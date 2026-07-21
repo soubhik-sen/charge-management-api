@@ -1,4 +1,4 @@
-# Charge Management API
+# Charge Management API - Built with ❤️ using Codex
 
 An open-source, adapter-neutral API for defining, calculating, allocating, converting, approving, and reconciling charges. It is designed for logistics and other multi-party pricing workflows without requiring a particular ERP, identity provider, or host application.
 
