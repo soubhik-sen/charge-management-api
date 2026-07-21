@@ -8,10 +8,11 @@ from app.api.v1.charge_management import router as charge_management_router
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Charge Management API",
-        version="0.1.0",
+        version="0.2.0",
         description=(
             "Adapter-neutral Charge Management API for rate books, contracts, "
-            "quote ranking, charge documents, invoice matching, and export readiness."
+            "quote ranking, allocation/date profiles, FX rates, charge documents, "
+            "invoice matching, and export readiness."
         ),
     )
     app.include_router(

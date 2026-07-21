@@ -14,6 +14,7 @@ This repo is intentionally independent from FLUXPORT. FLUXPORT owns its embedded
 - Charge component aliases are durable API objects for mapping external proposal or invoice labels to system charge components with default basis, level, staged allocation drivers, `final_posting_level`, quantity UOM, and optional customer/forwarder/transport-mode scope.
 - Charge allocation profiles are versioned API objects. Profile versions use the canonical fields `source_level`, `source_to_house_driver`, `house_to_item_driver`, and `final_posting_level`; alias overrides use `INHERIT_PROFILE`, `OVERRIDE_PROFILE`, and `NO_ALLOCATION`.
 - Business date profiles are versioned API objects for adapter-neutral exchange-rate date fallback chains. Assignments are explicit per owner, `shipment_scope` (`OCEAN_HOUSE` or `AIR_HOUSE`), and `business_purpose`; only one profile can own an effective assignment slot. Components can either keep legacy `charge_date_basis`, inherit the exact shipment-scope assignment, or override with a published profile directly.
+- FX rate sources and directional rates are durable API objects. A stored rate means target-currency units per one source-currency unit and retains source, date, rate type, conversion method, priority, and metadata provenance. Resolution supports exact or latest-prior dates and optional inverse-pair lookup.
 - Charge components include adapter-neutral `charge_date_basis` metadata so consuming applications can persist a document-date choice without embedding host-specific shipment resolution logic.
 - Charge documents carry an optional neutral `shipment_scope`. Charge lines can override `charge_date_basis`; date resolution precedence is explicit `exchange_rate_date`, explicit manual `charge_date`, line `charge_date_basis`, component profile/legacy policy, then document fallback.
 - Contracts can store default rate book/default calculation template references on the header; lines can override them for specific lane/component rules. Release requires at least one line and a header or line rate source.
@@ -43,7 +44,7 @@ http://127.0.0.1:8000/openapi.json
 Detailed DB-backed setup instructions are in [docs/setup.md](docs/setup.md).
 
 ## Database
-Alembic is configured in this repo. Migrations create charge settings, components, rate books, contracts, calculation templates, quote requests, quote offers, quote options, quote commitments, charge documents, invoices, match results, and export batches. They also seed 32 common charge components.
+Alembic is configured in this repo, and the HTTP lifecycle uses SQLAlchemy persistence rather than process-local state. Migrations create charge settings, components, rate books, contracts, calculation templates, quote requests, quote offers, quote options, quote commitments, charge documents, invoices, match results, export batches, allocation profiles, business-date profiles, FX rate sources, and FX rates. They also seed 32 common charge components and a manual FX source.
 
 Set `DATABASE_URL` before running migrations or the API. PostgreSQL is the target runtime database; SQLite is only suitable for local smoke tests.
 
@@ -51,6 +52,16 @@ Set `DATABASE_URL` before running migrations or the API. PostgreSQL is the targe
 The endpoint shape mirrors the embedded FLUXPORT charge module:
 
 - `GET /api/v1/charge-management/initialization-data`
+- `GET|POST /api/v1/charge-management/fx-rate-sources`
+- `GET|PUT|DELETE /api/v1/charge-management/fx-rate-sources/{id}`
+- `GET|POST /api/v1/charge-management/fx-rates`
+- `POST /api/v1/charge-management/fx-rates/resolve`
+- `GET|PUT|DELETE /api/v1/charge-management/fx-rates/{id}`
+- `GET|POST /api/v1/charge-management/allocation-profiles`
+- `GET|PUT /api/v1/charge-management/allocation-profiles/{id}`
+- `POST /api/v1/charge-management/allocation-profiles/{id}/versions`
+- `PUT /api/v1/charge-management/allocation-profile-versions/{version_id}`
+- `POST /api/v1/charge-management/allocation-profile-versions/{version_id}/publish`
 - `GET /api/v1/charge-management/component-aliases`
 - `POST /api/v1/charge-management/component-aliases`
 - `PUT|DELETE /api/v1/charge-management/component-aliases/{id}`

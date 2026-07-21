@@ -58,6 +58,82 @@ class ChargeManagementSettingsRow(TimestampMixin, Base):
     )
 
 
+class ChargeIdSequenceRow(Base):
+    __tablename__ = "charge_id_sequence"
+
+    bucket: Mapped[str] = mapped_column(String(80), primary_key=True)
+    last_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+class ChargeFxRateSourceRow(TimestampMixin, Base):
+    __tablename__ = "charge_fx_rate_source"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_code: Mapped[str] = mapped_column(String(60), nullable=False, unique=True)
+    source_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    provider_url: Mapped[str | None] = mapped_column(String(500))
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    metadata_json: Mapped[dict | None] = mapped_column(JSON)
+
+    rates: Mapped[list["ChargeFxRateRow"]] = relationship(back_populates="source")
+
+    __table_args__ = (
+        CheckConstraint("priority >= 0", name="ck_charge_fx_rate_source_priority"),
+        Index("ix_charge_fx_rate_source_code", "source_code"),
+    )
+
+
+class ChargeFxRateRow(TimestampMixin, Base):
+    __tablename__ = "charge_fx_rate"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("charge_fx_rate_source.id"), nullable=False)
+    source_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    target_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    rate_date: Mapped[object] = mapped_column(Date, nullable=False)
+    rate: Mapped[object] = mapped_column(Numeric(20, 10), nullable=False)
+    rate_type: Mapped[str] = mapped_column(String(20), nullable=False, default="MID", server_default="MID")
+    conversion_method: Mapped[str] = mapped_column(
+        String(60),
+        nullable=False,
+        default="DIRECT",
+        server_default="DIRECT",
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    metadata_json: Mapped[dict | None] = mapped_column(JSON)
+
+    source: Mapped[ChargeFxRateSourceRow] = relationship(back_populates="rates")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "source_currency",
+            "target_currency",
+            "rate_date",
+            "rate_type",
+            "conversion_method",
+            name="uq_charge_fx_rate_pair_date_source_type_method",
+        ),
+        CheckConstraint("source_currency <> target_currency", name="ck_charge_fx_rate_currency_pair"),
+        CheckConstraint("rate > 0", name="ck_charge_fx_rate_positive"),
+        CheckConstraint(
+            "rate_type in ('MID', 'BUY', 'SELL', 'CUSTOM')",
+            name="ck_charge_fx_rate_type",
+        ),
+        Index(
+            "ix_charge_fx_rate_lookup",
+            "source_currency",
+            "target_currency",
+            "rate_date",
+            "rate_type",
+            "is_active",
+        ),
+        Index("ix_charge_fx_rate_source", "source_id"),
+    )
+
+
 class ChargeComponentRow(Base):
     __tablename__ = "charge_component"
 
@@ -229,6 +305,7 @@ class ChargeBusinessDateProfileRow(TimestampMixin, Base):
     versions: Mapped[list["ChargeBusinessDateProfileVersionRow"]] = relationship(
         back_populates="profile",
         cascade="all, delete-orphan",
+        foreign_keys="ChargeBusinessDateProfileVersionRow.profile_id",
     )
     assignments: Mapped[list["ChargeBusinessDateProfileAssignmentRow"]] = relationship(
         back_populates="profile",
@@ -251,7 +328,10 @@ class ChargeBusinessDateProfileVersionRow(TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
 
-    profile: Mapped[ChargeBusinessDateProfileRow] = relationship(back_populates="versions")
+    profile: Mapped[ChargeBusinessDateProfileRow] = relationship(
+        back_populates="versions",
+        foreign_keys=[profile_id],
+    )
     steps: Mapped[list["ChargeBusinessDateProfileStepRow"]] = relationship(
         back_populates="version",
         cascade="all, delete-orphan",
@@ -484,6 +564,7 @@ class ChargeCalculationTemplateStepRow(Base):
     template_id: Mapped[int] = mapped_column(ForeignKey("charge_calculation_template.id", ondelete="CASCADE"), nullable=False)
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
     charge_component_id: Mapped[int] = mapped_column(ForeignKey("charge_component.id"), nullable=False)
+    relationship_role: Mapped[str] = mapped_column(String(20), nullable=False, default="BOTH", server_default="BOTH")
     rate_book_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book.id"))
     precondition_json: Mapped[dict | None] = mapped_column(JSON)
     subtotal_group: Mapped[str | None] = mapped_column(String(80))
@@ -495,6 +576,10 @@ class ChargeCalculationTemplateStepRow(Base):
 
     __table_args__ = (
         UniqueConstraint("template_id", "sequence_no", name="uq_charge_calc_template_step_sequence"),
+        CheckConstraint(
+            "relationship_role in ('PAYER', 'PAYEE', 'BOTH')",
+            name="ck_charge_calc_template_step_relationship_role",
+        ),
     )
 
 
@@ -793,6 +878,10 @@ class ChargeLineRow(Base):
     source_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     exchange_rate: Mapped[object | None] = mapped_column(Numeric(18, 8))
     exchange_rate_date: Mapped[object | None] = mapped_column(Date)
+    fx_rate_id: Mapped[int | None] = mapped_column(ForeignKey("charge_fx_rate.id"))
+    exchange_rate_source_code: Mapped[str | None] = mapped_column(String(60))
+    exchange_rate_type: Mapped[str | None] = mapped_column(String(20))
+    exchange_rate_method: Mapped[str | None] = mapped_column(String(60))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
     pinned_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
@@ -824,6 +913,10 @@ class ChargeLineRow(Base):
         CheckConstraint(
             "charge_date_basis is null or charge_date_basis in ('DOCUMENT_DATE', 'SHIPMENT_DEPARTURE_DATE', 'SHIPMENT_ARRIVAL_DATE', 'HOUSE_BILL_ISSUE_DATE', 'MANUAL')",
             name="ck_charge_line_charge_date_basis",
+        ),
+        CheckConstraint(
+            "exchange_rate_type is null or exchange_rate_type in ('MID', 'BUY', 'SELL', 'CUSTOM')",
+            name="ck_charge_line_exchange_rate_type",
         ),
         CheckConstraint(
             "target_level is null or target_level in ('HEADER', 'ITEM', 'CONTAINER', 'HOUSE', 'PO_SCHEDULE_LINE')",

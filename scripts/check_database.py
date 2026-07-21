@@ -18,6 +18,8 @@ def main() -> int:
         component_count = db.execute(text("select count(*) from charge_component")).scalar_one()
         business_date_profile_count = db.execute(text("select count(*) from charge_business_date_profile")).scalar_one()
         assignment_count = db.execute(text("select count(*) from charge_business_date_profile_assignment")).scalar_one()
+        fx_rate_source_count = db.execute(text("select count(*) from charge_fx_rate_source")).scalar_one()
+        fx_rate_count = db.execute(text("select count(*) from charge_fx_rate")).scalar_one()
         settings = db.execute(
             text(
                 "select quotation_policy, quote_acceptance_mode, provider_cost_layer_enabled "
@@ -29,6 +31,8 @@ def main() -> int:
     print(f"charge_component_count={component_count}")
     print(f"business_date_profile_count={business_date_profile_count}")
     print(f"business_date_profile_assignment_count={assignment_count}")
+    print(f"fx_rate_source_count={fx_rate_source_count}")
+    print(f"fx_rate_count={fx_rate_count}")
     if settings:
         print(f"quotation_policy={settings['quotation_policy']}")
         print(f"quote_acceptance_mode={settings['quote_acceptance_mode']}")

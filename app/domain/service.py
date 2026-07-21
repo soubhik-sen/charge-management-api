@@ -13,6 +13,7 @@ from app.domain.models import (
     ChargeAllocationProfile,
     ChargeAllocationProfileCreate,
     ChargeAllocationProfileListResponse,
+    ChargeAllocationProfileUpdate,
     ChargeAllocationProfileVersion,
     ChargeAllocationProfileVersionCreate,
     BusinessDateProfile,
@@ -22,6 +23,7 @@ from app.domain.models import (
     BusinessDateProfileAssignmentPayload,
     BusinessDateProfileCreate,
     BusinessDateProfileListResponse,
+    BusinessDateProfileUpdate,
     BusinessDateProfileStep,
     BusinessDateProfileStepCreate,
     BusinessDateProfileStepPayload,
@@ -459,6 +461,35 @@ class ChargeManagementService:
             offset=safe_offset,
         )
 
+    def get_allocation_profile(self, profile_id: int) -> ChargeAllocationProfile:
+        return self._require_allocation_profile(profile_id)
+
+    def update_allocation_profile(
+        self,
+        profile_id: int,
+        payload: ChargeAllocationProfileUpdate,
+    ) -> ChargeAllocationProfile:
+        profile = self._require_allocation_profile(profile_id)
+        code = payload.profile_code.strip().upper()
+        name = payload.profile_name.strip()
+        if not code or not name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Allocation profile_code and profile_name are required.",
+            )
+        if any(
+            row.profile_code == code and row.id != profile.id
+            for row in self.repository.allocation_profiles.values()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Allocation profile_code already exists.",
+            )
+        profile.profile_code = code
+        profile.profile_name = name
+        profile.updated_at = utcnow()
+        return profile
+
     def create_allocation_profile(self, payload: ChargeAllocationProfileCreate) -> ChargeAllocationProfile:
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
@@ -604,7 +635,11 @@ class ChargeManagementService:
         self.repository.business_date_profile_versions[version.id] = version
         return profile
 
-    def update_business_date_profile(self, profile_id: int, payload: BusinessDateProfileCreate) -> BusinessDateProfile:
+    def update_business_date_profile(
+        self,
+        profile_id: int,
+        payload: BusinessDateProfileUpdate,
+    ) -> BusinessDateProfile:
         profile = self._require_business_date_profile(profile_id)
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
@@ -1512,7 +1547,7 @@ class ChargeManagementService:
                     quote.updated_at = utcnow()
                     return RateResponse(quote_request=quote, options=existing_options)
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=422,
                     detail="No released payee contract matched the quote request.",
                 )
             self._delete_contract_options_for_quote(quote.id)
@@ -1534,7 +1569,7 @@ class ChargeManagementService:
                 quote.updated_at = utcnow()
                 return RateResponse(quote_request=quote, options=existing_options)
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=422,
                 detail="No released payer contract matched the quote request.",
             )
 
@@ -1842,6 +1877,22 @@ class ChargeManagementService:
                 source_amount=money(line_payload.source_amount) if line_payload.source_amount is not None else None,
                 exchange_rate=line_payload.exchange_rate,
                 exchange_rate_date=resolved_exchange_rate_date,
+                fx_rate_id=getattr(line_payload, "fx_rate_id", None),
+                exchange_rate_source_code=(
+                    line_payload.exchange_rate_source_code.strip().upper()
+                    if getattr(line_payload, "exchange_rate_source_code", None)
+                    else None
+                ),
+                exchange_rate_type=(
+                    line_payload.exchange_rate_type.strip().upper()
+                    if getattr(line_payload, "exchange_rate_type", None)
+                    else None
+                ),
+                exchange_rate_method=(
+                    line_payload.exchange_rate_method.strip().upper()
+                    if getattr(line_payload, "exchange_rate_method", None)
+                    else None
+                ),
                 allocation_profile_id=allocation_profile_id,
                 allocation_profile_version_id=allocation_profile_version_id,
                 pinned_allocation_snapshot_json=pinned_allocation_snapshot_json,
@@ -2098,6 +2149,7 @@ class ChargeManagementService:
             if result.invoice_id == invoice.id:
                 del self.repository.match_results[result_id]
         invoice.status = "CAPTURED"
+        invoice.updated_at = utcnow()
         self._sync_invoice_document_summary(invoice)
         return self.get_invoice_workspace(invoice_id)
 
@@ -2141,6 +2193,7 @@ class ChargeManagementService:
             self.repository.match_results[result.id] = result
             results.append(result)
         invoice.status = "MATCHED" if all(row.match_status == "MATCHED" for row in results) else "VARIANCE"
+        invoice.updated_at = utcnow()
         self._sync_invoice_document_summary(invoice)
         return InvoiceMatchResponse(invoice=invoice, results=results)
 

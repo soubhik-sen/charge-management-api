@@ -42,7 +42,7 @@ Do not commit real passwords or connection strings.
 .\.venv\Scripts\alembic.exe upgrade head
 ```
 
-The migration set creates the full charge domain schema, including quote commitments and consumption history, creates `charge_management_settings`, adds quote validity windows, seeds 32 common charge components with default `charge_date_basis` metadata, and seeds the standard business date profiles used for exchange-rate fallback chains. Business-date assignments persist owner scope, Ocean/Air house shipment scope, and business purpose with a single effective assignment slot across profiles. Charge documents persist shipment scope, and charge lines persist an optional date-basis override.
+The migration set creates the full charge domain schema, including quote commitments and consumption history, creates `charge_management_settings`, adds quote validity windows, seeds 32 common charge components with default `charge_date_basis` metadata, and seeds the standard business date profiles used for exchange-rate fallback chains. It also creates persistent allocation profiles, repository ID sequences, FX rate sources, and directional FX rates. Business-date assignments persist owner scope, Ocean/Air house shipment scope, and business purpose with a single effective assignment slot across profiles. Charge documents persist shipment scope, and charge lines persist date-basis, allocation, and selected-FX snapshots.
 
 Verify:
 
@@ -53,8 +53,9 @@ Verify:
 Expected:
 
 ```text
-alembic_version=0011_add_business_date_profiles
+alembic_version=0012_fx_rates_and_sequences
 charge_component_count=32
+fx_rate_source_count=1
 quotation_policy=OPTIONAL
 quote_acceptance_mode=CUSTOMER_ACCEPTANCE
 provider_cost_layer_enabled=False
@@ -107,7 +108,7 @@ app\contracts\charge-management-api.openapi.json
 .\.venv\Scripts\pytest.exe -q
 ```
 
-The current tests validate the reusable HTTP contract and quote-to-export lifecycle. Add DB repository tests when the SQLAlchemy persistence adapter is wired into runtime services.
+The tests validate the reusable HTTP contract, SQLAlchemy restart persistence, fresh SQLite migrations, FX maintenance and resolution, and the quote-to-export lifecycle.
 
 The reusable API exposes setup values in initialization data. `quotation_policy` defaults to `OPTIONAL`; set it to `REQUIRED` when direct charge documents should be blocked, or `DIRECT_ONLY` when quote requests should be blocked. `quote_acceptance_mode` defaults to `CUSTOMER_ACCEPTANCE`; use `AUTO_ACCEPT` only when the consuming application should award the first rated option automatically. `provider_cost_layer_enabled` defaults to `false`, meaning rating can use customer-pricing contracts without requiring provider-cost contracts.
 

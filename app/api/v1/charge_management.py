@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.db.session import SessionLocal, get_db
+from app.domain.fx_service import FxRateService
 
 from app.domain.models import (
     ChargeActionResponse,
     ChargeAllocationProfile,
     ChargeAllocationProfileCreate,
     ChargeAllocationProfileListResponse,
+    ChargeAllocationProfileUpdate,
     ChargeAllocationProfileVersion,
     ChargeAllocationProfileVersionCreate,
     BusinessDateProfile,
@@ -15,6 +22,7 @@ from app.domain.models import (
     BusinessDateProfileAssignmentListResponse,
     BusinessDateProfileCreate,
     BusinessDateProfileListResponse,
+    BusinessDateProfileUpdate,
     BusinessDateProfileVersion,
     BusinessDateProfileVersionCreate,
     ChargeComponent,
@@ -70,14 +78,23 @@ from app.domain.models import (
     RateContractPayload,
     RateContractUpdate,
     RateResponse,
+    FxRate,
+    FxRateListResponse,
+    FxRatePayload,
+    FxRateResolution,
+    FxRateResolveRequest,
+    FxRateSource,
+    FxRateSourceListResponse,
+    FxRateSourcePayload,
 )
-from app.domain.service import ChargeManagementService, InMemoryChargeRepository
+from app.infrastructure.database_service import DatabaseBackedChargeManagementService
 from app.infrastructure.adapters import DefaultPolicyAdapter, Principal, require_bearer_principal
+from app.infrastructure.sqlalchemy_repository import DatabaseRepositoryControl
 
 router = APIRouter()
 
-repository = InMemoryChargeRepository()
-service = ChargeManagementService(repository)
+repository = DatabaseRepositoryControl(SessionLocal)
+service = DatabaseBackedChargeManagementService(SessionLocal)
 policy = DefaultPolicyAdapter()
 
 
@@ -101,6 +118,146 @@ def get_initialization_data(
 ) -> ChargeInitializationData:
     _allow(principal, "charge.initialization_data")
     return service.initialization_data()
+
+
+@router.get("/fx-rate-sources", response_model=FxRateSourceListResponse)
+def list_fx_rate_sources(
+    q: str | None = Query(default=None),
+    active_only: bool | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRateSourceListResponse:
+    _allow(principal, "charge.fx_rate_sources.list")
+    return FxRateService(db).list_sources(
+        search=q,
+        active_only=active_only,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/fx-rate-sources", response_model=FxRateSource, status_code=201)
+def create_fx_rate_source(
+    payload: FxRateSourcePayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRateSource:
+    _allow(principal, "charge.fx_rate_sources.create")
+    return FxRateService(db).create_source(payload)
+
+
+@router.get("/fx-rate-sources/{source_id}", response_model=FxRateSource)
+def get_fx_rate_source(
+    source_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRateSource:
+    _allow(principal, "charge.fx_rate_sources.read")
+    return FxRateService(db).get_source(source_id)
+
+
+@router.put("/fx-rate-sources/{source_id}", response_model=FxRateSource)
+def update_fx_rate_source(
+    source_id: int,
+    payload: FxRateSourcePayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRateSource:
+    _allow(principal, "charge.fx_rate_sources.update")
+    return FxRateService(db).update_source(source_id, payload)
+
+
+@router.delete("/fx-rate-sources/{source_id}", response_model=FxRateSource)
+def deactivate_fx_rate_source(
+    source_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRateSource:
+    _allow(principal, "charge.fx_rate_sources.deactivate")
+    return FxRateService(db).deactivate_source(source_id)
+
+
+@router.get("/fx-rates", response_model=FxRateListResponse)
+def list_fx_rates(
+    source_id: int | None = Query(default=None),
+    source_currency: str | None = Query(default=None),
+    target_currency: str | None = Query(default=None),
+    rate_date_from: date | None = Query(default=None),
+    rate_date_to: date | None = Query(default=None),
+    rate_type: str | None = Query(default=None),
+    conversion_method: str | None = Query(default=None),
+    active_only: bool | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRateListResponse:
+    _allow(principal, "charge.fx_rates.list")
+    return FxRateService(db).list_rates(
+        source_id=source_id,
+        source_currency=source_currency,
+        target_currency=target_currency,
+        rate_date_from=rate_date_from,
+        rate_date_to=rate_date_to,
+        rate_type=rate_type,
+        conversion_method=conversion_method,
+        active_only=active_only,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/fx-rates", response_model=FxRate, status_code=201)
+def create_fx_rate(
+    payload: FxRatePayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRate:
+    _allow(principal, "charge.fx_rates.create")
+    return FxRateService(db).create_rate(payload)
+
+
+@router.post("/fx-rates/resolve", response_model=FxRateResolution)
+def resolve_fx_rate(
+    payload: FxRateResolveRequest,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRateResolution:
+    _allow(principal, "charge.fx_rates.resolve")
+    return FxRateService(db).resolve(payload)
+
+
+@router.get("/fx-rates/{rate_id}", response_model=FxRate)
+def get_fx_rate(
+    rate_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRate:
+    _allow(principal, "charge.fx_rates.read")
+    return FxRateService(db).get_rate(rate_id)
+
+
+@router.put("/fx-rates/{rate_id}", response_model=FxRate)
+def update_fx_rate(
+    rate_id: int,
+    payload: FxRatePayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRate:
+    _allow(principal, "charge.fx_rates.update")
+    return FxRateService(db).update_rate(rate_id, payload)
+
+
+@router.delete("/fx-rates/{rate_id}", response_model=FxRate)
+def deactivate_fx_rate(
+    rate_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> FxRate:
+    _allow(principal, "charge.fx_rates.deactivate")
+    return FxRateService(db).deactivate_rate(rate_id)
 
 
 @router.get("/allocation-profiles", response_model=ChargeAllocationProfileListResponse)
@@ -129,6 +286,25 @@ def create_allocation_profile(
 ) -> ChargeAllocationProfile:
     _allow(principal, "charge.allocation_profiles.create")
     return service.create_allocation_profile(payload)
+
+
+@router.get("/allocation-profiles/{profile_id}", response_model=ChargeAllocationProfile)
+def get_allocation_profile(
+    profile_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeAllocationProfile:
+    _allow(principal, "charge.allocation_profiles.read")
+    return service.get_allocation_profile(profile_id)
+
+
+@router.put("/allocation-profiles/{profile_id}", response_model=ChargeAllocationProfile)
+def update_allocation_profile(
+    profile_id: int,
+    payload: ChargeAllocationProfileUpdate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeAllocationProfile:
+    _allow(principal, "charge.allocation_profiles.update")
+    return service.update_allocation_profile(profile_id, payload)
 
 
 @router.post("/allocation-profiles/{profile_id}/versions", response_model=ChargeAllocationProfile, status_code=201)
@@ -198,7 +374,7 @@ def get_business_date_profile(
 @router.put("/business-date-profiles/{profile_id}", response_model=BusinessDateProfile)
 def update_business_date_profile(
     profile_id: int,
-    payload: BusinessDateProfileCreate,
+    payload: BusinessDateProfileUpdate,
     principal: Principal = Depends(require_bearer_principal),
 ) -> BusinessDateProfile:
     _allow(principal, "charge.business_date_profiles.update")

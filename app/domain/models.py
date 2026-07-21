@@ -132,6 +132,11 @@ class ChargeAllocationProfileCreate(ApiModel):
     initial_version: ChargeAllocationProfileVersionCreate
 
 
+class ChargeAllocationProfileUpdate(ApiModel):
+    profile_code: str
+    profile_name: str
+
+
 class ChargeAllocationProfileVersion(ChargeAllocationProfileVersionPayload):
     id: int
     profile_id: int
@@ -184,6 +189,12 @@ class BusinessDateProfileCreate(ApiModel):
     profile_name: str
     description: str | None = None
     initial_version: BusinessDateProfileVersionCreate
+
+
+class BusinessDateProfileUpdate(ApiModel):
+    profile_code: str
+    profile_name: str
+    description: str | None = None
 
 
 class BusinessDateProfileStep(BusinessDateProfileStepPayload):
@@ -249,6 +260,78 @@ class BusinessDateProfileAssignmentListResponse(ApiModel):
     offset: int
 
 
+class FxRateSourcePayload(ApiModel):
+    source_code: str
+    source_name: str
+    provider_url: str | None = None
+    timezone: str = "UTC"
+    priority: int = 100
+    is_active: bool = True
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class FxRateSource(FxRateSourcePayload):
+    id: int
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class FxRateSourceListResponse(ApiModel):
+    items: list[FxRateSource]
+    total: int
+    limit: int
+    offset: int
+
+
+class FxRatePayload(ApiModel):
+    source_id: int
+    source_currency: str
+    target_currency: str
+    rate_date: date
+    rate: Decimal
+    rate_type: Literal["MID", "BUY", "SELL", "CUSTOM"] = "MID"
+    conversion_method: str = "DIRECT"
+    is_active: bool = True
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class FxRate(FxRatePayload):
+    id: int
+    source_code: str
+    source_name: str
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class FxRateListResponse(ApiModel):
+    items: list[FxRate]
+    total: int
+    limit: int
+    offset: int
+
+
+class FxRateResolveRequest(ApiModel):
+    source_currency: str
+    target_currency: str
+    rate_date: date
+    amount: Decimal = Decimal("1")
+    source_id: int | None = None
+    source_code: str | None = None
+    rate_type: Literal["MID", "BUY", "SELL", "CUSTOM"] = "MID"
+    conversion_method: str | None = None
+    allow_inverse: bool = True
+    allow_prior_date: bool = True
+
+
+class FxRateResolution(ApiModel):
+    rate: FxRate | None = None
+    effective_rate: Decimal
+    converted_amount: Decimal
+    requested_rate_date: date
+    selected_rate_date: date | None = None
+    inverse_applied: bool = False
+
+
 class ChargeReferenceData(ApiModel):
     contract_roles: list[str] = ["PAYER", "PAYEE"]
     contract_statuses: list[str] = ["DRAFT", "RELEASED", "EXPIRED", "BLOCKED"]
@@ -296,6 +379,7 @@ class ChargeReferenceData(ApiModel):
     business_date_shipment_scopes: list[str] = ["OCEAN_HOUSE", "AIR_HOUSE"]
     business_date_purposes: list[str] = ["EXCHANGE_RATE_DATE"]
     business_date_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
+    fx_rate_types: list[str] = ["MID", "BUY", "SELL", "CUSTOM"]
     business_date_keys: list[str] = [
         "DOCUMENT_DATE",
         "MANUAL_LINE_DATE",
@@ -699,6 +783,10 @@ class ChargeDocumentLineCreate(ApiModel):
     source_amount: Decimal | None = None
     exchange_rate: Decimal | None = None
     exchange_rate_date: date | None = None
+    fx_rate_id: int | None = None
+    exchange_rate_source_code: str | None = None
+    exchange_rate_type: Literal["MID", "BUY", "SELL", "CUSTOM"] | None = None
+    exchange_rate_method: str | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
     charge_text_snapshot: str | None = None
@@ -764,6 +852,10 @@ class ChargeLine(ApiModel):
     source_amount: Decimal | None = None
     exchange_rate: Decimal | None = None
     exchange_rate_date: date | None = None
+    fx_rate_id: int | None = None
+    exchange_rate_source_code: str | None = None
+    exchange_rate_type: Literal["MID", "BUY", "SELL", "CUSTOM"] | None = None
+    exchange_rate_method: str | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
     pinned_allocation_snapshot_json: dict[str, Any] | None = None
@@ -978,6 +1070,7 @@ class ChargeInvoice(ChargeInvoiceCreate):
     status: str = "CAPTURED"
     total_amount: Decimal = Decimal("0")
     created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class ChargeInvoiceListResponse(ApiModel):

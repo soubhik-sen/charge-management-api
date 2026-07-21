@@ -61,6 +61,7 @@ def test_initialization_data_has_seeded_components() -> None:
     assert "CUSTOMER" in response.json()["reference_data"]["business_date_assignment_scope_types"]
     assert response.json()["reference_data"]["business_date_shipment_scopes"] == ["OCEAN_HOUSE", "AIR_HOUSE"]
     assert response.json()["reference_data"]["business_date_purposes"] == ["EXCHANGE_RATE_DATE"]
+    assert response.json()["reference_data"]["fx_rate_types"] == ["MID", "BUY", "SELL", "CUSTOM"]
     assert "SHIPPED_ON_BOARD_DATE" in response.json()["reference_data"]["business_date_keys"]
 
 
@@ -307,6 +308,21 @@ def test_allocation_profile_lifecycle_and_component_propagation() -> None:
     assert profile["versions"][0]["status"] == "DRAFT"
     version_id = profile["versions"][0]["id"]
 
+    reopened_profile = client.get(
+        f"/api/v1/charge-management/allocation-profiles/{profile['id']}",
+        headers=AUTH,
+    )
+    assert reopened_profile.status_code == 200, reopened_profile.text
+    assert reopened_profile.json()["versions"][0]["id"] == version_id
+
+    updated_profile = client.put(
+        f"/api/v1/charge-management/allocation-profiles/{profile['id']}",
+        headers=AUTH,
+        json={"profile_code": "ITEM_WEIGHT_DEFAULT", "profile_name": "Item Weight Allocation"},
+    )
+    assert updated_profile.status_code == 200, updated_profile.text
+    assert updated_profile.json()["profile_name"] == "Item Weight Allocation"
+
     updated_version = client.put(
         f"/api/v1/charge-management/allocation-profile-versions/{version_id}",
         headers=AUTH,
@@ -413,6 +429,18 @@ def test_business_date_profile_lifecycle_assignment_and_resolution() -> None:
     assert created.status_code == 201, created.text
     profile = created.json()
     version_id = profile["versions"][0]["id"]
+
+    updated_profile = client.put(
+        f"/api/v1/charge-management/business-date-profiles/{profile['id']}",
+        headers=AUTH,
+        json={
+            "profile_code": "OCEAN_CUSTOM_OVERRIDE",
+            "profile_name": "Ocean Custom Date Basis",
+            "description": "Updated reusable date-basis profile",
+        },
+    )
+    assert updated_profile.status_code == 200, updated_profile.text
+    assert updated_profile.json()["profile_name"] == "Ocean Custom Date Basis"
 
     updated_version = client.put(
         f"/api/v1/charge-management/business-date-profile-versions/{version_id}",
@@ -1287,6 +1315,9 @@ def test_quote_offer_is_visible_in_workspace_and_rankable() -> None:
 
 def test_db_metadata_contains_quote_offer_schema() -> None:
     tables = Base.metadata.tables
+    assert "charge_id_sequence" in tables
+    assert "charge_fx_rate_source" in tables
+    assert "charge_fx_rate" in tables
     assert "charge_allocation_profile" in tables
     assert "charge_allocation_profile_version" in tables
     assert "charge_business_date_profile" in tables
@@ -1348,6 +1379,10 @@ def test_db_metadata_contains_quote_offer_schema() -> None:
     assert "target_reference_snapshot_json" in line_columns
     assert "allocation_profile_id" in line_columns
     assert "pinned_allocation_snapshot_json" in line_columns
+    assert "fx_rate_id" in line_columns
+    assert "exchange_rate_source_code" in line_columns
+    assert "exchange_rate_type" in line_columns
+    assert "exchange_rate_method" in line_columns
 
 
 def test_direct_charge_document_respects_quotation_policy() -> None:
