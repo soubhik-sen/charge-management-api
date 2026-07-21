@@ -39,6 +39,8 @@ The suite resets data and runs migrations. Never point it at a development, stag
 
 Open a workflow run in GitHub and download `test-results-python-<version>` from its **Artifacts** section. JUnit-aware CI tools can ingest `junit.xml` directly.
 
+Direct runtime and development dependencies are pinned in `pyproject.toml`. Update them intentionally, run the full matrix, and regenerate OpenAPI in the same pull request.
+
 ## Contract Verification
 
 Whenever a route or DTO changes:

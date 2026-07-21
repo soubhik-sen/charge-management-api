@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - PostgreSQL migrations widen Alembic's version column before descriptive revision IDs exceed its default length.
+- Direct runtime and test dependencies are pinned so generated OpenAPI and CI results are reproducible.
 
 ## [0.2.0] - 2026-07-21
 
