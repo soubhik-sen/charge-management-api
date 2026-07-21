@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: charge_management
+      POSTGRES_USER: charge_user
+      POSTGRES_PASSWORD: charge_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U charge_user -d charge_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - charge-management-data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://charge_user:charge_password@postgres:5432/charge_management
+      # This compose file is for local evaluation only. Configure JWT mode in production.
+      AUTH_MODE: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+volumes:
+  charge-management-data:

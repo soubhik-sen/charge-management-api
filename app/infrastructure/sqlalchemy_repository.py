@@ -320,6 +320,18 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self.seed_allocation_profiles()
         self.seed_components()
         self.flush()
+        self.session.add(
+            ChargeFxRateSourceRow(
+                id=1,
+                source_code="MANUAL",
+                source_name="Manual Rate Maintenance",
+                timezone="UTC",
+                priority=100,
+                is_active=True,
+                metadata_json={"system_seed": True},
+            )
+        )
+        self.session.flush()
 
     def next_id(self, bucket: str) -> int:
         row = self.session.scalar(

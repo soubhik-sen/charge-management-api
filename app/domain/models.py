@@ -318,7 +318,7 @@ class FxRateResolveRequest(ApiModel):
     source_id: int | None = None
     source_code: str | None = None
     rate_type: Literal["MID", "BUY", "SELL", "CUSTOM"] = "MID"
-    conversion_method: str | None = None
+    conversion_method: str = "DIRECT"
     allow_inverse: bool = True
     allow_prior_date: bool = True
 

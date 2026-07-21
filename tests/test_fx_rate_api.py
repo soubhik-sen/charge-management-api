@@ -124,6 +124,55 @@ def test_fx_resolution_supports_prior_date_and_inverse_pair() -> None:
     assert inverse.json()["inverse_applied"] is True
 
 
+def test_fx_resolution_uses_direct_method_unless_requested_otherwise() -> None:
+    source = client.post(
+        "/api/v1/charge-management/fx-rate-sources",
+        headers=AUTH,
+        json={"source_code": "MULTI_METHOD", "source_name": "Multiple Methods"},
+    ).json()
+    for method, rate in (("DIRECT", "1.10"), ("TREASURY", "1.25")):
+        response = client.post(
+            "/api/v1/charge-management/fx-rates",
+            headers=AUTH,
+            json={
+                "source_id": source["id"],
+                "source_currency": "EUR",
+                "target_currency": "USD",
+                "rate_date": "2026-07-21",
+                "rate": rate,
+                "conversion_method": method,
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    default_resolution = client.post(
+        "/api/v1/charge-management/fx-rates/resolve",
+        headers=AUTH,
+        json={
+            "source_currency": "EUR",
+            "target_currency": "USD",
+            "rate_date": "2026-07-21",
+            "source_code": "MULTI_METHOD",
+        },
+    )
+    treasury_resolution = client.post(
+        "/api/v1/charge-management/fx-rates/resolve",
+        headers=AUTH,
+        json={
+            "source_currency": "EUR",
+            "target_currency": "USD",
+            "rate_date": "2026-07-21",
+            "source_code": "MULTI_METHOD",
+            "conversion_method": "TREASURY",
+        },
+    )
+
+    assert default_resolution.status_code == 200, default_resolution.text
+    assert default_resolution.json()["effective_rate"] == "1.1000000000"
+    assert treasury_resolution.status_code == 200, treasury_resolution.text
+    assert treasury_resolution.json()["effective_rate"] == "1.2500000000"
+
+
 def test_fx_rate_uniqueness_and_soft_deactivation() -> None:
     source = client.post(
         "/api/v1/charge-management/fx-rate-sources",

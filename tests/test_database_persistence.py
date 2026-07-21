@@ -19,6 +19,13 @@ def setup_function() -> None:
 
 
 def test_master_data_survives_fresh_repository_and_service_instances() -> None:
+    seeded_sources = client.get(
+        "/api/v1/charge-management/fx-rate-sources?active_only=true",
+        headers=AUTH,
+    )
+    assert seeded_sources.status_code == 200, seeded_sources.text
+    assert seeded_sources.json()["items"][0]["source_code"] == "MANUAL"
+
     allocation = client.post(
         "/api/v1/charge-management/allocation-profiles",
         headers=AUTH,

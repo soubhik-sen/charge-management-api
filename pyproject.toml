@@ -2,7 +2,22 @@
 name = "charge-management-api"
 version = "0.2.0"
 description = "Standalone, adapter-neutral Charge Management API."
+readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
+authors = [
+  { name = "Charge Management API contributors" },
+]
+keywords = ["charges", "freight", "logistics", "pricing", "rating", "fx"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: FastAPI",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business :: Financial",
+]
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
@@ -10,13 +25,32 @@ dependencies = [
   "SQLAlchemy>=2.0.0",
   "alembic>=1.13.0",
   "psycopg[binary]>=3.2.0",
+  "PyJWT[crypto]>=2.9.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/soubhik-sen/charge-management-api"
+Documentation = "https://github.com/soubhik-sen/charge-management-api#readme"
+Issues = "https://github.com/soubhik-sen/charge-management-api/issues"
+Source = "https://github.com/soubhik-sen/charge-management-api"
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
+  "pytest-cov>=6.0.0",
   "httpx>=0.27.0",
+  "build>=1.2.0",
 ]
+
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.contracts" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

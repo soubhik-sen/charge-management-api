@@ -5166,15 +5166,9 @@
             "title": "Amount"
           },
           "conversion_method": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversion Method"
+            "default": "DIRECT",
+            "title": "Conversion Method",
+            "type": "string"
           },
           "rate_date": {
             "format": "date",
@@ -9186,6 +9180,13 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "A JWT issued for this API, or any non-empty token in explicit development mode.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -9206,22 +9207,6 @@
             "schema": {
               "title": "Version Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -9305,6 +9290,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Allocation Profile Version",
         "tags": [
           "Charge Management"
@@ -9322,22 +9312,6 @@
             "schema": {
               "title": "Version Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -9411,6 +9385,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Publish Allocation Profile Version",
         "tags": [
           "Charge Management"
@@ -9494,22 +9473,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -9579,6 +9542,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Allocation Profiles",
         "tags": [
           "Charge Management"
@@ -9587,22 +9555,6 @@
       "post": {
         "operationId": "create_allocation_profile_api_v1_charge_management_allocation_profiles_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -9684,6 +9636,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Allocation Profile",
         "tags": [
           "Charge Management"
@@ -9701,22 +9658,6 @@
             "schema": {
               "title": "Profile Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -9790,6 +9731,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Allocation Profile",
         "tags": [
           "Charge Management"
@@ -9805,22 +9751,6 @@
             "schema": {
               "title": "Profile Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -9904,6 +9834,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Allocation Profile",
         "tags": [
           "Charge Management"
@@ -9921,22 +9856,6 @@
             "schema": {
               "title": "Profile Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10020,6 +9939,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Allocation Profile Version",
         "tags": [
           "Charge Management"
@@ -10037,22 +9961,6 @@
             "schema": {
               "title": "Assignment Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10126,6 +10034,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Delete Business Date Profile Assignment",
         "tags": [
           "Charge Management"
@@ -10141,22 +10054,6 @@
             "schema": {
               "title": "Assignment Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10240,6 +10137,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Business Date Profile Assignment",
         "tags": [
           "Charge Management"
@@ -10257,22 +10159,6 @@
             "schema": {
               "title": "Version Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10356,6 +10242,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Business Date Profile Version",
         "tags": [
           "Charge Management"
@@ -10373,22 +10264,6 @@
             "schema": {
               "title": "Version Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10462,6 +10337,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Publish Business Date Profile Version",
         "tags": [
           "Charge Management"
@@ -10525,22 +10405,6 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10614,6 +10478,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Business Date Profiles",
         "tags": [
           "Charge Management"
@@ -10622,22 +10491,6 @@
       "post": {
         "operationId": "create_business_date_profile_api_v1_charge_management_business_date_profiles_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -10719,6 +10572,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Business Date Profile",
         "tags": [
           "Charge Management"
@@ -10736,22 +10594,6 @@
             "schema": {
               "title": "Profile Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10825,6 +10667,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Business Date Profile",
         "tags": [
           "Charge Management"
@@ -10840,22 +10687,6 @@
             "schema": {
               "title": "Profile Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -10939,6 +10770,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Business Date Profile",
         "tags": [
           "Charge Management"
@@ -11063,22 +10899,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -11148,6 +10968,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Business Date Profile Assignments",
         "tags": [
           "Charge Management"
@@ -11163,22 +10988,6 @@
             "schema": {
               "title": "Profile Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -11262,6 +11071,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Business Date Profile Assignment",
         "tags": [
           "Charge Management"
@@ -11279,22 +11093,6 @@
             "schema": {
               "title": "Profile Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -11378,6 +11176,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Business Date Profile Version",
         "tags": [
           "Charge Management"
@@ -11461,22 +11264,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -11546,6 +11333,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Calculation Templates",
         "tags": [
           "Charge Management"
@@ -11554,22 +11346,6 @@
       "post": {
         "operationId": "create_calculation_template_api_v1_charge_management_calculation_templates_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -11651,6 +11427,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Calculation Template",
         "tags": [
           "Charge Management"
@@ -11668,22 +11449,6 @@
             "schema": {
               "title": "Calculation Template Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -11757,6 +11522,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Calculation Template Workspace",
         "tags": [
           "Charge Management"
@@ -11772,22 +11542,6 @@
             "schema": {
               "title": "Calculation Template Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -11871,6 +11625,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Calculation Template Workspace",
         "tags": [
           "Charge Management"
@@ -11986,22 +11745,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -12071,6 +11814,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Charge Documents",
         "tags": [
           "Charge Management"
@@ -12079,22 +11827,6 @@
       "post": {
         "operationId": "create_charge_document_api_v1_charge_management_charge_documents_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -12176,6 +11908,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Charge Document",
         "tags": [
           "Charge Management"
@@ -12197,22 +11934,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -12282,6 +12003,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Delete Charge Document",
         "tags": [
           "Charge Management"
@@ -12303,22 +12029,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -12388,6 +12098,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Approve Document",
         "tags": [
           "Charge Management"
@@ -12405,22 +12120,6 @@
             "schema": {
               "title": "Charge Document Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -12494,6 +12193,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Post Export",
         "tags": [
           "Charge Management"
@@ -12511,22 +12215,6 @@
             "schema": {
               "title": "Charge Document Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -12610,6 +12298,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Reverse Document",
         "tags": [
           "Charge Management"
@@ -12627,22 +12320,6 @@
             "schema": {
               "title": "Charge Document Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -12716,6 +12393,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Charge Document Workspace",
         "tags": [
           "Charge Management"
@@ -12731,22 +12413,6 @@
             "schema": {
               "title": "Charge Document Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -12830,6 +12496,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Charge Document Workspace",
         "tags": [
           "Charge Management"
@@ -12993,22 +12664,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -13078,6 +12733,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Component Aliases",
         "tags": [
           "Charge Management"
@@ -13086,22 +12746,6 @@
       "post": {
         "operationId": "create_component_alias_api_v1_charge_management_component_aliases_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -13183,6 +12827,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Component Alias",
         "tags": [
           "Charge Management"
@@ -13200,22 +12849,6 @@
             "schema": {
               "title": "Alias Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -13289,6 +12922,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Delete Component Alias",
         "tags": [
           "Charge Management"
@@ -13304,22 +12942,6 @@
             "schema": {
               "title": "Alias Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -13403,6 +13025,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Component Alias",
         "tags": [
           "Charge Management"
@@ -13502,22 +13129,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -13587,6 +13198,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Components",
         "tags": [
           "Charge Management"
@@ -13595,22 +13211,6 @@
       "post": {
         "operationId": "create_component_api_v1_charge_management_components_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -13692,6 +13292,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Component",
         "tags": [
           "Charge Management"
@@ -13709,22 +13314,6 @@
             "schema": {
               "title": "Component Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -13798,6 +13387,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Delete Component",
         "tags": [
           "Charge Management"
@@ -13813,22 +13407,6 @@
             "schema": {
               "title": "Component Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -13912,6 +13490,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Component",
         "tags": [
           "Charge Management"
@@ -14027,22 +13610,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -14112,6 +13679,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Contracts",
         "tags": [
           "Charge Management"
@@ -14120,22 +13692,6 @@
       "post": {
         "operationId": "create_contract_api_v1_charge_management_contracts_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -14217,6 +13773,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Contract",
         "tags": [
           "Charge Management"
@@ -14234,22 +13795,6 @@
             "schema": {
               "title": "Contract Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -14323,6 +13868,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Release Contract",
         "tags": [
           "Charge Management"
@@ -14340,22 +13890,6 @@
             "schema": {
               "title": "Contract Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -14429,6 +13963,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Contract Workspace",
         "tags": [
           "Charge Management"
@@ -14444,22 +13983,6 @@
             "schema": {
               "title": "Contract Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -14543,6 +14066,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Contract Workspace",
         "tags": [
           "Charge Management"
@@ -14606,22 +14134,6 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -14695,6 +14207,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Fx Rate Sources",
         "tags": [
           "Charge Management"
@@ -14703,22 +14220,6 @@
       "post": {
         "operationId": "create_fx_rate_source_api_v1_charge_management_fx_rate_sources_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -14800,6 +14301,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Fx Rate Source",
         "tags": [
           "Charge Management"
@@ -14821,22 +14327,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -14906,6 +14396,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Deactivate Fx Rate Source",
         "tags": [
           "Charge Management"
@@ -14925,22 +14420,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -15010,6 +14489,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Fx Rate Source",
         "tags": [
           "Charge Management"
@@ -15025,22 +14509,6 @@
             "schema": {
               "title": "Source Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -15124,6 +14592,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Fx Rate Source",
         "tags": [
           "Charge Management"
@@ -15289,22 +14762,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -15374,6 +14831,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Fx Rates",
         "tags": [
           "Charge Management"
@@ -15382,22 +14844,6 @@
       "post": {
         "operationId": "create_fx_rate_api_v1_charge_management_fx_rates_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -15479,6 +14925,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Fx Rate",
         "tags": [
           "Charge Management"
@@ -15489,22 +14940,6 @@
       "post": {
         "operationId": "resolve_fx_rate_api_v1_charge_management_fx_rates_resolve_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -15586,6 +15021,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Resolve Fx Rate",
         "tags": [
           "Charge Management"
@@ -15607,22 +15047,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -15692,6 +15116,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Deactivate Fx Rate",
         "tags": [
           "Charge Management"
@@ -15711,22 +15140,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -15796,6 +15209,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Fx Rate",
         "tags": [
           "Charge Management"
@@ -15811,22 +15229,6 @@
             "schema": {
               "title": "Rate Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -15910,6 +15312,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Fx Rate",
         "tags": [
           "Charge Management"
@@ -15920,22 +15327,6 @@
       "get": {
         "operationId": "get_initialization_data_api_v1_charge_management_initialization_data_get",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -16007,6 +15398,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Initialization Data",
         "tags": [
           "Charge Management"
@@ -16090,22 +15486,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -16175,6 +15555,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Invoices",
         "tags": [
           "Charge Management"
@@ -16183,22 +15568,6 @@
       "post": {
         "operationId": "create_invoice_api_v1_charge_management_invoices_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -16280,6 +15649,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Invoice",
         "tags": [
           "Charge Management"
@@ -16297,22 +15671,6 @@
             "schema": {
               "title": "Invoice Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -16386,6 +15744,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Match Invoice",
         "tags": [
           "Charge Management"
@@ -16403,22 +15766,6 @@
             "schema": {
               "title": "Invoice Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -16492,6 +15839,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Invoice Workspace",
         "tags": [
           "Charge Management"
@@ -16507,22 +15859,6 @@
             "schema": {
               "title": "Invoice Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -16606,6 +15942,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Invoice Workspace",
         "tags": [
           "Charge Management"
@@ -16623,22 +15964,6 @@
             "schema": {
               "title": "Consumption Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -16722,6 +16047,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Reverse Quote Commitment Consumption",
         "tags": [
           "Charge Management"
@@ -16732,22 +16062,6 @@
       "post": {
         "operationId": "match_quote_commitments_api_v1_charge_management_quote_commitments_match_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -16829,6 +16143,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Match Quote Commitments",
         "tags": [
           "Charge Management"
@@ -16846,22 +16165,6 @@
             "schema": {
               "title": "Commitment Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -16945,6 +16248,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Consume Quote Commitment",
         "tags": [
           "Charge Management"
@@ -16962,22 +16270,6 @@
             "schema": {
               "title": "Offer Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -17061,6 +16353,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Withdraw Quote Offer",
         "tags": [
           "Charge Management"
@@ -17078,22 +16375,6 @@
             "schema": {
               "title": "Offer Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -17167,6 +16448,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Quote Offer Workspace",
         "tags": [
           "Charge Management"
@@ -17182,22 +16468,6 @@
             "schema": {
               "title": "Offer Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -17281,6 +16551,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Quote Offer Workspace",
         "tags": [
           "Charge Management"
@@ -17380,22 +16655,6 @@
           },
           {
             "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
             "name": "X-Subject",
             "required": false,
             "schema": {
@@ -17465,6 +16724,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Quote Requests",
         "tags": [
           "Charge Management"
@@ -17473,22 +16737,6 @@
       "post": {
         "operationId": "create_quote_request_api_v1_charge_management_quote_requests_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -17570,6 +16818,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Quote Request",
         "tags": [
           "Charge Management"
@@ -17587,22 +16840,6 @@
             "schema": {
               "title": "Quote Request Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -17686,6 +16923,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Award Quote Request",
         "tags": [
           "Charge Management"
@@ -17703,22 +16945,6 @@
             "schema": {
               "title": "Quote Request Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -17792,6 +17018,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Determine Contracts",
         "tags": [
           "Charge Management"
@@ -17809,22 +17040,6 @@
             "schema": {
               "title": "Quote Request Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -17908,6 +17123,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Quote Offer",
         "tags": [
           "Charge Management"
@@ -17925,22 +17145,6 @@
             "schema": {
               "title": "Quote Request Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -18014,6 +17218,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Rank Quote Request",
         "tags": [
           "Charge Management"
@@ -18031,22 +17240,6 @@
             "schema": {
               "title": "Quote Request Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -18120,6 +17313,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Rate Quote Request",
         "tags": [
           "Charge Management"
@@ -18137,22 +17335,6 @@
             "schema": {
               "title": "Quote Request Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -18226,6 +17408,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Quote Request Workspace",
         "tags": [
           "Charge Management"
@@ -18241,22 +17428,6 @@
             "schema": {
               "title": "Quote Request Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -18340,6 +17511,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Quote Request Workspace",
         "tags": [
           "Charge Management"
@@ -18403,22 +17579,6 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -18492,6 +17652,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Rate Books",
         "tags": [
           "Charge Management"
@@ -18500,22 +17665,6 @@
       "post": {
         "operationId": "create_rate_book_api_v1_charge_management_rate_books_post",
         "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
           {
             "in": "header",
             "name": "X-Subject",
@@ -18597,6 +17746,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Rate Book",
         "tags": [
           "Charge Management"
@@ -18614,22 +17768,6 @@
             "schema": {
               "title": "Rate Book Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -18703,6 +17841,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Rate Book Workspace",
         "tags": [
           "Charge Management"
@@ -18718,22 +17861,6 @@
             "schema": {
               "title": "Rate Book Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           },
           {
@@ -18817,6 +17944,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Rate Book Workspace",
         "tags": [
           "Charge Management"

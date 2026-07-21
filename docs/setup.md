@@ -1,155 +1,102 @@
-# Setup And Run Manual
+# Setup And Operations
 
-This manual sets up the standalone Charge Management API as a DB-backed service.
+## Prerequisites
 
-## 1. Prerequisites
 - Python 3.11 or newer.
-- PostgreSQL 14 or newer for normal development/deployment.
-- PowerShell on Windows.
+- PostgreSQL 14 or newer for development and deployment.
+- Alembic-compatible database credentials with schema migration rights.
 
-SQLite can be used for local smoke tests, but PostgreSQL should be used for real development because production integrations will depend on transactional behavior and database-level constraints.
+SQLite is supported for a local smoke test, not as the production database.
 
-## 2. Create Environment
+## Install
 
-```powershell
-cd C:\CW\charge-management-api
+```bash
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\pip.exe install -e ".[dev]"
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-## 3. Configure Database
-
-Set `DATABASE_URL` before running Alembic or the API.
-
-PostgreSQL example:
+On Windows PowerShell, use:
 
 ```powershell
-$env:DATABASE_URL = "postgresql+psycopg://charge_user:charge_password@localhost:5432/charge_management"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-Local SQLite smoke-test example:
+If activation is restricted, run commands explicitly through `.venv\Scripts\python.exe` and executables under `.venv\Scripts`.
 
-```powershell
-$env:DATABASE_URL = "sqlite:///./charge_management.db"
-```
+## Configure
 
-Do not commit real passwords or connection strings.
+Configuration is read from process environment variables. `.env.example` is a reference; the application does not automatically load `.env` files.
 
-## 4. Apply Migrations
-
-```powershell
-.\.venv\Scripts\alembic.exe upgrade head
-```
-
-The migration set creates the full charge domain schema, including quote commitments and consumption history, creates `charge_management_settings`, adds quote validity windows, seeds 32 common charge components with default `charge_date_basis` metadata, and seeds the standard business date profiles used for exchange-rate fallback chains. It also creates persistent allocation profiles, repository ID sequences, FX rate sources, and directional FX rates. Business-date assignments persist owner scope, Ocean/Air house shipment scope, and business purpose with a single effective assignment slot across profiles. Charge documents persist shipment scope, and charge lines persist date-basis, allocation, and selected-FX snapshots.
-
-Verify:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\check_database.py
-```
-
-Expected:
+PostgreSQL:
 
 ```text
-alembic_version=0012_fx_rates_and_sequences
-charge_component_count=32
-fx_rate_source_count=1
-quotation_policy=OPTIONAL
-quote_acceptance_mode=CUSTOMER_ACCEPTANCE
-provider_cost_layer_enabled=False
+DATABASE_URL=postgresql+psycopg://charge_user:charge_password@localhost:5432/charge_management
 ```
 
-## 5. Run API
-
-```powershell
-.\.venv\Scripts\uvicorn.exe app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Open:
+Local SQLite smoke test:
 
 ```text
-http://127.0.0.1:8000/docs
-http://127.0.0.1:8000/openapi.json
+DATABASE_URL=sqlite:///./charge_management.db
 ```
 
-## 6. Call API
+For a local-only session, set `AUTH_MODE=development`. For every shared or production environment, keep the default `AUTH_MODE=jwt` and configure the variables in [authentication.md](authentication.md).
 
-The default auth adapter requires a bearer token and accepts neutral identity headers. Replace this adapter when integrating with a real identity provider.
+## Migrate And Verify
 
-```powershell
-$headers = @{
-  Authorization = "Bearer local-dev-token"
-  "X-Subject" = "developer@example.com"
-  "X-Roles" = "ADMIN"
-}
-
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/api/v1/charge-management/initialization-data" `
-  -Headers $headers
+```bash
+alembic upgrade head
+python scripts/check_database.py
 ```
 
-## 7. Generate OpenAPI Artifact
+The database check reports the migration version, seed counts, and charge-management settings without printing database passwords.
 
-```powershell
-.\.venv\Scripts\python.exe scripts\export_openapi.py
+Useful migration commands:
+
+```bash
+alembic current
+alembic history
+alembic revision --autogenerate -m "describe change"
+alembic upgrade head
 ```
 
-Output:
+Use `alembic downgrade -1` only against a disposable development database after checking whether the migration is safely reversible.
 
-```text
-app\contracts\charge-management-api.openapi.json
+## Run
+
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-## 8. Run Tests
+Swagger UI is at `http://127.0.0.1:8000/docs`. All charge-management operations require a bearer token.
 
-```powershell
-.\.venv\Scripts\pytest.exe -q
+## Generate The Contract
+
+```bash
+python scripts/export_openapi.py
 ```
 
-The tests validate the reusable HTTP contract, SQLAlchemy restart persistence, fresh SQLite migrations, FX maintenance and resolution, and the quote-to-export lifecycle.
+Commit changes to `app/contracts/charge-management-api.openapi.json` whenever endpoint or DTO behavior changes.
 
-The reusable API exposes setup values in initialization data. `quotation_policy` defaults to `OPTIONAL`; set it to `REQUIRED` when direct charge documents should be blocked, or `DIRECT_ONLY` when quote requests should be blocked. `quote_acceptance_mode` defaults to `CUSTOMER_ACCEPTANCE`; use `AUTO_ACCEPT` only when the consuming application should award the first rated option automatically. `provider_cost_layer_enabled` defaults to `false`, meaning rating can use customer-pricing contracts without requiring provider-cost contracts.
+## Validate
 
-## 9. Migration Operations
-
-Show current DB version:
-
-```powershell
-.\.venv\Scripts\alembic.exe current
+```bash
+python scripts/run_tests.py
+python -m build
 ```
 
-Show available migrations:
+See [testing.md](testing.md) for report locations and CI behavior.
 
-```powershell
-.\.venv\Scripts\alembic.exe history
-```
+## Production Checklist
 
-Create a future migration:
-
-```powershell
-.\.venv\Scripts\alembic.exe revision --autogenerate -m "describe change"
-```
-
-Apply latest:
-
-```powershell
-.\.venv\Scripts\alembic.exe upgrade head
-```
-
-Rollback one migration in local development only:
-
-```powershell
-.\.venv\Scripts\alembic.exe downgrade -1
-```
-
-## 10. Troubleshooting
-
-If `alembic upgrade head` cannot connect, confirm `DATABASE_URL` is set in the same PowerShell session.
-
-If `scripts\check_database.py` reports `charge_component` missing, migrations were not applied to the database targeted by the current `DATABASE_URL`.
-
-If API calls return `401`, include an `Authorization: Bearer ...` header.
-
-If PostgreSQL rejects the URL, use the SQLAlchemy dialect prefix `postgresql+psycopg://`.
+- Run PostgreSQL with backups, encryption, monitoring, and restricted credentials.
+- Run `alembic upgrade head` as a controlled deployment step.
+- Configure JWT issuer, audience, algorithms, and JWKS over TLS.
+- Replace or configure `PolicyAdapter` for action, tenant, and row-scope authorization.
+- Terminate TLS at a trusted proxy or service mesh and restrict direct service access.
+- Keep `AUTH_MODE=development` out of shared environments.
+- Pin and scan the deployed image and dependencies according to your organization policy.

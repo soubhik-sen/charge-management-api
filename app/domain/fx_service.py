@@ -258,10 +258,9 @@ class FxRateService:
             statement = statement.where(ChargeFxRateRow.rate_date == payload.rate_date)
         if source_id is not None:
             statement = statement.where(ChargeFxRateRow.source_id == source_id)
-        if payload.conversion_method:
-            statement = statement.where(
-                ChargeFxRateRow.conversion_method == self._method(payload.conversion_method)
-            )
+        statement = statement.where(
+            ChargeFxRateRow.conversion_method == self._method(payload.conversion_method)
+        )
         return self.db.scalar(
             statement.order_by(
                 ChargeFxRateRow.rate_date.desc(),
