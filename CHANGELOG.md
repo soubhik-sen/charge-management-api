@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- PostgreSQL migrations widen Alembic's version column before descriptive revision IDs exceed its default length.
+
 ## [0.2.0] - 2026-07-21
 
 ### Added

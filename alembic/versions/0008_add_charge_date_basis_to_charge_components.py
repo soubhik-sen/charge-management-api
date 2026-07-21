@@ -24,6 +24,16 @@ _CHECK = "ck_charge_component_charge_date_basis"
 
 def upgrade() -> None:
     bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        # Alembic defaults this column to VARCHAR(32), but descriptive revision IDs
+        # in this migration chain are longer. Widen it before this ID is recorded.
+        op.alter_column(
+            "alembic_version",
+            "version_num",
+            existing_type=sa.String(length=32),
+            type_=sa.String(length=128),
+            existing_nullable=False,
+        )
     inspector = inspect(bind)
     if not inspector.has_table(_TABLE):
         return
