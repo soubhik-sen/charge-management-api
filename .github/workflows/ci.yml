@@ -33,7 +33,7 @@ jobs:
       AUTH_MODE: development
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/charge_management_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
