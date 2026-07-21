@@ -2,6 +2,8 @@
 
 These examples use the local Docker profile. On Windows PowerShell, invoke `curl.exe` rather than the `curl` alias.
 
+Read [Core concepts and module guide](core-concepts.md) first if you are deciding which objects your integration needs.
+
 ```bash
 BASE_URL=http://localhost:8000/api/v1/charge-management
 TOKEN=local-dev-token

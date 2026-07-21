@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
 - PostgreSQL migrations widen Alembic's version column before descriptive revision IDs exceed its default length.
 - Direct runtime and test dependencies are pinned so generated OpenAPI and CI results are reproducible.
 
+### Documentation
+
+- Added a module-by-module concepts and usage guide covering setup, pricing, allocation, business dates, FX, quotes, charge documents, invoices, and export.
+
 ## [0.2.0] - 2026-07-21
 
 ### Added

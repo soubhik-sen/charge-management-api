@@ -70,6 +70,7 @@ On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1` instead. Set
 | Guide | Purpose |
 | --- | --- |
 | [Quickstart](docs/quickstart.md) | First local call with Docker or Python |
+| [Core concepts](docs/core-concepts.md) | What each module means and how the modules work together |
 | [API examples](docs/api-examples.md) | Allocation, business-date, and FX requests |
 | [Authentication](docs/authentication.md) | JWT, claims, local mode, and authorization boundary |
 | [Database](docs/database.md) | Schema groups, migrations, and persistence behavior |
