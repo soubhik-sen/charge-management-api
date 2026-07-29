@@ -15,6 +15,25 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+CalculationProfileStatus = Literal["DRAFT", "PUBLISHED", "RETIRED"]
+CalculationApplicationLevel = Literal["SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
+CalculationMethod = Literal["FLAT_AMOUNT", "RATE_TIMES_PRODUCT"]
+CalculationFactorResolver = Literal[
+    "MANUAL",
+    "TARGET_COUNT",
+    "CONTAINER_COUNT",
+    "HOUSE_COUNT",
+    "PO_SCHEDULE_LINE_COUNT",
+    "QUANTITY",
+    "WEIGHT",
+    "VOLUME",
+    "CHARGEABLE_WEIGHT",
+    "DURATION_HOURS",
+    "DURATION_DAYS",
+    "FIXED_VALUE",
+]
+
+
 class ChargeComponent(ApiModel):
     id: int
     component_code: str
@@ -34,6 +53,7 @@ class ChargeComponent(ApiModel):
     business_date_profile_id: int | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
+    default_calculation_profile_id: int | None = None
     is_tax: bool = False
     is_active: bool = True
 
@@ -56,6 +76,7 @@ class ChargeComponentPayload(ApiModel):
     business_date_profile_id: int | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
+    default_calculation_profile_id: int | None = None
     is_tax: bool = False
     is_active: bool = True
 
@@ -160,6 +181,83 @@ class ChargeAllocationProfile(ApiModel):
 
 class ChargeAllocationProfileListResponse(ApiModel):
     items: list[ChargeAllocationProfile]
+    total: int
+    limit: int
+    offset: int
+
+
+class ChargeCalculationProfileFactorPayload(ApiModel):
+    sequence: int
+    factor_code: str
+    factor_label: str
+    resolver: CalculationFactorResolver
+    uom: str | None = None
+    is_required: bool = True
+    default_value: Decimal | None = None
+
+
+class ChargeCalculationProfileFactor(ChargeCalculationProfileFactorPayload):
+    id: int
+    profile_version_id: int
+
+
+class ChargeCalculationProfileVersionPayload(ApiModel):
+    effective_from: date | None = None
+    effective_to: date | None = None
+    application_level: CalculationApplicationLevel
+    calculation_method: CalculationMethod = "RATE_TIMES_PRODUCT"
+    rate_uom: str | None = None
+    missing_factor_policy: Literal["BLOCK"] = "BLOCK"
+    factors: list[ChargeCalculationProfileFactorPayload] = Field(default_factory=list)
+
+
+class ChargeCalculationProfileVersionCreate(ChargeCalculationProfileVersionPayload):
+    pass
+
+
+class ChargeCalculationProfileVersion(ChargeCalculationProfileVersionPayload):
+    id: int
+    profile_id: int
+    version_number: int
+    status: CalculationProfileStatus = "DRAFT"
+    lock_version: int = 1
+    published_at: datetime | None = None
+    published_by: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    factors: list[ChargeCalculationProfileFactor] = Field(default_factory=list)
+
+
+class ChargeCalculationProfileCreate(ApiModel):
+    profile_code: str
+    profile_name: str
+    description: str | None = None
+    is_active: bool = True
+    initial_version: ChargeCalculationProfileVersionCreate
+
+
+class ChargeCalculationProfileUpdate(ApiModel):
+    profile_code: str
+    profile_name: str
+    description: str | None = None
+    is_active: bool = True
+
+
+class ChargeCalculationProfile(ApiModel):
+    id: int
+    profile_code: str
+    profile_name: str
+    description: str | None = None
+    is_active: bool = True
+    published_version_id: int | None = None
+    published_version_number: int | None = None
+    versions: list[ChargeCalculationProfileVersion] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ChargeCalculationProfileListResponse(ApiModel):
+    items: list[ChargeCalculationProfile]
     total: int
     limit: int
     offset: int
@@ -366,6 +464,23 @@ class ChargeReferenceData(ApiModel):
     allocation_profile_source_levels: list[str] = ["SHIPMENT", "CONTAINER", "HOUSE"]
     allocation_profile_final_posting_levels: list[str] = ["HOUSE", "PO_SCHEDULE_LINE"]
     allocation_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
+    calculation_profile_application_levels: list[str] = ["SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
+    calculation_profile_methods: list[str] = ["FLAT_AMOUNT", "RATE_TIMES_PRODUCT"]
+    calculation_profile_factor_resolvers: list[str] = [
+        "MANUAL",
+        "TARGET_COUNT",
+        "CONTAINER_COUNT",
+        "HOUSE_COUNT",
+        "PO_SCHEDULE_LINE_COUNT",
+        "QUANTITY",
+        "WEIGHT",
+        "VOLUME",
+        "CHARGEABLE_WEIGHT",
+        "DURATION_HOURS",
+        "DURATION_DAYS",
+        "FIXED_VALUE",
+    ]
+    calculation_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
     allocation_override_modes: list[str] = ["INHERIT_PROFILE", "OVERRIDE_PROFILE", "NO_ALLOCATION"]
     business_date_policy_modes: list[str] = ["LEGACY_BASIS", "INHERIT_PROFILE", "PROFILE_OVERRIDE"]
     business_date_assignment_scope_types: list[str] = [
@@ -413,6 +528,7 @@ class RateBookEntryPayload(ApiModel):
     rate_amount: Decimal
     basis: str = "SHIPMENT"
     currency: str = "USD"
+    calculation_profile_id: int | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
     origin_code: str | None = None
@@ -511,6 +627,7 @@ class ContractLinePayload(ApiModel):
     charge_component_code: str
     rate_book_id: int | None = None
     calculation_template_id: int | None = None
+    calculation_profile_id: int | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
     origin_code: str | None = None
@@ -699,6 +816,11 @@ class QuoteOptionLine(ApiModel):
     currency: str
     basis: str
     quantity_uom: str | None = None
+    rate_amount: Decimal | None = None
+    quantity: Decimal = Decimal("1")
+    calculation_profile_version_id: int | None = None
+    calculation_config_snapshot_json: dict[str, Any] | None = None
+    calculation_input_snapshot_json: dict[str, Any] | None = None
     allocation_basis: str | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
@@ -777,8 +899,12 @@ class ChargeDocumentLineCreate(ApiModel):
         "MANUAL",
     ] | None = None
     expected_amount: Decimal
+    rate_amount: Decimal | None = None
     currency: str = "USD"
     quantity_uom: str | None = None
+    calculation_profile_version_id: int | None = None
+    calculation_config_snapshot_json: dict[str, Any] | None = None
+    calculation_input_snapshot_json: dict[str, Any] | None = None
     source_currency: str | None = None
     source_amount: Decimal | None = None
     exchange_rate: Decimal | None = None
@@ -844,10 +970,14 @@ class ChargeLine(ApiModel):
         "MANUAL",
     ] | None = None
     expected_amount: Decimal
+    rate_amount: Decimal | None = None
     actual_amount: Decimal | None = None
     approved_amount: Decimal | None = None
     currency: str
     quantity_uom: str | None = None
+    calculation_profile_version_id: int | None = None
+    calculation_config_snapshot_json: dict[str, Any] | None = None
+    calculation_input_snapshot_json: dict[str, Any] | None = None
     source_currency: str | None = None
     source_amount: Decimal | None = None
     exchange_rate: Decimal | None = None

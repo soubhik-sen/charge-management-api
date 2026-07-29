@@ -19,6 +19,9 @@ from app.db.models import (
     ChargeBusinessDateProfileRow,
     ChargeBusinessDateProfileStepRow,
     ChargeBusinessDateProfileVersionRow,
+    ChargeCalculationProfileFactorRow,
+    ChargeCalculationProfileRow,
+    ChargeCalculationProfileVersionRow,
     ChargeCalculationTemplateRow,
     ChargeCalculationTemplateStepRow,
     ChargeComponentAliasRow,
@@ -51,6 +54,9 @@ from app.domain.models import (
     BusinessDateProfileVersion,
     ChargeAllocationProfile,
     ChargeAllocationProfileVersion,
+    ChargeCalculationProfile,
+    ChargeCalculationProfileFactor,
+    ChargeCalculationProfileVersion,
     ChargeComponent,
     ChargeComponentAlias,
     ChargeDocument,
@@ -77,7 +83,12 @@ from app.domain.models import (
     utcnow,
 )
 from app.domain.service import InMemoryChargeRepository
-from app.domain.seeds import COMMON_CHARGE_ALLOCATION_PROFILES, COMMON_CHARGE_COMPONENTS, COMMON_BUSINESS_DATE_PROFILES
+from app.domain.seeds import (
+    COMMON_BUSINESS_DATE_PROFILES,
+    COMMON_CHARGE_ALLOCATION_PROFILES,
+    COMMON_CHARGE_CALCULATION_PROFILES,
+    COMMON_CHARGE_COMPONENTS,
+)
 
 
 def _row_data(row: Any) -> dict[str, Any]:
@@ -174,10 +185,14 @@ def _charge_line_row(line: ChargeLine, component_id: int) -> ChargeLineRow:
         charge_date=line.charge_date,
         charge_date_basis=line.charge_date_basis,
         expected_amount=line.expected_amount,
+        rate_amount=line.rate_amount,
         actual_amount=line.actual_amount,
         approved_amount=line.approved_amount,
         currency=line.currency,
         quantity_uom=line.quantity_uom,
+        calculation_profile_version_id=line.calculation_profile_version_id,
+        calculation_config_snapshot_json=line.calculation_config_snapshot_json,
+        calculation_input_snapshot_json=line.calculation_input_snapshot_json,
         source_currency=line.source_currency,
         source_amount=line.source_amount,
         exchange_rate=line.exchange_rate,
@@ -211,6 +226,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._ids = defaultdict(int)
         self.allocation_profiles: dict[int, ChargeAllocationProfile] = {}
         self.allocation_profile_versions: dict[int, ChargeAllocationProfileVersion] = {}
+        self.calculation_profiles: dict[int, ChargeCalculationProfile] = {}
+        self.calculation_profile_versions: dict[int, ChargeCalculationProfileVersion] = {}
         self.business_date_profiles: dict[int, BusinessDateProfile] = {}
         self.business_date_profile_versions: dict[int, BusinessDateProfileVersion] = {}
         self.business_date_profile_assignments: dict[int, BusinessDateProfileAssignment] = {}
@@ -247,6 +264,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._sequence_rows.clear()
         self.allocation_profiles.clear()
         self.allocation_profile_versions.clear()
+        self.calculation_profiles.clear()
+        self.calculation_profile_versions.clear()
         self.business_date_profiles.clear()
         self.business_date_profile_versions.clear()
         self.business_date_profile_assignments.clear()
@@ -277,6 +296,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         # enforces these foreign keys during the statement, unlike default SQLite.
         self.session.execute(update(ChargeBusinessDateProfileRow).values(published_version_id=None))
         self.session.execute(update(ChargeAllocationProfileRow).values(published_version_id=None))
+        self.session.execute(update(ChargeCalculationProfileRow).values(published_version_id=None))
         self.session.flush()
         for table in (
             ChargeMatchResultRow,
@@ -302,6 +322,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             ChargeBusinessDateProfileStepRow,
             ChargeBusinessDateProfileVersionRow,
             ChargeBusinessDateProfileRow,
+            ChargeCalculationProfileFactorRow,
+            ChargeCalculationProfileVersionRow,
+            ChargeCalculationProfileRow,
             ChargeAllocationProfileVersionRow,
             ChargeAllocationProfileRow,
             ChargeFxRateRow,
@@ -316,6 +339,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._delete_all_rows()
         self._clear_state()
         self._original_row_keys = {}
+        self.seed_calculation_profiles()
         self.seed_business_date_profiles()
         self.seed_allocation_profiles()
         self.seed_components()
@@ -359,6 +383,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._persist_settings()
         self._persist_sequences()
         self._persist_allocation_profiles()
+        self._persist_calculation_profiles()
         self._persist_business_date_profiles()
         self._persist_components()
         self._persist_rate_books()
@@ -376,6 +401,11 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
 
     def _state_row_keys(self) -> dict[str, set[Any]]:
         return {
+            "calculation_profile_factor": {
+                factor.id
+                for version in self.calculation_profile_versions.values()
+                for factor in version.factors
+            },
             "business_date_profile_assignment": set(self.business_date_profile_assignments),
             "business_date_profile_step": {
                 step.id
@@ -418,6 +448,11 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             ),
             ("rate_book_entry", ChargeRateBookEntryRow, ChargeRateBookEntryRow.id),
             (
+                "calculation_profile_factor",
+                ChargeCalculationProfileFactorRow,
+                ChargeCalculationProfileFactorRow.id,
+            ),
+            (
                 "business_date_profile_assignment",
                 ChargeBusinessDateProfileAssignmentRow,
                 ChargeBusinessDateProfileAssignmentRow.id,
@@ -438,6 +473,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         collections = (
             "allocation_profiles",
             "allocation_profile_versions",
+            "calculation_profiles",
+            "calculation_profile_versions",
             "business_date_profiles",
             "business_date_profile_versions",
             "business_date_profile_assignments",
@@ -497,6 +534,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._load_settings()
         self._load_sequence_rows()
         self._load_allocation_profiles()
+        self._load_calculation_profiles()
         self._load_business_date_profiles()
         self._load_components()
         self._load_rate_books()
@@ -511,6 +549,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         for collection in (
             self.allocation_profiles,
             self.allocation_profile_versions,
+            self.calculation_profiles,
+            self.calculation_profile_versions,
             self.business_date_profiles,
             self.business_date_profile_versions,
             self.business_date_profile_assignments,
@@ -592,6 +632,80 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         for profile in self.allocation_profiles.values():
             for version in profile.versions:
                 self.allocation_profile_versions[version.id] = version
+
+    def _load_calculation_profiles(self) -> None:
+        profile_rows = self.session.scalars(
+            select(ChargeCalculationProfileRow).order_by(
+                ChargeCalculationProfileRow.profile_code,
+                ChargeCalculationProfileRow.id,
+            )
+        ).all()
+        version_rows = self.session.scalars(
+            select(ChargeCalculationProfileVersionRow).order_by(
+                ChargeCalculationProfileVersionRow.profile_id,
+                ChargeCalculationProfileVersionRow.version_number,
+                ChargeCalculationProfileVersionRow.id,
+            )
+        ).all()
+        factor_rows = self.session.scalars(
+            select(ChargeCalculationProfileFactorRow).order_by(
+                ChargeCalculationProfileFactorRow.profile_version_id,
+                ChargeCalculationProfileFactorRow.sequence,
+                ChargeCalculationProfileFactorRow.id,
+            )
+        ).all()
+        factors_by_version: dict[int, list[ChargeCalculationProfileFactor]] = defaultdict(list)
+        for row in factor_rows:
+            factor = _model_from_row(ChargeCalculationProfileFactor, row)
+            factors_by_version[factor.profile_version_id].append(factor)
+            self._ids["calculation_profile_factor"] = max(self._ids["calculation_profile_factor"], factor.id)
+        versions_by_profile: dict[int, list[ChargeCalculationProfileVersion]] = defaultdict(list)
+        for row in version_rows:
+            version = ChargeCalculationProfileVersion(
+                id=row.id,
+                profile_id=row.profile_id,
+                version_number=row.version_number,
+                status=row.status,
+                effective_from=row.effective_from,
+                effective_to=row.effective_to,
+                application_level=row.application_level,
+                calculation_method=row.calculation_method,
+                rate_uom=row.rate_uom,
+                missing_factor_policy=row.missing_factor_policy,
+                lock_version=row.lock_version,
+                published_at=row.published_at,
+                published_by=row.published_by,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                factors=sorted(factors_by_version.get(row.id, []), key=lambda item: (item.sequence, item.id)),
+            )
+            versions_by_profile[version.profile_id].append(version)
+            self._ids["calculation_profile_version"] = max(self._ids["calculation_profile_version"], version.id)
+        for row in profile_rows:
+            profile = ChargeCalculationProfile(
+                id=row.id,
+                profile_code=row.profile_code,
+                profile_name=row.profile_name,
+                description=row.description,
+                is_active=row.is_active,
+                published_version_id=row.published_version_id,
+                published_version_number=next(
+                    (
+                        version.version_number
+                        for version in versions_by_profile.get(row.id, [])
+                        if version.id == row.published_version_id
+                    ),
+                    None,
+                ),
+                versions=sorted(versions_by_profile.get(row.id, []), key=lambda item: (item.version_number, item.id)),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            self.calculation_profiles[profile.id] = profile
+            self._ids["calculation_profile"] = max(self._ids["calculation_profile"], profile.id)
+        for profile in self.calculation_profiles.values():
+            for version in profile.versions:
+                self.calculation_profile_versions[version.id] = version
 
     def _load_business_date_profiles(self) -> None:
         profile_rows = self.session.scalars(
@@ -877,6 +991,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 row,
                 charge_component_code=component.component_code,
                 amount=_money_decimal(row.amount),
+                rate_amount=_money_decimal(row.rate_amount),
             )
             option_lines_by_option[option_line.quote_option_id].append(option_line)
             self._ids["quote_option_line"] = max(self._ids["quote_option_line"], option_line.id)
@@ -966,6 +1081,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 row,
                 charge_component_code=component.component_code,
                 expected_amount=_money_decimal(row.expected_amount),
+                rate_amount=_money_decimal(row.rate_amount),
                 actual_amount=_money_decimal(row.actual_amount),
                 approved_amount=_money_decimal(row.approved_amount),
                 source_amount=_money_decimal(row.source_amount),
@@ -1194,6 +1310,70 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 )
         self.session.flush()
 
+    def _persist_calculation_profiles(self) -> None:
+        for profile in sorted(self.calculation_profiles.values(), key=lambda item: item.id):
+            self.session.merge(
+                ChargeCalculationProfileRow(
+                    id=profile.id,
+                    profile_code=profile.profile_code,
+                    profile_name=profile.profile_name,
+                    description=profile.description,
+                    is_active=profile.is_active,
+                    published_version_id=None,
+                    created_at=profile.created_at,
+                    updated_at=profile.updated_at,
+                )
+            )
+        self.session.flush()
+        for version in sorted(self.calculation_profile_versions.values(), key=lambda item: item.id):
+            self.session.merge(
+                ChargeCalculationProfileVersionRow(
+                    id=version.id,
+                    profile_id=version.profile_id,
+                    version_number=version.version_number,
+                    status=version.status,
+                    effective_from=version.effective_from,
+                    effective_to=version.effective_to,
+                    application_level=version.application_level,
+                    calculation_method=version.calculation_method,
+                    rate_uom=version.rate_uom,
+                    missing_factor_policy=version.missing_factor_policy,
+                    lock_version=version.lock_version,
+                    published_at=version.published_at,
+                    published_by=version.published_by,
+                    created_at=version.created_at,
+                    updated_at=version.updated_at,
+                )
+            )
+        self.session.flush()
+        factors = sorted(
+            (factor for version in self.calculation_profile_versions.values() for factor in version.factors),
+            key=lambda item: item.id,
+        )
+        for factor in factors:
+            self.session.merge(
+                ChargeCalculationProfileFactorRow(
+                    id=factor.id,
+                    profile_version_id=factor.profile_version_id,
+                    sequence=factor.sequence,
+                    factor_code=factor.factor_code,
+                    factor_label=factor.factor_label,
+                    resolver=factor.resolver,
+                    uom=factor.uom,
+                    is_required=factor.is_required,
+                    default_value=factor.default_value,
+                )
+            )
+        self.session.flush()
+        for profile in self.calculation_profiles.values():
+            if profile.published_version_id is not None:
+                self.session.execute(
+                    update(ChargeCalculationProfileRow)
+                    .where(ChargeCalculationProfileRow.id == profile.id)
+                    .values(published_version_id=profile.published_version_id)
+                )
+        self.session.flush()
+
     def _persist_business_date_profiles(self) -> None:
         for profile in sorted(self.business_date_profiles.values(), key=lambda item: item.id):
             self.session.merge(
@@ -1279,6 +1459,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     business_date_profile_id=component.business_date_profile_id,
                     allocation_profile_id=component.allocation_profile_id,
                     allocation_profile_version_id=component.allocation_profile_version_id,
+                    default_calculation_profile_id=component.default_calculation_profile_id,
                     is_tax=component.is_tax,
                     is_active=component.is_active,
                 )
@@ -1383,6 +1564,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     rate_amount=entry.rate_amount,
                     basis=entry.basis,
                     currency=entry.currency,
+                    calculation_profile_id=entry.calculation_profile_id,
                     allocation_profile_id=entry.allocation_profile_id,
                     allocation_profile_version_id=entry.allocation_profile_version_id,
                     origin_code=entry.origin_code,
@@ -1474,6 +1656,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     charge_component_id=component.id,
                     rate_book_id=line.rate_book_id,
                     calculation_template_id=line.calculation_template_id,
+                    calculation_profile_id=line.calculation_profile_id,
                     allocation_profile_id=line.allocation_profile_id,
                     allocation_profile_version_id=line.allocation_profile_version_id,
                     origin_code=line.origin_code,
@@ -1590,7 +1773,12 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                         amount=line.amount,
                         currency=line.currency,
                         basis=line.basis,
+                        rate_amount=line.rate_amount,
+                        quantity=line.quantity,
                         quantity_uom=line.quantity_uom,
+                        calculation_profile_version_id=line.calculation_profile_version_id,
+                        calculation_config_snapshot_json=dict(line.calculation_config_snapshot_json or {}),
+                        calculation_input_snapshot_json=dict(line.calculation_input_snapshot_json or {}),
                         allocation_basis=line.allocation_basis,
                         allocation_profile_id=line.allocation_profile_id,
                         allocation_profile_version_id=line.allocation_profile_version_id,

@@ -16,6 +16,14 @@ from app.domain.models import (
     ChargeAllocationProfileUpdate,
     ChargeAllocationProfileVersion,
     ChargeAllocationProfileVersionCreate,
+    ChargeCalculationProfile,
+    ChargeCalculationProfileCreate,
+    ChargeCalculationProfileFactor,
+    ChargeCalculationProfileFactorPayload,
+    ChargeCalculationProfileListResponse,
+    ChargeCalculationProfileUpdate,
+    ChargeCalculationProfileVersion,
+    ChargeCalculationProfileVersionCreate,
     BusinessDateProfile,
     BusinessDateProfileAssignment,
     BusinessDateProfileAssignmentCreate,
@@ -94,7 +102,12 @@ from app.domain.models import (
     RateResponse,
     utcnow,
 )
-from app.domain.seeds import COMMON_BUSINESS_DATE_PROFILES, COMMON_CHARGE_ALLOCATION_PROFILES, COMMON_CHARGE_COMPONENTS
+from app.domain.seeds import (
+    COMMON_BUSINESS_DATE_PROFILES,
+    COMMON_CHARGE_ALLOCATION_PROFILES,
+    COMMON_CHARGE_CALCULATION_PROFILES,
+    COMMON_CHARGE_COMPONENTS,
+)
 
 MONEY = Decimal("0.01")
 CHARGE_TARGET_LEVELS = {"HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"}
@@ -102,6 +115,28 @@ ALLOCATION_PROFILE_SOURCE_LEVELS = {"SHIPMENT", "CONTAINER", "HOUSE"}
 ALLOCATION_PROFILE_FINAL_POSTING_LEVELS = {"HOUSE", "PO_SCHEDULE_LINE"}
 ALLOCATION_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 ALLOCATION_OVERRIDE_MODES = {"INHERIT_PROFILE", "OVERRIDE_PROFILE", "NO_ALLOCATION"}
+CALCULATION_PROFILE_APPLICATION_LEVELS = {"SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"}
+CALCULATION_PROFILE_METHODS = {"FLAT_AMOUNT", "RATE_TIMES_PRODUCT"}
+CALCULATION_PROFILE_FACTOR_RESOLVERS = {
+    "MANUAL",
+    "TARGET_COUNT",
+    "CONTAINER_COUNT",
+    "HOUSE_COUNT",
+    "PO_SCHEDULE_LINE_COUNT",
+    "QUANTITY",
+    "WEIGHT",
+    "VOLUME",
+    "CHARGEABLE_WEIGHT",
+    "DURATION_HOURS",
+    "DURATION_DAYS",
+    "FIXED_VALUE",
+}
+CALCULATION_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
+CALCULATION_TRANSACTION_INPUT_RESOLVERS = {
+    "MANUAL",
+    "DURATION_HOURS",
+    "DURATION_DAYS",
+}
 BUSINESS_DATE_POLICY_MODES = {"LEGACY_BASIS", "INHERIT_PROFILE", "PROFILE_OVERRIDE"}
 BUSINESS_DATE_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 BUSINESS_DATE_ASSIGNMENT_SCOPE_TYPES = {"GLOBAL", "COMPANY", "CUSTOMER", "VENDOR", "FORWARDER", "CARRIER"}
@@ -190,8 +225,6 @@ LEGACY_BASIS_TO_BUSINESS_KEYS: dict[str, tuple[str, ...]] = {
     "HOUSE_BILL_ISSUE_DATE": ("HOUSE_BILL_ISSUE_DATE",),
     "MANUAL": ("MANUAL_LINE_DATE",),
 }
-
-
 def money(value: Decimal | int | float | str | None) -> Decimal:
     return Decimal(str(value or "0")).quantize(MONEY, rounding=ROUND_HALF_UP)
 
@@ -287,6 +320,8 @@ class InMemoryChargeRepository:
         self._ids: defaultdict[str, int] = defaultdict(int)
         self.allocation_profiles: dict[int, ChargeAllocationProfile] = {}
         self.allocation_profile_versions: dict[int, ChargeAllocationProfileVersion] = {}
+        self.calculation_profiles: dict[int, ChargeCalculationProfile] = {}
+        self.calculation_profile_versions: dict[int, ChargeCalculationProfileVersion] = {}
         self.business_date_profiles: dict[int, BusinessDateProfile] = {}
         self.business_date_profile_versions: dict[int, BusinessDateProfileVersion] = {}
         self.business_date_profile_assignments: dict[int, BusinessDateProfileAssignment] = {}
@@ -308,6 +343,7 @@ class InMemoryChargeRepository:
         self.quotation_policy = "OPTIONAL"
         self.quote_acceptance_mode = "CUSTOMER_ACCEPTANCE"
         self.provider_cost_layer_enabled = False
+        self.seed_calculation_profiles()
         self.seed_business_date_profiles()
         self.seed_allocation_profiles()
         self.seed_components()
@@ -333,6 +369,54 @@ class InMemoryChargeRepository:
             )
             self.components[component.id] = component
             self.components_by_code[code] = component
+
+    def seed_calculation_profiles(self) -> None:
+        for row in COMMON_CHARGE_CALCULATION_PROFILES:
+            profile_id = self.next_id("calculation_profile")
+            version_id = self.next_id("calculation_profile_version")
+            factors: list[ChargeCalculationProfileFactor] = []
+            for factor in row.get("factors", ()):  # type: ignore[assignment]
+                factor_id = self.next_id("calculation_profile_factor")
+                factors.append(
+                    ChargeCalculationProfileFactor(
+                        id=factor_id,
+                        profile_version_id=version_id,
+                        sequence=int(factor[0]),
+                        factor_code=str(factor[1]).strip().upper(),
+                        factor_label=str(factor[2]).strip(),
+                        resolver=str(factor[3]).strip().upper(),  # type: ignore[arg-type]
+                        uom=_clean_optional(str(factor[4]).strip().upper() if factor[4] else None),
+                        is_required=True,
+                        default_value=None,
+                    )
+                )
+            version = ChargeCalculationProfileVersion(
+                id=version_id,
+                profile_id=profile_id,
+                version_number=int(row.get("version_number", 1)),
+                status="PUBLISHED",
+                effective_from=row.get("effective_from"),
+                effective_to=row.get("effective_to"),
+                application_level=str(row["application_level"]).strip().upper(),  # type: ignore[arg-type]
+                calculation_method=str(row.get("calculation_method", "RATE_TIMES_PRODUCT")).strip().upper(),  # type: ignore[arg-type]
+                rate_uom=_clean_optional(str(row.get("rate_uom")).strip().upper() if row.get("rate_uom") else None),
+                missing_factor_policy=str(row.get("missing_factor_policy", "BLOCK")).strip().upper(),
+                published_at=utcnow(),
+                published_by="SYSTEM",
+                factors=sorted(factors, key=lambda item: (item.sequence, item.id)),
+            )
+            profile = ChargeCalculationProfile(
+                id=profile_id,
+                profile_code=str(row["profile_code"]).strip().upper(),
+                profile_name=str(row["profile_name"]).strip(),
+                description=_clean_optional(row.get("description")),  # type: ignore[arg-type]
+                is_active=bool(row.get("is_active", True)),
+                published_version_id=version.id,
+                published_version_number=version.version_number,
+                versions=[version],
+            )
+            self.calculation_profiles[profile.id] = profile
+            self.calculation_profile_versions[version.id] = version
 
     def seed_business_date_profiles(self) -> None:
         for row in COMMON_BUSINESS_DATE_PROFILES:
@@ -562,6 +646,194 @@ class ChargeManagementService:
             if existing.id == version.id:
                 existing.status = "PUBLISHED"
                 existing.published_at = utcnow()
+                existing.updated_at = utcnow()
+            elif existing.status == "PUBLISHED":
+                existing.status = "RETIRED"
+                existing.updated_at = utcnow()
+        profile.published_version_id = version.id
+        profile.published_version_number = version.version_number
+        profile.updated_at = utcnow()
+        return profile
+
+    def list_calculation_profiles(
+        self,
+        *,
+        search: str | None = None,
+        application_level: str | None = None,
+        status_filter: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> ChargeCalculationProfileListResponse:
+        rows = list(self.repository.calculation_profiles.values())
+        if application_level:
+            normalized_level = application_level.strip().upper()
+            rows = [
+                row
+                for row in rows
+                if any(version.application_level == normalized_level for version in row.versions)
+            ]
+        if status_filter:
+            normalized_status = status_filter.strip().upper()
+            rows = [
+                row
+                for row in rows
+                if any(version.status == normalized_status for version in row.versions)
+            ]
+        if search:
+            normalized = search.strip().upper()
+            rows = [
+                row
+                for row in rows
+                if normalized in row.profile_code.upper()
+                or normalized in row.profile_name.upper()
+                or any(normalized in (version.rate_uom or "").upper() for version in row.versions)
+            ]
+        rows.sort(key=lambda row: (row.profile_code, row.id))
+        safe_offset = max(int(offset), 0)
+        safe_limit = min(max(int(limit), 1), 200)
+        return ChargeCalculationProfileListResponse(
+            items=rows[safe_offset : safe_offset + safe_limit],
+            total=len(rows),
+            limit=safe_limit,
+            offset=safe_offset,
+        )
+
+    def get_calculation_profile(self, profile_id: int) -> ChargeCalculationProfile:
+        return self._require_calculation_profile(profile_id)
+
+    def create_calculation_profile(self, payload: ChargeCalculationProfileCreate) -> ChargeCalculationProfile:
+        code = payload.profile_code.strip().upper()
+        name = payload.profile_name.strip()
+        if not code or not name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Calculation profile_code and profile_name are required.",
+            )
+        if any(row.profile_code == code for row in self.repository.calculation_profiles.values()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Charge calculation profile code already exists.",
+            )
+        profile_id = self.repository.next_id("calculation_profile")
+        version = self._calculation_profile_version_from_payload(
+            profile_id=profile_id,
+            payload=payload.initial_version,
+            version_number=1,
+        )
+        profile = ChargeCalculationProfile(
+            id=profile_id,
+            profile_code=code,
+            profile_name=name,
+            description=_clean_optional(payload.description),
+            is_active=bool(payload.is_active),
+            versions=[version],
+        )
+        self.repository.calculation_profiles[profile.id] = profile
+        self.repository.calculation_profile_versions[version.id] = version
+        return profile
+
+    def update_calculation_profile(
+        self,
+        profile_id: int,
+        payload: ChargeCalculationProfileUpdate,
+    ) -> ChargeCalculationProfile:
+        profile = self._require_calculation_profile(profile_id)
+        code = payload.profile_code.strip().upper()
+        name = payload.profile_name.strip()
+        if not code or not name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Calculation profile_code and profile_name are required.",
+            )
+        if any(
+            row.profile_code == code and row.id != profile.id
+            for row in self.repository.calculation_profiles.values()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Charge calculation profile code already exists.",
+            )
+        profile.profile_code = code
+        profile.profile_name = name
+        profile.description = _clean_optional(payload.description)
+        profile.is_active = bool(payload.is_active)
+        profile.updated_at = utcnow()
+        return profile
+
+    def create_calculation_profile_version(
+        self,
+        profile_id: int,
+        payload: ChargeCalculationProfileVersionCreate,
+    ) -> ChargeCalculationProfile:
+        profile = self._require_calculation_profile(profile_id)
+        next_version_number = max((row.version_number for row in profile.versions), default=0) + 1
+        version = self._calculation_profile_version_from_payload(
+            profile_id=profile.id,
+            payload=payload,
+            version_number=next_version_number,
+        )
+        profile.versions = sorted([*profile.versions, version], key=lambda row: (row.version_number, row.id))
+        profile.updated_at = utcnow()
+        self.repository.calculation_profile_versions[version.id] = version
+        return profile
+
+    def update_calculation_profile_version(
+        self,
+        version_id: int,
+        payload: ChargeCalculationProfileVersionCreate,
+    ) -> ChargeCalculationProfileVersion:
+        version = self._require_calculation_profile_version(version_id)
+        if version.status != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only draft calculation profile versions can be updated.",
+            )
+        normalized = self._normalized_calculation_profile_version_payload(payload)
+        version.effective_from = normalized["effective_from"]
+        version.effective_to = normalized["effective_to"]
+        version.application_level = normalized["application_level"]
+        version.calculation_method = normalized["calculation_method"]
+        version.rate_uom = normalized["rate_uom"]
+        version.missing_factor_policy = normalized["missing_factor_policy"]
+        version.factors = [
+            ChargeCalculationProfileFactor(
+                id=self.repository.next_id("calculation_profile_factor"),
+                profile_version_id=version.id,
+                sequence=item["sequence"],
+                factor_code=item["factor_code"],
+                factor_label=item["factor_label"],
+                resolver=item["resolver"],  # type: ignore[arg-type]
+                uom=item["uom"],
+                is_required=item["is_required"],
+                default_value=item["default_value"],
+            )
+            for item in normalized["factors"]
+        ]
+        version.updated_at = utcnow()
+        profile = self._require_calculation_profile(version.profile_id)
+        profile.updated_at = utcnow()
+        return version
+
+    def publish_calculation_profile_version(self, version_id: int) -> ChargeCalculationProfile:
+        version = self._require_calculation_profile_version(version_id)
+        profile = self._require_calculation_profile(version.profile_id)
+        if version.status != "DRAFT":
+            if version.status == "PUBLISHED":
+                return profile
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only draft calculation profile versions can be published.",
+            )
+        if version.calculation_method == "RATE_TIMES_PRODUCT" and not version.factors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Calculation profile requires at least one factor.",
+            )
+        for existing in profile.versions:
+            if existing.id == version.id:
+                existing.status = "PUBLISHED"
+                existing.published_at = utcnow()
+                existing.published_by = "SYSTEM"
                 existing.updated_at = utcnow()
             elif existing.status == "PUBLISHED":
                 existing.status = "RETIRED"
@@ -868,6 +1140,9 @@ class ChargeManagementService:
             payload.allocation_profile_id,
             payload.allocation_profile_version_id,
         )
+        default_calculation_profile_id = self._resolve_calculation_profile_identity_reference(
+            payload.default_calculation_profile_id
+        )
         component = ChargeComponent(
             **payload.model_dump(
                 exclude={
@@ -881,6 +1156,7 @@ class ChargeManagementService:
                     "business_date_profile_id",
                     "allocation_profile_id",
                     "allocation_profile_version_id",
+                    "default_calculation_profile_id",
                 }
             ),
             id=self.repository.next_id("component"),
@@ -894,6 +1170,7 @@ class ChargeManagementService:
             business_date_profile_id=business_date_profile_id,
             allocation_profile_id=allocation_profile_id,
             allocation_profile_version_id=allocation_profile_version_id,
+            default_calculation_profile_id=default_calculation_profile_id,
         )
         self.repository.components[component.id] = component
         self.repository.components_by_code[component.component_code] = component
@@ -930,6 +1207,9 @@ class ChargeManagementService:
         ) = self._resolve_allocation_profile_reference(
             payload.allocation_profile_id,
             payload.allocation_profile_version_id,
+        )
+        existing.default_calculation_profile_id = self._resolve_calculation_profile_identity_reference(
+            payload.default_calculation_profile_id
         )
         existing.is_tax = bool(payload.is_tax)
         existing.is_active = bool(payload.is_active)
@@ -1043,11 +1323,21 @@ class ChargeManagementService:
                 entry.allocation_profile_id,
                 entry.allocation_profile_version_id,
             )
+            calculation_profile_id = self._resolve_calculation_profile_identity_reference(
+                entry.calculation_profile_id
+            )
             entries.append(
                 RateBookEntry(
-                    **entry.model_dump(exclude={"allocation_profile_id", "allocation_profile_version_id"}),
+                    **entry.model_dump(
+                        exclude={
+                            "allocation_profile_id",
+                            "allocation_profile_version_id",
+                            "calculation_profile_id",
+                        }
+                    ),
                     id=self.repository.next_id("rate_book_entry"),
                     rate_book_id=rate_book_id,
+                    calculation_profile_id=calculation_profile_id,
                     allocation_profile_id=allocation_profile_id,
                     allocation_profile_version_id=allocation_profile_version_id,
                 )
@@ -1109,11 +1399,21 @@ class ChargeManagementService:
                 entry.allocation_profile_id,
                 entry.allocation_profile_version_id,
             )
+            calculation_profile_id = self._resolve_calculation_profile_identity_reference(
+                entry.calculation_profile_id
+            )
             entries.append(
                 RateBookEntry(
-                    **entry.model_dump(exclude={"allocation_profile_id", "allocation_profile_version_id"}),
+                    **entry.model_dump(
+                        exclude={
+                            "allocation_profile_id",
+                            "allocation_profile_version_id",
+                            "calculation_profile_id",
+                        }
+                    ),
                     id=self.repository.next_id("rate_book_entry"),
                     rate_book_id=row.id,
+                    calculation_profile_id=calculation_profile_id,
                     allocation_profile_id=allocation_profile_id,
                     allocation_profile_version_id=allocation_profile_version_id,
                 )
@@ -1659,8 +1959,12 @@ class ChargeManagementService:
                     charge_component_code=line.charge_component_code,
                     description=line.description,
                     expected_amount=line.amount,
+                    rate_amount=line.rate_amount,
                     currency=line.currency,
                     quantity_uom=line.quantity_uom,
+                    calculation_profile_version_id=line.calculation_profile_version_id,
+                    calculation_config_snapshot_json=line.calculation_config_snapshot_json,
+                    calculation_input_snapshot_json=line.calculation_input_snapshot_json,
                     allocation_profile_id=line.allocation_profile_id,
                     allocation_profile_version_id=line.allocation_profile_version_id,
                     pinned_allocation_snapshot_json=line.pinned_allocation_snapshot_json,
@@ -1854,6 +2158,18 @@ class ChargeManagementService:
                 document=document,
                 line_payload=line_payload,
             )
+            (
+                calculation_profile_version_id,
+                calculation_config_snapshot_json,
+                calculation_input_snapshot_json,
+                rate_amount,
+                calculated_quantity_uom,
+                expected_amount,
+            ) = self._resolve_effective_document_calculation(
+                component=component,
+                document=document,
+                line_payload=line_payload,
+            )
             line = ChargeLine(
                 id=self.repository.next_id("charge_line"),
                 charge_document_id=document.id,
@@ -1870,9 +2186,17 @@ class ChargeManagementService:
                 description=line_payload.description or component.component_name,
                 charge_date=line_payload.charge_date,
                 charge_date_basis=getattr(line_payload, "charge_date_basis", None),
-                expected_amount=money(line_payload.expected_amount),
+                expected_amount=expected_amount,
+                rate_amount=rate_amount,
                 currency=line_payload.currency.upper(),
-                quantity_uom=_clean_optional(line_payload.quantity_uom) or effective_quantity_uom,
+                quantity_uom=(
+                    _clean_optional(line_payload.quantity_uom)
+                    or calculated_quantity_uom
+                    or effective_quantity_uom
+                ),
+                calculation_profile_version_id=calculation_profile_version_id,
+                calculation_config_snapshot_json=calculation_config_snapshot_json,
+                calculation_input_snapshot_json=calculation_input_snapshot_json,
                 source_currency=line_payload.source_currency.upper() if line_payload.source_currency else None,
                 source_amount=money(line_payload.source_amount) if line_payload.source_amount is not None else None,
                 exchange_rate=line_payload.exchange_rate,
@@ -2675,7 +2999,20 @@ class ChargeManagementService:
                     allocation_profile_version_id=contract_line.allocation_profile_version_id
                     or entry.allocation_profile_version_id,
                 )
-                amount = self._calculate_amount(entry, quote)
+                (
+                    calculation_profile_version_id,
+                    calculation_config_snapshot_json,
+                    calculation_input_snapshot_json,
+                    rate_amount,
+                    quantity,
+                    calculation_quantity_uom,
+                    amount,
+                ) = self._resolve_effective_quote_calculation(
+                    component=component,
+                    quote=quote,
+                    entry=entry,
+                    contract_line=contract_line,
+                )
                 lines.append(
                     QuoteOptionLine(
                         id=self.repository.next_id("quote_option_line"),
@@ -2689,10 +3026,16 @@ class ChargeManagementService:
                         amount=amount,
                         currency=entry.currency or quote.currency,
                         basis=entry.basis,
-                        quantity_uom=self._effective_allocation_value(
+                        rate_amount=rate_amount,
+                        quantity=quantity,
+                        quantity_uom=calculation_quantity_uom
+                        or self._effective_allocation_value(
                             effective_allocation_snapshot_json,
                             "default_quantity_uom",
                         ),
+                        calculation_profile_version_id=calculation_profile_version_id,
+                        calculation_config_snapshot_json=calculation_config_snapshot_json,
+                        calculation_input_snapshot_json=calculation_input_snapshot_json,
                         allocation_basis=self._effective_allocation_basis(
                             effective_allocation_snapshot_json
                         ),
@@ -2766,6 +3109,324 @@ class ChargeManagementService:
         if entry.maximum_amount is not None:
             amount = min(amount, entry.maximum_amount)
         return money(amount)
+
+    def _resolve_effective_quote_calculation(
+        self,
+        *,
+        component: ChargeComponent,
+        quote: QuoteRequest,
+        entry: RateBookEntry,
+        contract_line: ContractLine,
+    ) -> tuple[int | None, dict[str, Any] | None, dict[str, Any] | None, Decimal | None, Decimal, str | None, Decimal]:
+        _, version_id, profile, version = self._resolve_calculation_profile_reference(
+            contract_line.calculation_profile_id
+            or entry.calculation_profile_id
+            or component.default_calculation_profile_id,
+            None,
+        )
+        if profile is None or version is None:
+            return None, None, None, dec(entry.rate_amount), Decimal("1"), None, self._calculate_amount(entry, quote)
+        result = self._evaluate_calculation_profile(
+            version,
+            rate_amount=entry.rate_amount,
+            context=self._calculation_context_for_quote(quote, version.application_level),
+        )
+        return (
+            version_id,
+            self._calculation_snapshot(profile, version),
+            result["input_snapshot"],
+            dec(entry.rate_amount),
+            result["quantity"],
+            result["quantity_uom"],
+            result["amount"],
+        )
+
+    def _resolve_effective_document_calculation(
+        self,
+        *,
+        component: ChargeComponent,
+        document: ChargeDocument,
+        line_payload: Any,
+    ) -> tuple[int | None, dict[str, Any] | None, dict[str, Any] | None, Decimal | None, str | None, Decimal]:
+        requested_version_id = getattr(line_payload, "calculation_profile_version_id", None)
+        _, version_id, profile, version = self._resolve_calculation_profile_reference(
+            None if requested_version_id not in (None, "", 0) else component.default_calculation_profile_id,
+            requested_version_id,
+        )
+        if profile is None or version is None:
+            return (
+                None,
+                None,
+                getattr(line_payload, "calculation_input_snapshot_json", None),
+                dec(getattr(line_payload, "rate_amount", None)) if getattr(line_payload, "rate_amount", None) is not None else None,
+                _clean_optional(getattr(line_payload, "quantity_uom", None)),
+                money(getattr(line_payload, "expected_amount", None)),
+            )
+        result = self._evaluate_calculation_profile(
+            version,
+            rate_amount=getattr(line_payload, "rate_amount", None),
+            flat_amount=getattr(line_payload, "expected_amount", None),
+            inputs=getattr(line_payload, "calculation_input_snapshot_json", None),
+            context=self._calculation_context_for_document(document, line_payload, version.application_level),
+        )
+        return (
+            version_id,
+            self._calculation_snapshot(profile, version),
+            result["input_snapshot"],
+            dec(getattr(line_payload, "rate_amount", None)) if getattr(line_payload, "rate_amount", None) is not None else None,
+            result["quantity_uom"],
+            result["amount"],
+        )
+
+    def _calculation_context_for_quote(
+        self,
+        quote: QuoteRequest,
+        application_level: str,
+    ) -> dict[str, Decimal]:
+        return {
+            "shipment_count": Decimal("1"),
+            "container_count": dec(quote.container_count),
+            "house_count": Decimal("0"),
+            "po_schedule_line_count": dec(quote.package_count),
+            "quantity": dec(quote.quantity),
+            "weight": dec(quote.gross_weight),
+            "volume": dec(quote.gross_volume_cbm),
+            "chargeable_weight": dec(quote.gross_weight),
+            "duration_hours": Decimal("0"),
+            "duration_days": dec(quote.quantity),
+            "target_count": dec(
+                {
+                    "SHIPMENT": Decimal("1"),
+                    "CONTAINER": quote.container_count,
+                    "HOUSE": Decimal("0"),
+                    "PO_SCHEDULE_LINE": quote.package_count,
+                }.get(application_level, Decimal("0"))
+            ),
+        }
+
+    def _calculation_context_for_document(
+        self,
+        document: ChargeDocument,
+        line_payload: Any,
+        application_level: str,
+    ) -> dict[str, Decimal]:
+        source = document.source_reference_snapshot_json or {}
+        target = getattr(line_payload, "target_reference_snapshot_json", None) or {}
+        target_level = _clean_optional(getattr(line_payload, "target_level", None))
+        shipment_count = Decimal("1")
+        container_count = self._snapshot_decimal(target, source, "container_count", "containers", "target_container_count")
+        house_count = self._snapshot_decimal(target, source, "house_count", "houses", "target_house_count")
+        po_count = self._snapshot_decimal(
+            target,
+            source,
+            "po_schedule_line_count",
+            "package_count",
+            "target_po_schedule_line_count",
+        )
+        if target_level == "CONTAINER" and container_count <= 0:
+            container_count = Decimal("1")
+        if target_level == "HOUSE" and house_count <= 0:
+            house_count = Decimal("1")
+        if target_level == "PO_SCHEDULE_LINE" and po_count <= 0:
+            po_count = Decimal("1")
+        if target_level == "HEADER" and application_level == "SHIPMENT":
+            shipment_count = Decimal("1")
+        quantity = self._snapshot_decimal(target, source, "quantity", "target_quantity")
+        weight = self._snapshot_decimal(target, source, "weight", "gross_weight", "target_weight")
+        volume = self._snapshot_decimal(target, source, "volume", "gross_volume_cbm", "cbm", "target_volume")
+        chargeable_weight = self._snapshot_decimal(
+            target,
+            source,
+            "chargeable_weight",
+            "target_chargeable_weight",
+            "weight",
+            "gross_weight",
+        )
+        duration_hours = self._snapshot_decimal(target, source, "duration_hours", "hours", "target_duration_hours")
+        duration_days = self._snapshot_decimal(target, source, "duration_days", "days", "target_duration_days")
+        return {
+            "shipment_count": shipment_count,
+            "container_count": container_count,
+            "house_count": house_count,
+            "po_schedule_line_count": po_count,
+            "quantity": quantity,
+            "weight": weight,
+            "volume": volume,
+            "chargeable_weight": chargeable_weight,
+            "duration_hours": duration_hours,
+            "duration_days": duration_days,
+            "target_count": dec(
+                {
+                    "SHIPMENT": shipment_count,
+                    "CONTAINER": container_count,
+                    "HOUSE": house_count,
+                    "PO_SCHEDULE_LINE": po_count,
+                }.get(application_level, Decimal("0"))
+            ),
+        }
+
+    def _snapshot_decimal(self, primary: dict[str, Any], secondary: dict[str, Any], *keys: str) -> Decimal:
+        for source in (primary, secondary):
+            for key in keys:
+                value = source.get(key)
+                if value is not None and str(value).strip() != "":
+                    return dec(value)
+        return Decimal("0")
+
+    def _evaluate_calculation_profile(
+        self,
+        version: ChargeCalculationProfileVersion,
+        *,
+        rate_amount: Decimal | int | float | str | None,
+        flat_amount: Decimal | int | float | str | None = None,
+        inputs: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_inputs = {str(key).strip().upper(): value for key, value in (inputs or {}).items()}
+        normalized_context = {str(key).strip().lower(): value for key, value in (context or {}).items()}
+        if version.calculation_method == "FLAT_AMOUNT":
+            amount = self._calculation_decimal(flat_amount)
+            if amount is None:
+                amount = self._calculation_decimal(rate_amount)
+            if amount is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="A flat calculation amount is required.",
+                )
+            return {
+                "amount": money(amount),
+                "quantity": Decimal("1"),
+                "quantity_uom": version.rate_uom,
+                "input_snapshot": {},
+                "audit": {
+                    "calculation_method": "FLAT_AMOUNT",
+                    "rate_amount": str(amount),
+                    "formula": "flat amount",
+                },
+            }
+        rate = self._calculation_decimal(rate_amount)
+        if rate is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A unit rate is required by the calculation profile.",
+            )
+        product = Decimal("1")
+        input_snapshot: dict[str, Any] = {}
+        audit_factors: list[dict[str, Any]] = []
+        for factor in sorted(version.factors, key=lambda item: (item.sequence, item.id)):
+            value: Decimal | None = None
+            source = "OBJECT_CONTEXT"
+            if factor.resolver in CALCULATION_TRANSACTION_INPUT_RESOLVERS:
+                value = self._calculation_input_value(normalized_inputs.get(factor.factor_code))
+                source = "TRANSACTION_INPUT"
+                if value is None:
+                    value = self._calculation_input_value(normalized_inputs.get(factor.resolver))
+            if value is None:
+                context_key = self._factor_context_key(factor.resolver, version.application_level)
+                if context_key is not None:
+                    value = self._calculation_decimal(normalized_context.get(context_key))
+                    source = "OBJECT_CONTEXT"
+            if value is None and factor.resolver == "FIXED_VALUE":
+                value = self._calculation_decimal(factor.default_value)
+                source = "PROFILE_DEFAULT"
+            if value is None and factor.default_value is not None:
+                value = self._calculation_decimal(factor.default_value)
+                source = "PROFILE_DEFAULT"
+            if value is None or value <= 0:
+                if factor.is_required:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Calculation factor {factor.factor_label} ({factor.factor_code}) is required.",
+                    )
+                value = Decimal("1")
+                source = "OPTIONAL_IDENTITY"
+            product *= value
+            input_snapshot[factor.factor_code] = {
+                "value": str(value),
+                "uom": factor.uom,
+                "resolver": factor.resolver,
+                "source": source,
+            }
+            audit_factors.append(input_snapshot[factor.factor_code] | {"factor_code": factor.factor_code})
+        quantity = product.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        return {
+            "amount": money(rate * quantity),
+            "quantity": quantity,
+            "quantity_uom": version.rate_uom,
+            "input_snapshot": input_snapshot,
+            "audit": {
+                "calculation_method": version.calculation_method,
+                "rate_amount": str(rate),
+                "quantity": str(quantity),
+                "factors": audit_factors,
+            },
+        }
+
+    def _calculation_decimal(self, value: Any) -> Decimal | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            value = value.get("value")
+        if value is None or str(value).strip() == "":
+            return None
+        return Decimal(str(value))
+
+    def _calculation_input_value(self, value: Any) -> Decimal | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            value = value.get("value")
+        return self._calculation_decimal(value)
+
+    def _factor_context_key(self, resolver: str, application_level: str) -> str | None:
+        normalized = resolver.strip().upper()
+        if normalized == "TARGET_COUNT":
+            return {
+                "SHIPMENT": "shipment_count",
+                "CONTAINER": "container_count",
+                "HOUSE": "house_count",
+                "PO_SCHEDULE_LINE": "po_schedule_line_count",
+            }.get(application_level.strip().upper())
+        return {
+            "CONTAINER_COUNT": "container_count",
+            "HOUSE_COUNT": "house_count",
+            "PO_SCHEDULE_LINE_COUNT": "po_schedule_line_count",
+            "QUANTITY": "quantity",
+            "WEIGHT": "weight",
+            "VOLUME": "volume",
+            "CHARGEABLE_WEIGHT": "chargeable_weight",
+            "DURATION_HOURS": "duration_hours",
+            "DURATION_DAYS": "duration_days",
+        }.get(normalized)
+
+    def _calculation_snapshot(
+        self,
+        profile: ChargeCalculationProfile,
+        version: ChargeCalculationProfileVersion,
+    ) -> dict[str, Any]:
+        return {
+            "profile_id": profile.id,
+            "profile_code": profile.profile_code,
+            "profile_name": profile.profile_name,
+            "profile_version_id": version.id,
+            "version_number": version.version_number,
+            "application_level": version.application_level,
+            "calculation_method": version.calculation_method,
+            "rate_uom": version.rate_uom,
+            "missing_factor_policy": version.missing_factor_policy,
+            "factors": [
+                {
+                    "sequence": factor.sequence,
+                    "factor_code": factor.factor_code,
+                    "factor_label": factor.factor_label,
+                    "resolver": factor.resolver,
+                    "uom": factor.uom,
+                    "is_required": factor.is_required,
+                    "default_value": str(factor.default_value) if factor.default_value is not None else None,
+                }
+                for factor in sorted(version.factors, key=lambda item: (item.sequence, item.id))
+            ],
+        }
 
     def _matching_contracts(self, quote: QuoteRequest, *, contract_role: str) -> list[RateContract]:
         return [
@@ -2888,15 +3549,137 @@ class ChargeManagementService:
             **normalized,
         )
 
+    def _normalized_calculation_profile_version_payload(
+        self,
+        payload: ChargeCalculationProfileVersionCreate,
+    ) -> dict[str, Any]:
+        application_level = (payload.application_level or "").strip().upper()
+        if application_level not in CALCULATION_PROFILE_APPLICATION_LEVELS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported calculation profile application_level: {payload.application_level}",
+            )
+        calculation_method = (payload.calculation_method or "").strip().upper()
+        if calculation_method not in CALCULATION_PROFILE_METHODS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported calculation profile method: {payload.calculation_method}",
+            )
+        missing_factor_policy = (payload.missing_factor_policy or "").strip().upper()
+        if missing_factor_policy != "BLOCK":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported calculation profile missing_factor_policy.",
+            )
+        factors: list[dict[str, Any]] = []
+        factor_codes: set[str] = set()
+        sequences: set[int] = set()
+        for item in payload.factors:
+            factor_code = item.factor_code.strip().upper()
+            factor_label = item.factor_label.strip()
+            resolver = item.resolver.strip().upper()
+            if resolver not in CALCULATION_PROFILE_FACTOR_RESOLVERS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported factor resolver: {item.resolver}.",
+                )
+            if not factor_code or not factor_label:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Calculation profile factors require factor_code and factor_label.",
+                )
+            if factor_code in factor_codes:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Duplicate calculation factor code: {factor_code}.",
+                )
+            if int(item.sequence) in sequences:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Duplicate calculation factor sequence: {item.sequence}.",
+                )
+            factor_codes.add(factor_code)
+            sequences.add(int(item.sequence))
+            factors.append(
+                {
+                    "sequence": int(item.sequence),
+                    "factor_code": factor_code,
+                    "factor_label": factor_label,
+                    "resolver": resolver,
+                    "uom": _clean_optional(item.uom.strip().upper() if item.uom else None),
+                    "is_required": bool(item.is_required),
+                    "default_value": item.default_value,
+                }
+            )
+        if calculation_method == "RATE_TIMES_PRODUCT" and not factors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Calculation profile requires at least one factor.",
+            )
+        return {
+            "effective_from": payload.effective_from,
+            "effective_to": payload.effective_to,
+            "application_level": application_level,
+            "calculation_method": calculation_method,
+            "rate_uom": _clean_optional(payload.rate_uom.strip().upper() if payload.rate_uom else None),
+            "missing_factor_policy": missing_factor_policy,
+            "factors": sorted(factors, key=lambda item: (item["sequence"], item["factor_code"])),
+        }
+
+    def _calculation_profile_version_from_payload(
+        self,
+        *,
+        profile_id: int,
+        payload: ChargeCalculationProfileVersionCreate,
+        version_number: int,
+    ) -> ChargeCalculationProfileVersion:
+        normalized = self._normalized_calculation_profile_version_payload(payload)
+        version_id = self.repository.next_id("calculation_profile_version")
+        return ChargeCalculationProfileVersion(
+            id=version_id,
+            profile_id=profile_id,
+            version_number=version_number,
+            effective_from=normalized["effective_from"],
+            effective_to=normalized["effective_to"],
+            application_level=normalized["application_level"],
+            calculation_method=normalized["calculation_method"],
+            rate_uom=normalized["rate_uom"],
+            missing_factor_policy=normalized["missing_factor_policy"],
+            factors=[
+                ChargeCalculationProfileFactor(
+                    id=self.repository.next_id("calculation_profile_factor"),
+                    profile_version_id=version_id,
+                    sequence=item["sequence"],
+                    factor_code=item["factor_code"],
+                    factor_label=item["factor_label"],
+                    resolver=item["resolver"],  # type: ignore[arg-type]
+                    uom=item["uom"],
+                    is_required=item["is_required"],
+                    default_value=item["default_value"],
+                )
+                for item in normalized["factors"]
+            ],
+        )
+
     def _contract_line_from_payload(self, *, contract_id: int, line_payload: Any) -> ContractLine:
         allocation_profile_id, allocation_profile_version_id, _, _ = self._resolve_allocation_profile_reference(
             getattr(line_payload, "allocation_profile_id", None),
             getattr(line_payload, "allocation_profile_version_id", None),
         )
+        calculation_profile_id = self._resolve_calculation_profile_identity_reference(
+            getattr(line_payload, "calculation_profile_id", None)
+        )
         return ContractLine(
-            **line_payload.model_dump(exclude={"allocation_profile_id", "allocation_profile_version_id"}),
+            **line_payload.model_dump(
+                exclude={
+                    "allocation_profile_id",
+                    "allocation_profile_version_id",
+                    "calculation_profile_id",
+                }
+            ),
             id=self.repository.next_id("contract_line"),
             contract_id=contract_id,
+            calculation_profile_id=calculation_profile_id,
             allocation_profile_id=allocation_profile_id,
             allocation_profile_version_id=allocation_profile_version_id,
         )
@@ -3248,6 +4031,78 @@ class ChargeManagementService:
             ):
                 return True
         return False
+
+    def _published_calculation_profile_versions(
+        self,
+        profile: ChargeCalculationProfile,
+    ) -> list[ChargeCalculationProfileVersion]:
+        return [
+            version
+            for version in profile.versions
+            if version.status == "PUBLISHED"
+        ]
+
+    def _resolve_calculation_profile_identity_reference(self, profile_id: int | None) -> int | None:
+        if profile_id in (None, "", 0):
+            return None
+        return self._require_calculation_profile(int(profile_id)).id
+
+    def _resolve_calculation_profile_reference(
+        self,
+        profile_id: int | None,
+        version_id: int | None,
+    ) -> tuple[int | None, int | None, ChargeCalculationProfile | None, ChargeCalculationProfileVersion | None]:
+        if profile_id in (None, "", 0):
+            profile_id = None
+        else:
+            profile_id = int(profile_id)
+        if version_id in (None, "", 0):
+            version_id = None
+        else:
+            version_id = int(version_id)
+        if version_id is not None:
+            version = self._require_calculation_profile_version(version_id)
+            profile = self._require_calculation_profile(version.profile_id)
+            if profile_id is not None and version.profile_id != profile_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="calculation_profile_version_id does not belong to calculation_profile_id.",
+                )
+            return profile.id, version.id, profile, version
+        if profile_id is None:
+            return None, None, None, None
+        profile = self._require_calculation_profile(profile_id)
+        if profile.published_version_id is not None:
+            version = self._require_calculation_profile_version(profile.published_version_id)
+            return profile.id, version.id, profile, version
+        published = self._published_calculation_profile_versions(profile)
+        if not published:
+            return profile.id, None, profile, None
+        version = sorted(published, key=lambda row: (row.version_number, row.id), reverse=True)[0]
+        return profile.id, version.id, profile, version
+
+    def _require_calculation_profile(self, profile_id: int) -> ChargeCalculationProfile:
+        profile = self.repository.calculation_profiles.get(int(profile_id))
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unknown calculation profile id: {profile_id}",
+            )
+        return profile
+
+    def _require_calculation_profile_version(self, version_id: int) -> ChargeCalculationProfileVersion:
+        version = self.repository.calculation_profile_versions.get(int(version_id))
+        if version is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unknown calculation profile version id: {version_id}",
+            )
+        if version.status not in CALCULATION_PROFILE_VERSION_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Unsupported calculation profile version status: {version.status}",
+            )
+        return version
 
     def _require_business_date_profile(self, profile_id: int) -> BusinessDateProfile:
         profile = self.repository.business_date_profiles.get(int(profile_id))

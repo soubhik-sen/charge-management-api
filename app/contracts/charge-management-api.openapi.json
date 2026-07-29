@@ -1167,6 +1167,555 @@
         "title": "ChargeAllocationProfileVersionCreate",
         "type": "object"
       },
+      "ChargeCalculationProfile": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "profile_code": {
+            "title": "Profile Code",
+            "type": "string"
+          },
+          "profile_name": {
+            "title": "Profile Name",
+            "type": "string"
+          },
+          "published_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Id"
+          },
+          "published_version_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Number"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ChargeCalculationProfileVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "profile_code",
+          "profile_name"
+        ],
+        "title": "ChargeCalculationProfile",
+        "type": "object"
+      },
+      "ChargeCalculationProfileCreate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "initial_version": {
+            "$ref": "#/components/schemas/ChargeCalculationProfileVersionCreate"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "profile_code": {
+            "title": "Profile Code",
+            "type": "string"
+          },
+          "profile_name": {
+            "title": "Profile Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_code",
+          "profile_name",
+          "initial_version"
+        ],
+        "title": "ChargeCalculationProfileCreate",
+        "type": "object"
+      },
+      "ChargeCalculationProfileFactor": {
+        "properties": {
+          "default_value": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "factor_code": {
+            "title": "Factor Code",
+            "type": "string"
+          },
+          "factor_label": {
+            "title": "Factor Label",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_required": {
+            "default": true,
+            "title": "Is Required",
+            "type": "boolean"
+          },
+          "profile_version_id": {
+            "title": "Profile Version Id",
+            "type": "integer"
+          },
+          "resolver": {
+            "enum": [
+              "MANUAL",
+              "TARGET_COUNT",
+              "CONTAINER_COUNT",
+              "HOUSE_COUNT",
+              "PO_SCHEDULE_LINE_COUNT",
+              "QUANTITY",
+              "WEIGHT",
+              "VOLUME",
+              "CHARGEABLE_WEIGHT",
+              "DURATION_HOURS",
+              "DURATION_DAYS",
+              "FIXED_VALUE"
+            ],
+            "title": "Resolver",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          }
+        },
+        "required": [
+          "sequence",
+          "factor_code",
+          "factor_label",
+          "resolver",
+          "id",
+          "profile_version_id"
+        ],
+        "title": "ChargeCalculationProfileFactor",
+        "type": "object"
+      },
+      "ChargeCalculationProfileFactorPayload": {
+        "properties": {
+          "default_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "factor_code": {
+            "title": "Factor Code",
+            "type": "string"
+          },
+          "factor_label": {
+            "title": "Factor Label",
+            "type": "string"
+          },
+          "is_required": {
+            "default": true,
+            "title": "Is Required",
+            "type": "boolean"
+          },
+          "resolver": {
+            "enum": [
+              "MANUAL",
+              "TARGET_COUNT",
+              "CONTAINER_COUNT",
+              "HOUSE_COUNT",
+              "PO_SCHEDULE_LINE_COUNT",
+              "QUANTITY",
+              "WEIGHT",
+              "VOLUME",
+              "CHARGEABLE_WEIGHT",
+              "DURATION_HOURS",
+              "DURATION_DAYS",
+              "FIXED_VALUE"
+            ],
+            "title": "Resolver",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uom"
+          }
+        },
+        "required": [
+          "sequence",
+          "factor_code",
+          "factor_label",
+          "resolver"
+        ],
+        "title": "ChargeCalculationProfileFactorPayload",
+        "type": "object"
+      },
+      "ChargeCalculationProfileListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChargeCalculationProfile"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "ChargeCalculationProfileListResponse",
+        "type": "object"
+      },
+      "ChargeCalculationProfileUpdate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "profile_code": {
+            "title": "Profile Code",
+            "type": "string"
+          },
+          "profile_name": {
+            "title": "Profile Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_code",
+          "profile_name"
+        ],
+        "title": "ChargeCalculationProfileUpdate",
+        "type": "object"
+      },
+      "ChargeCalculationProfileVersion": {
+        "properties": {
+          "application_level": {
+            "enum": [
+              "SHIPMENT",
+              "CONTAINER",
+              "HOUSE",
+              "PO_SCHEDULE_LINE"
+            ],
+            "title": "Application Level",
+            "type": "string"
+          },
+          "calculation_method": {
+            "default": "RATE_TIMES_PRODUCT",
+            "enum": [
+              "FLAT_AMOUNT",
+              "RATE_TIMES_PRODUCT"
+            ],
+            "title": "Calculation Method",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/ChargeCalculationProfileFactor"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lock_version": {
+            "default": 1,
+            "title": "Lock Version",
+            "type": "integer"
+          },
+          "missing_factor_policy": {
+            "const": "BLOCK",
+            "default": "BLOCK",
+            "title": "Missing Factor Policy",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "integer"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "published_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published By"
+          },
+          "rate_uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Uom"
+          },
+          "status": {
+            "default": "DRAFT",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "RETIRED"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "application_level",
+          "id",
+          "profile_id",
+          "version_number"
+        ],
+        "title": "ChargeCalculationProfileVersion",
+        "type": "object"
+      },
+      "ChargeCalculationProfileVersionCreate": {
+        "properties": {
+          "application_level": {
+            "enum": [
+              "SHIPMENT",
+              "CONTAINER",
+              "HOUSE",
+              "PO_SCHEDULE_LINE"
+            ],
+            "title": "Application Level",
+            "type": "string"
+          },
+          "calculation_method": {
+            "default": "RATE_TIMES_PRODUCT",
+            "enum": [
+              "FLAT_AMOUNT",
+              "RATE_TIMES_PRODUCT"
+            ],
+            "title": "Calculation Method",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/ChargeCalculationProfileFactorPayload"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "missing_factor_policy": {
+            "const": "BLOCK",
+            "default": "BLOCK",
+            "title": "Missing Factor Policy",
+            "type": "string"
+          },
+          "rate_uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Uom"
+          }
+        },
+        "required": [
+          "application_level"
+        ],
+        "title": "ChargeCalculationProfileVersionCreate",
+        "type": "object"
+      },
       "ChargeComponent": {
         "properties": {
           "allocation_profile_id": {
@@ -1243,6 +1792,17 @@
           "component_name": {
             "title": "Component Name",
             "type": "string"
+          },
+          "default_calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Calculation Profile Id"
           },
           "default_party_role": {
             "enum": [
@@ -1972,6 +2532,17 @@
             "title": "Component Name",
             "type": "string"
           },
+          "default_calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Calculation Profile Id"
+          },
           "default_party_role": {
             "default": "BOTH",
             "enum": [
@@ -2490,6 +3061,41 @@
             ],
             "title": "Calculation Audit Json"
           },
+          "calculation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Config Snapshot Json"
+          },
+          "calculation_input_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Input Snapshot Json"
+          },
+          "calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Version Id"
+          },
           "charge_component_code": {
             "title": "Charge Component Code",
             "type": "string"
@@ -2715,6 +3321,21 @@
             ],
             "title": "Quantity Uom"
           },
+          "rate_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Amount"
+          },
           "relationship_role": {
             "enum": [
               "PAYER",
@@ -2891,6 +3512,41 @@
               }
             ],
             "title": "Calculation Audit Json"
+          },
+          "calculation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Config Snapshot Json"
+          },
+          "calculation_input_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Input Snapshot Json"
+          },
+          "calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Version Id"
           },
           "charge_component_code": {
             "title": "Charge Component Code",
@@ -3127,6 +3783,21 @@
               }
             ],
             "title": "Quantity Uom"
+          },
+          "rate_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Amount"
           },
           "relationship_role": {
             "enum": [
@@ -3741,6 +4412,41 @@
             ],
             "title": "Calculation Audit Json"
           },
+          "calculation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Config Snapshot Json"
+          },
+          "calculation_input_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Input Snapshot Json"
+          },
+          "calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Version Id"
+          },
           "charge_component_code": {
             "title": "Charge Component Code",
             "type": "string"
@@ -3990,6 +4696,18 @@
               }
             ],
             "title": "Quantity Uom"
+          },
+          "rate_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Amount"
           },
           "relationship_role": {
             "enum": [
@@ -4377,6 +5095,63 @@
             "title": "Business Date Shipment Scopes",
             "type": "array"
           },
+          "calculation_profile_application_levels": {
+            "default": [
+              "SHIPMENT",
+              "CONTAINER",
+              "HOUSE",
+              "PO_SCHEDULE_LINE"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculation Profile Application Levels",
+            "type": "array"
+          },
+          "calculation_profile_factor_resolvers": {
+            "default": [
+              "MANUAL",
+              "TARGET_COUNT",
+              "CONTAINER_COUNT",
+              "HOUSE_COUNT",
+              "PO_SCHEDULE_LINE_COUNT",
+              "QUANTITY",
+              "WEIGHT",
+              "VOLUME",
+              "CHARGEABLE_WEIGHT",
+              "DURATION_HOURS",
+              "DURATION_DAYS",
+              "FIXED_VALUE"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculation Profile Factor Resolvers",
+            "type": "array"
+          },
+          "calculation_profile_methods": {
+            "default": [
+              "FLAT_AMOUNT",
+              "RATE_TIMES_PRODUCT"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculation Profile Methods",
+            "type": "array"
+          },
+          "calculation_profile_version_statuses": {
+            "default": [
+              "DRAFT",
+              "PUBLISHED",
+              "RETIRED"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculation Profile Version Statuses",
+            "type": "array"
+          },
           "charge_line_roles": {
             "default": [
               "CALCULATION",
@@ -4603,6 +5378,17 @@
             ],
             "title": "Allocation Profile Version Id"
           },
+          "calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Id"
+          },
           "calculation_template_id": {
             "anyOf": [
               {
@@ -4759,6 +5545,17 @@
               }
             ],
             "title": "Allocation Profile Version Id"
+          },
+          "calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Id"
           },
           "calculation_template_id": {
             "anyOf": [
@@ -6944,6 +7741,41 @@
             "title": "Basis",
             "type": "string"
           },
+          "calculation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Config Snapshot Json"
+          },
+          "calculation_input_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Input Snapshot Json"
+          },
+          "calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Version Id"
+          },
           "charge_component_code": {
             "title": "Charge Component Code",
             "type": "string"
@@ -7022,6 +7854,12 @@
             ],
             "title": "Pinned Allocation Snapshot Json"
           },
+          "quantity": {
+            "default": "1",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
           "quantity_uom": {
             "anyOf": [
               {
@@ -7036,6 +7874,18 @@
           "quote_option_id": {
             "title": "Quote Option Id",
             "type": "integer"
+          },
+          "rate_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Amount"
           },
           "relationship_role": {
             "enum": [
@@ -8175,6 +9025,17 @@
             "title": "Basis",
             "type": "string"
           },
+          "calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Id"
+          },
           "charge_component_code": {
             "title": "Charge Component Code",
             "type": "string"
@@ -8373,6 +9234,17 @@
             "default": "SHIPMENT",
             "title": "Basis",
             "type": "string"
+          },
+          "calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Id"
           },
           "charge_component_code": {
             "title": "Charge Component Code",
@@ -11189,6 +12061,760 @@
           }
         ],
         "summary": "Create Business Date Profile Version",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/calculation-profile-versions/{version_id}": {
+      "put": {
+        "operationId": "update_calculation_profile_version_api_v1_charge_management_calculation_profile_versions__version_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChargeCalculationProfileVersionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationProfileVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Calculation Profile Version",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/calculation-profile-versions/{version_id}/publish": {
+      "post": {
+        "operationId": "publish_calculation_profile_version_api_v1_charge_management_calculation_profile_versions__version_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Calculation Profile Version",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/calculation-profiles": {
+      "get": {
+        "operationId": "list_calculation_profiles_api_v1_charge_management_calculation_profiles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "application_level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Application Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationProfileListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Calculation Profiles",
+        "tags": [
+          "Charge Management"
+        ]
+      },
+      "post": {
+        "operationId": "create_calculation_profile_api_v1_charge_management_calculation_profiles_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChargeCalculationProfileCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Calculation Profile",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/calculation-profiles/{profile_id}": {
+      "get": {
+        "operationId": "get_calculation_profile_api_v1_charge_management_calculation_profiles__profile_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Calculation Profile",
+        "tags": [
+          "Charge Management"
+        ]
+      },
+      "put": {
+        "operationId": "update_calculation_profile_api_v1_charge_management_calculation_profiles__profile_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChargeCalculationProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Calculation Profile",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/calculation-profiles/{profile_id}/versions": {
+      "post": {
+        "operationId": "create_calculation_profile_version_api_v1_charge_management_calculation_profiles__profile_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChargeCalculationProfileVersionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Calculation Profile Version",
         "tags": [
           "Charge Management"
         ]

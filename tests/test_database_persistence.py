@@ -42,6 +42,38 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
     )
     assert allocation.status_code == 201, allocation.text
 
+    calculation = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "RESTART_PER_CONTAINER",
+            "profile_name": "Restart Per Container",
+            "initial_version": {
+                "application_level": "CONTAINER",
+                "calculation_method": "RATE_TIMES_PRODUCT",
+                "rate_uom": "USD",
+                "factors": [
+                    {
+                        "sequence": 10,
+                        "factor_code": "CONTAINER_COUNT",
+                        "factor_label": "Container count",
+                        "resolver": "CONTAINER_COUNT",
+                        "uom": "EA",
+                    }
+                ],
+            },
+        },
+    )
+    assert calculation.status_code == 201, calculation.text
+    calculation_profile = calculation.json()
+    calculation_version_id = calculation_profile["versions"][0]["id"]
+
+    calculation_publish = client.post(
+        f"/api/v1/charge-management/calculation-profile-versions/{calculation_version_id}/publish",
+        headers=AUTH,
+    )
+    assert calculation_publish.status_code == 200, calculation_publish.text
+
     date_profile = client.post(
         "/api/v1/charge-management/business-date-profiles",
         headers=AUTH,
@@ -89,20 +121,43 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
     )
     assert allocation_update.status_code == 200, allocation_update.text
 
+    component = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            "component_code": "RESTART_COMPONENT",
+            "component_name": "Restart Component",
+            "category": "FREIGHT",
+            "default_party_role": "PAYEE",
+            "charge_context": "TRANSPORT",
+            "calculation_basis": "PER_CONTAINER",
+            "default_calculation_profile_id": calculation_profile["id"],
+        },
+    )
+    assert component.status_code == 201, component.text
+
     # A fresh session and fresh services simulate process reconstruction: no
     # in-memory state from the API calls is available to these instances.
     with SessionLocal() as db:
         domain_service = ChargeManagementService(SqlAlchemyChargeRepository(db))
         reloaded_allocation = domain_service.get_allocation_profile(allocation.json()["id"])
+        reloaded_calculation = domain_service.get_calculation_profile(calculation_profile["id"])
         reloaded_date_profile = domain_service.get_business_date_profile(date_profile.json()["id"])
+        reloaded_component = next(
+            item for item in domain_service.list_components(limit=200, offset=0).items if item.id == component.json()["id"]
+        )
         reloaded_rate = FxRateService(db).get_rate(rate.json()["id"])
 
     assert reloaded_allocation.profile_name == "Restart Weight Allocation Updated"
     assert reloaded_allocation.versions[0].house_to_item_driver == "WEIGHT"
+    assert reloaded_calculation.profile_code == "RESTART_PER_CONTAINER"
+    assert reloaded_calculation.published_version_id == calculation_version_id
+    assert reloaded_calculation.versions[0].factors[0].resolver == "CONTAINER_COUNT"
     assert reloaded_date_profile.profile_code == "RESTART_DATE"
     assert [step.date_key for step in reloaded_date_profile.versions[0].steps] == [
         "SHIPPED_ON_BOARD_DATE",
         "DOCUMENT_DATE",
     ]
+    assert reloaded_component.default_calculation_profile_id == calculation_profile["id"]
     assert reloaded_rate.source_code == "RESTART_BANK"
     assert str(reloaded_rate.rate) == "0.8600000000"

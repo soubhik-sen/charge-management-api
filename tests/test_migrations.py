@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.infrastructure.sqlalchemy_repository import DatabaseRepositoryControl
 
 
-def test_fresh_sqlite_database_migrates_to_fx_head(tmp_path, monkeypatch) -> None:
+def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "charge_management.sqlite"
     database_url = f"sqlite:///{database_path.as_posix()}"
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -28,6 +28,9 @@ def test_fresh_sqlite_database_migrates_to_fx_head(tmp_path, monkeypatch) -> Non
     assert "charge_fx_rate_source" in tables
     assert "charge_fx_rate" in tables
     assert "charge_allocation_profile" in tables
+    assert "charge_calculation_profile" in tables
+    assert "charge_calculation_profile_version" in tables
+    assert "charge_calculation_profile_factor" in tables
     assert "charge_business_date_profile" in tables
     line_columns = {column["name"] for column in inspector.get_columns("charge_line")}
     assert {
@@ -35,14 +38,37 @@ def test_fresh_sqlite_database_migrates_to_fx_head(tmp_path, monkeypatch) -> Non
         "exchange_rate_source_code",
         "exchange_rate_type",
         "exchange_rate_method",
+        "rate_amount",
+        "calculation_profile_version_id",
+        "calculation_config_snapshot_json",
+        "calculation_input_snapshot_json",
     } <= line_columns
+    quote_line_columns = {column["name"] for column in inspector.get_columns("charge_quote_option_line")}
+    assert {
+        "rate_amount",
+        "quantity",
+        "quantity_uom",
+        "calculation_profile_version_id",
+        "calculation_config_snapshot_json",
+        "calculation_input_snapshot_json",
+    } <= quote_line_columns
+    component_columns = {column["name"] for column in inspector.get_columns("charge_component")}
+    assert "default_calculation_profile_id" in component_columns
+    contract_line_columns = {column["name"] for column in inspector.get_columns("charge_contract_line")}
+    assert "calculation_profile_id" in contract_line_columns
+    rate_entry_columns = {column["name"] for column in inspector.get_columns("charge_rate_book_entry")}
+    assert "calculation_profile_id" in rate_entry_columns
     with engine.connect() as connection:
         version = connection.execute(text("select version_num from alembic_version")).scalar_one()
         source_code = connection.execute(
             text("select source_code from charge_fx_rate_source where source_code = 'MANUAL'")
         ).scalar_one()
-    assert version == "0012_fx_rates_and_sequences"
+        flat_count = connection.execute(
+            text("select count(*) from charge_calculation_profile where profile_code = 'FLAT_AMOUNT'")
+        ).scalar_one()
+    assert version == "0013_add_charge_calculation_profiles"
     assert source_code == "MANUAL"
+    assert flat_count == 1
 
     # Exercise cyclic profile/version references with immediate FK checks, which
     # is closer to PostgreSQL behavior than SQLite's default configuration.
@@ -63,9 +89,11 @@ def test_fx_migration_round_trip(tmp_path, monkeypatch) -> None:
     command.downgrade(config, "0011_add_business_date_profiles")
     engine = create_engine(database_url)
     assert "charge_fx_rate" not in inspect(engine).get_table_names()
+    assert "charge_calculation_profile" not in inspect(engine).get_table_names()
     engine.dispose()
 
     command.upgrade(config, "head")
     engine = create_engine(database_url)
     assert "charge_fx_rate" in inspect(engine).get_table_names()
+    assert "charge_calculation_profile" in inspect(engine).get_table_names()
     engine.dispose()

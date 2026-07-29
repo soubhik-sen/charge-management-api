@@ -26,6 +26,22 @@ def test_requires_bearer_token() -> None:
 def test_initialization_data_has_seeded_components() -> None:
     response = client.get("/api/v1/charge-management/initialization-data", headers=AUTH)
     assert response.status_code == 200
+    assert set(response.json()["reference_data"]["calculation_profile_application_levels"]) == {
+        "CONTAINER",
+        "HOUSE",
+        "PO_SCHEDULE_LINE",
+        "SHIPMENT",
+    }
+    assert set(response.json()["reference_data"]["calculation_profile_methods"]) == {
+        "FLAT_AMOUNT",
+        "RATE_TIMES_PRODUCT",
+    }
+    assert "CONTAINER_COUNT" in response.json()["reference_data"]["calculation_profile_factor_resolvers"]
+    assert response.json()["reference_data"]["calculation_profile_version_statuses"] == [
+        "DRAFT",
+        "PUBLISHED",
+        "RETIRED",
+    ]
     codes = {row["component_code"] for row in response.json()["components"]}
     assert "BASE_FREIGHT" in codes
     assert "MARGIN_MARKUP" in codes
@@ -134,6 +150,322 @@ def test_charge_component_crud_and_search() -> None:
     )
     assert active_only.status_code == 200, active_only.text
     assert active_only.json()["total"] == 0
+
+
+def test_calculation_profile_lifecycle_and_server_side_rating_snapshot() -> None:
+    seeded = client.get("/api/v1/charge-management/calculation-profiles", headers=AUTH)
+    assert seeded.status_code == 200, seeded.text
+    assert seeded.json()["total"] == 8
+    seeded_codes = {row["profile_code"] for row in seeded.json()["items"]}
+    assert {"FLAT_AMOUNT", "PER_CONTAINER", "PER_DAY"} <= seeded_codes
+
+    created = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "CONTAINER_RATE_ONLY",
+            "profile_name": "Container Rate Only",
+            "initial_version": {
+                "application_level": "CONTAINER",
+                "calculation_method": "RATE_TIMES_PRODUCT",
+                "rate_uom": "USD",
+                "factors": [
+                    {
+                        "sequence": 10,
+                        "factor_code": "CONTAINER_COUNT",
+                        "factor_label": "Container count",
+                        "resolver": "CONTAINER_COUNT",
+                        "uom": "EA",
+                    }
+                ],
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    version_id = profile["versions"][0]["id"]
+    assert profile["published_version_id"] is None
+    assert profile["versions"][0]["status"] == "DRAFT"
+    assert profile["versions"][0]["factors"][0]["resolver"] == "CONTAINER_COUNT"
+
+    updated_profile = client.put(
+        f"/api/v1/charge-management/calculation-profiles/{profile['id']}",
+        headers=AUTH,
+        json={
+            "profile_code": "CONTAINER_RATE_ONLY",
+            "profile_name": "Container Rate",
+            "description": "Container-based rate profile",
+        },
+    )
+    assert updated_profile.status_code == 200, updated_profile.text
+    assert updated_profile.json()["profile_name"] == "Container Rate"
+
+    updated_version = client.put(
+        f"/api/v1/charge-management/calculation-profile-versions/{version_id}",
+        headers=AUTH,
+        json={
+            "application_level": "CONTAINER",
+            "calculation_method": "RATE_TIMES_PRODUCT",
+            "rate_uom": "USD",
+            "factors": [
+                {
+                    "sequence": 10,
+                    "factor_code": "CONTAINER_COUNT",
+                    "factor_label": "Eligible container count",
+                    "resolver": "CONTAINER_COUNT",
+                    "uom": "EA",
+                }
+            ],
+        },
+    )
+    assert updated_version.status_code == 200, updated_version.text
+    assert updated_version.json()["factors"][0]["factor_label"] == "Eligible container count"
+
+    published = client.post(
+        f"/api/v1/charge-management/calculation-profile-versions/{version_id}/publish",
+        headers=AUTH,
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["published_version_id"] == version_id
+    assert published.json()["versions"][0]["status"] == "PUBLISHED"
+
+    component = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            "component_code": "CONTAINER_RATE_TEST",
+            "component_name": "Container Rate Test",
+            "category": "FREIGHT",
+            "default_party_role": "PAYEE",
+            "charge_context": "TRANSPORT",
+            "calculation_basis": "PER_CONTAINER",
+            "default_calculation_profile_id": profile["id"],
+        },
+    )
+    assert component.status_code == 201, component.text
+    assert component.json()["default_calculation_profile_id"] == profile["id"]
+
+    rate_book = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RB-CALC-001",
+            "rate_book_name": "Calculation profile rates",
+            "currency": "USD",
+            "entries": [
+                {
+                    "charge_component_code": "CONTAINER_RATE_TEST",
+                    "rate_amount": "25.00",
+                    "basis": "CONTAINER",
+                    "currency": "USD",
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "calculation_profile_id": profile["id"],
+                }
+            ],
+        },
+    )
+    assert rate_book.status_code == 201, rate_book.text
+    assert rate_book.json()["entries"][0]["calculation_profile_id"] == profile["id"]
+
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": "CALC-PAYEE-001",
+            "contract_name": "Calculation Payee Contract",
+            "contract_role": "PAYEE",
+            "payer_party_ref": "party:customer:20",
+            "payee_party_ref": "party:platform:10",
+            "party_role_ref": "PAYEE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "charge_component_code": "CONTAINER_RATE_TEST",
+                    "rate_book_id": rate_book.json()["id"],
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "calculation_profile_id": profile["id"],
+                }
+            ],
+        },
+    )
+    assert contract.status_code == 201, contract.text
+    assert contract.json()["lines"][0]["calculation_profile_id"] == profile["id"]
+
+    release = client.post(
+        f"/api/v1/charge-management/contracts/{contract.json()['id']}/release",
+        headers=AUTH,
+    )
+    assert release.status_code == 200, release.text
+
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "source_object_type": "MANUAL",
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BRSSZ",
+            "destination_code": "USNYC",
+            "mode": "OCEAN",
+            "currency": "USD",
+            "container_count": "2",
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    quote_id = quote.json()["id"]
+    _submit_quote(quote_id)
+
+    rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/rate",
+        headers=AUTH,
+    )
+    assert rated.status_code == 200, rated.text
+    option_line = rated.json()["options"][0]["lines"][0]
+    assert option_line["charge_component_code"] == "CONTAINER_RATE_TEST"
+    assert option_line["rate_amount"] == "25.000000"
+    assert option_line["quantity"] == "2.000000"
+    assert option_line["amount"] == "50.00"
+    assert option_line["calculation_profile_version_id"] == version_id
+    assert option_line["calculation_config_snapshot_json"]["calculation_method"] == "RATE_TIMES_PRODUCT"
+    assert option_line["calculation_input_snapshot_json"]["CONTAINER_COUNT"]["value"] == "2"
+
+
+def test_charge_document_uses_default_flat_calculation_profile() -> None:
+    created = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "MANUAL_FLAT_ONLY",
+            "profile_name": "Manual Flat Only",
+            "initial_version": {
+                "application_level": "SHIPMENT",
+                "calculation_method": "FLAT_AMOUNT",
+                "rate_uom": "USD",
+                "factors": [],
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    version_id = profile["versions"][0]["id"]
+    published = client.post(
+        f"/api/v1/charge-management/calculation-profile-versions/{version_id}/publish",
+        headers=AUTH,
+    )
+    assert published.status_code == 200, published.text
+
+    component = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            "component_code": "FLAT_PROFILE_COMPONENT",
+            "component_name": "Flat Profile Component",
+            "category": "SURCHARGE",
+            "default_party_role": "PAYER",
+            "charge_context": "TRANSPORT",
+            "calculation_basis": "FLAT",
+            "default_calculation_profile_id": profile["id"],
+        },
+    )
+    assert component.status_code == 201, component.text
+
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "document_number": "CHG-CALC-001",
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYER",
+                    "charge_component_code": "FLAT_PROFILE_COMPONENT",
+                    "description": "Server-side flat evaluation",
+                    "expected_amount": "999.99",
+                    "rate_amount": "45.50",
+                    "currency": "USD",
+                    "basis": "FLAT",
+                }
+            ],
+        },
+    )
+    assert document.status_code == 201, document.text
+    line = document.json()["lines"][0]
+    assert line["rate_amount"] == "45.50"
+    assert line["expected_amount"] == "999.99"
+    assert line["calculation_profile_version_id"] == version_id
+    assert line["calculation_config_snapshot_json"]["calculation_method"] == "FLAT_AMOUNT"
+
+
+def test_charge_document_explicit_profile_uses_server_object_axes() -> None:
+    profiles = client.get(
+        "/api/v1/charge-management/calculation-profiles?limit=100",
+        headers=AUTH,
+    )
+    assert profiles.status_code == 200, profiles.text
+    by_code = {row["profile_code"]: row for row in profiles.json()["items"]}
+    flat_profile = by_code["FLAT_AMOUNT"]
+    compound_profile = by_code["PER_CONTAINER_PER_HOUR"]
+    compound_version_id = compound_profile["published_version_id"]
+
+    component = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            "component_code": "CONTAINER_HOURLY_TEST",
+            "component_name": "Container Hourly Test",
+            "category": "SURCHARGE",
+            "default_party_role": "PAYER",
+            "charge_context": "TRANSPORT",
+            "calculation_basis": "FLAT",
+            "default_calculation_profile_id": flat_profile["id"],
+        },
+    )
+    assert component.status_code == 201, component.text
+
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "document_number": "CHG-CALC-EXPLICIT-001",
+            "customer_id": 20,
+            "currency": "USD",
+            "source_reference_snapshot_json": {"container_count": "3"},
+            "lines": [
+                {
+                    "relationship_role": "PAYER",
+                    "charge_component_code": "CONTAINER_HOURLY_TEST",
+                    "expected_amount": "1.00",
+                    "rate_amount": "12.00",
+                    "currency": "USD",
+                    "basis": "CONTAINER_HOUR",
+                    "calculation_profile_version_id": compound_version_id,
+                    "calculation_input_snapshot_json": {
+                        "CONTAINER_COUNT": {"value": "99"},
+                        "DURATION_HOURS": {"value": "8"},
+                    },
+                }
+            ],
+        },
+    )
+    assert document.status_code == 201, document.text
+    line = document.json()["lines"][0]
+    assert line["expected_amount"] == "288.00"
+    assert line["calculation_profile_version_id"] == compound_version_id
+    assert line["calculation_input_snapshot_json"]["CONTAINER_COUNT"] == {
+        "value": "3",
+        "uom": "CONTAINER",
+        "resolver": "CONTAINER_COUNT",
+        "source": "OBJECT_CONTEXT",
+    }
+    assert line["calculation_input_snapshot_json"]["DURATION_HOURS"]["value"] == "8"
+    assert line["calculation_input_snapshot_json"]["DURATION_HOURS"]["source"] == "TRANSACTION_INPUT"
 
 
 def test_component_alias_crud_and_search() -> None:
@@ -1960,6 +2292,12 @@ def test_openapi_exposes_core_paths() -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
     paths = response.json()["paths"]
+    assert "/api/v1/charge-management/calculation-profiles" in paths
+    assert "post" in paths["/api/v1/charge-management/calculation-profiles"]
+    assert "/api/v1/charge-management/calculation-profiles/{profile_id}" in paths
+    assert "/api/v1/charge-management/calculation-profiles/{profile_id}/versions" in paths
+    assert "/api/v1/charge-management/calculation-profile-versions/{version_id}" in paths
+    assert "/api/v1/charge-management/calculation-profile-versions/{version_id}/publish" in paths
     assert "/api/v1/charge-management/allocation-profiles" in paths
     assert "post" in paths["/api/v1/charge-management/allocation-profiles"]
     assert "/api/v1/charge-management/allocation-profiles/{profile_id}/versions" in paths
@@ -2010,6 +2348,7 @@ def test_openapi_exposes_core_paths() -> None:
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     assert contract["info"]["title"] == "Charge Management API"
     assert "/api/v1/charge-management/rate-books" in contract["paths"]
+    assert "/api/v1/charge-management/calculation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/allocation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/business-date-profiles" in contract["paths"]
     assert "get" in contract["paths"]["/api/v1/charge-management/rate-books"]
@@ -2039,8 +2378,12 @@ def test_openapi_exposes_core_paths() -> None:
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeComponentPayload"]["properties"]
     assert "allocation_profile_id" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
+    assert "default_calculation_profile_id" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
     assert "business_date_policy_mode" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
     assert "business_date_profile_id" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
+    assert "profile_code" in contract["components"]["schemas"]["ChargeCalculationProfile"]["properties"]
+    assert "factors" in contract["components"]["schemas"]["ChargeCalculationProfileVersion"]["properties"]
+    assert "resolver" in contract["components"]["schemas"]["ChargeCalculationProfileFactor"]["properties"]
     assert "allocation_override_mode" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
     assert "final_posting_level" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
     assert "override_final_posting_level" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
@@ -2055,6 +2398,11 @@ def test_openapi_exposes_core_paths() -> None:
     assert "shipment_scope" in contract["components"]["schemas"]["ChargeDocument"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    assert "calculation_profile_version_id" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
+    assert "rate_amount" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    assert "calculation_profile_version_id" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    assert "calculation_config_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    assert "calculation_input_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "pinned_allocation_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
 
 

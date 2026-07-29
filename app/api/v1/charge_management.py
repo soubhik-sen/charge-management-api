@@ -16,6 +16,12 @@ from app.domain.models import (
     ChargeAllocationProfileUpdate,
     ChargeAllocationProfileVersion,
     ChargeAllocationProfileVersionCreate,
+    ChargeCalculationProfile,
+    ChargeCalculationProfileCreate,
+    ChargeCalculationProfileListResponse,
+    ChargeCalculationProfileUpdate,
+    ChargeCalculationProfileVersion,
+    ChargeCalculationProfileVersionCreate,
     BusinessDateProfile,
     BusinessDateProfileAssignment,
     BusinessDateProfileAssignmentCreate,
@@ -334,6 +340,82 @@ def publish_allocation_profile_version(
 ) -> ChargeAllocationProfile:
     _allow(principal, "charge.allocation_profiles.versions.publish")
     return service.publish_allocation_profile_version(version_id)
+
+
+@router.get("/calculation-profiles", response_model=ChargeCalculationProfileListResponse)
+def list_calculation_profiles(
+    q: str | None = Query(default=None),
+    application_level: str | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationProfileListResponse:
+    _allow(principal, "charge.calculation_profiles.list")
+    return service.list_calculation_profiles(
+        search=q,
+        application_level=application_level,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/calculation-profiles", response_model=ChargeCalculationProfile, status_code=201)
+def create_calculation_profile(
+    payload: ChargeCalculationProfileCreate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationProfile:
+    _allow(principal, "charge.calculation_profiles.create")
+    return service.create_calculation_profile(payload)
+
+
+@router.get("/calculation-profiles/{profile_id}", response_model=ChargeCalculationProfile)
+def get_calculation_profile(
+    profile_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationProfile:
+    _allow(principal, "charge.calculation_profiles.read")
+    return service.get_calculation_profile(profile_id)
+
+
+@router.put("/calculation-profiles/{profile_id}", response_model=ChargeCalculationProfile)
+def update_calculation_profile(
+    profile_id: int,
+    payload: ChargeCalculationProfileUpdate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationProfile:
+    _allow(principal, "charge.calculation_profiles.update")
+    return service.update_calculation_profile(profile_id, payload)
+
+
+@router.post("/calculation-profiles/{profile_id}/versions", response_model=ChargeCalculationProfile, status_code=201)
+def create_calculation_profile_version(
+    profile_id: int,
+    payload: ChargeCalculationProfileVersionCreate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationProfile:
+    _allow(principal, "charge.calculation_profiles.versions.create")
+    return service.create_calculation_profile_version(profile_id, payload)
+
+
+@router.put("/calculation-profile-versions/{version_id}", response_model=ChargeCalculationProfileVersion)
+def update_calculation_profile_version(
+    version_id: int,
+    payload: ChargeCalculationProfileVersionCreate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationProfileVersion:
+    _allow(principal, "charge.calculation_profiles.versions.update")
+    return service.update_calculation_profile_version(version_id, payload)
+
+
+@router.post("/calculation-profile-versions/{version_id}/publish", response_model=ChargeCalculationProfile)
+def publish_calculation_profile_version(
+    version_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationProfile:
+    _allow(principal, "charge.calculation_profiles.versions.publish")
+    return service.publish_calculation_profile_version(version_id)
 
 
 @router.get("/business-date-profiles", response_model=BusinessDateProfileListResponse)

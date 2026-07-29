@@ -11,6 +11,7 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 ## Capabilities
 
 - Persistent charge components, aliases, rate books, calculation templates, and contracts.
+- Versioned calculation profiles for flat, single-axis, and compound rate formulas.
 - Versioned allocation profiles with shipment, container, house, and item-level drivers.
 - Versioned business-date profiles with ordered fallback steps and scoped assignments.
 - FX source/rate maintenance plus exact-date, prior-date, direct, and inverse resolution.

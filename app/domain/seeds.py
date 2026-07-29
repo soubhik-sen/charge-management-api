@@ -76,6 +76,113 @@ COMMON_CHARGE_ALLOCATION_PROFILES: tuple[dict[str, object], ...] = (
 )
 
 
+COMMON_CHARGE_CALCULATION_PROFILES: tuple[dict[str, object], ...] = (
+    {
+        "profile_code": "FLAT_AMOUNT",
+        "profile_name": "Flat amount",
+        "description": "Uses the provided amount directly without factor multiplication.",
+        "version_number": 1,
+        "application_level": "SHIPMENT",
+        "calculation_method": "FLAT_AMOUNT",
+        "rate_uom": None,
+        "missing_factor_policy": "BLOCK",
+        "factors": (),
+    },
+    {
+        "profile_code": "QUANTITY",
+        "profile_name": "Rate per quantity",
+        "description": "Multiplies the unit rate by the target quantity.",
+        "version_number": 1,
+        "application_level": "SHIPMENT",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "UNIT",
+        "missing_factor_policy": "BLOCK",
+        "factors": (
+            (1, "QUANTITY", "Quantity", "QUANTITY", "UNIT"),
+        ),
+    },
+    {
+        "profile_code": "WEIGHT",
+        "profile_name": "Rate per weight",
+        "description": "Multiplies the unit rate by gross weight.",
+        "version_number": 1,
+        "application_level": "SHIPMENT",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "KG",
+        "missing_factor_policy": "BLOCK",
+        "factors": (
+            (1, "WEIGHT", "Weight", "WEIGHT", "KG"),
+        ),
+    },
+    {
+        "profile_code": "VOLUME",
+        "profile_name": "Rate per volume",
+        "description": "Multiplies the unit rate by gross volume.",
+        "version_number": 1,
+        "application_level": "SHIPMENT",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "CBM",
+        "missing_factor_policy": "BLOCK",
+        "factors": (
+            (1, "VOLUME", "Volume", "VOLUME", "CBM"),
+        ),
+    },
+    {
+        "profile_code": "PER_CONTAINER",
+        "profile_name": "Rate per container",
+        "description": "Multiplies the unit rate by eligible container count.",
+        "version_number": 1,
+        "application_level": "CONTAINER",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "CONTAINER",
+        "missing_factor_policy": "BLOCK",
+        "factors": (
+            (1, "CONTAINER_COUNT", "Container count", "CONTAINER_COUNT", "CONTAINER"),
+        ),
+    },
+    {
+        "profile_code": "PER_HOUSE",
+        "profile_name": "Rate per house",
+        "description": "Multiplies the unit rate by approved house count.",
+        "version_number": 1,
+        "application_level": "HOUSE",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "HOUSE",
+        "missing_factor_policy": "BLOCK",
+        "factors": (
+            (1, "HOUSE_COUNT", "House count", "HOUSE_COUNT", "HOUSE"),
+        ),
+    },
+    {
+        "profile_code": "PER_DAY",
+        "profile_name": "Rate per day",
+        "description": "Multiplies the unit rate by duration in days.",
+        "version_number": 1,
+        "application_level": "SHIPMENT",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "DAY",
+        "missing_factor_policy": "BLOCK",
+        "factors": (
+            (1, "DURATION_DAYS", "Duration days", "DURATION_DAYS", "DAY"),
+        ),
+    },
+    {
+        "profile_code": "PER_CONTAINER_PER_HOUR",
+        "profile_name": "Rate per container per hour",
+        "description": "Multiplies the unit rate by container count and duration hours.",
+        "version_number": 1,
+        "application_level": "CONTAINER",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "CONTAINER_HOUR",
+        "missing_factor_policy": "BLOCK",
+        "factors": (
+            (1, "CONTAINER_COUNT", "Container count", "CONTAINER_COUNT", "CONTAINER"),
+            (2, "DURATION_HOURS", "Duration hours", "DURATION_HOURS", "HOUR"),
+        ),
+    },
+)
+
+
 COMMON_BUSINESS_DATE_PROFILES: tuple[dict[str, object], ...] = (
     {
         "profile_code": "OCEAN_HOUSE_STANDARD",

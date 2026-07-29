@@ -159,6 +159,7 @@ class ChargeComponentRow(Base):
     business_date_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_business_date_profile.id"))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
+    default_calculation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile.id"))
     is_tax: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
@@ -290,6 +291,100 @@ class ChargeAllocationProfileVersionRow(TimestampMixin, Base):
             name="ck_charge_allocation_profile_version_final_posting_level",
         ),
         Index("ix_charge_allocation_profile_version_profile", "profile_id"),
+    )
+
+
+class ChargeCalculationProfileRow(TimestampMixin, Base):
+    __tablename__ = "charge_calculation_profile"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    profile_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    published_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_calculation_profile_version.id", ondelete="SET NULL")
+    )
+
+    __table_args__ = (
+        Index("ix_charge_calculation_profile_code", "profile_code"),
+    )
+
+
+class ChargeCalculationProfileVersionRow(TimestampMixin, Base):
+    __tablename__ = "charge_calculation_profile_version"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(
+        ForeignKey("charge_calculation_profile.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    effective_from: Mapped[object | None] = mapped_column(Date)
+    effective_to: Mapped[object | None] = mapped_column(Date)
+    application_level: Mapped[str] = mapped_column(String(30), nullable=False)
+    calculation_method: Mapped[str] = mapped_column(String(30), nullable=False, default="RATE_TIMES_PRODUCT")
+    rate_uom: Mapped[str | None] = mapped_column(String(80))
+    missing_factor_policy: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="BLOCK",
+        server_default="BLOCK",
+    )
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    published_by: Mapped[str | None] = mapped_column(String(255))
+
+    __table_args__ = (
+        UniqueConstraint("profile_id", "version_number", name="uq_charge_calculation_profile_version_number"),
+        CheckConstraint(
+            "status in ('DRAFT', 'PUBLISHED', 'RETIRED')",
+            name="ck_charge_calculation_profile_version_status",
+        ),
+        CheckConstraint(
+            "application_level in ('SHIPMENT', 'CONTAINER', 'HOUSE', 'PO_SCHEDULE_LINE')",
+            name="ck_charge_calculation_profile_version_application_level",
+        ),
+        CheckConstraint(
+            "calculation_method in ('FLAT_AMOUNT', 'RATE_TIMES_PRODUCT')",
+            name="ck_charge_calculation_profile_version_method",
+        ),
+        CheckConstraint(
+            "missing_factor_policy in ('BLOCK')",
+            name="ck_charge_calculation_profile_version_missing_factor_policy",
+        ),
+        Index("ix_charge_calculation_profile_version_profile", "profile_id"),
+        Index("ix_charge_calculation_profile_version_status", "status"),
+    )
+
+
+class ChargeCalculationProfileFactorRow(TimestampMixin, Base):
+    __tablename__ = "charge_calculation_profile_factor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_version_id: Mapped[int] = mapped_column(
+        ForeignKey("charge_calculation_profile_version.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    factor_code: Mapped[str] = mapped_column(String(60), nullable=False)
+    factor_label: Mapped[str] = mapped_column(String(160), nullable=False)
+    resolver: Mapped[str] = mapped_column(String(40), nullable=False)
+    uom: Mapped[str | None] = mapped_column(String(30))
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    default_value: Mapped[object | None] = mapped_column(Numeric(18, 6))
+
+    __table_args__ = (
+        UniqueConstraint("profile_version_id", "factor_code", name="uq_charge_calculation_profile_factor_code"),
+        UniqueConstraint("profile_version_id", "sequence", name="uq_charge_calculation_profile_factor_sequence"),
+        CheckConstraint(
+            "resolver in ('MANUAL', 'TARGET_COUNT', 'CONTAINER_COUNT', 'HOUSE_COUNT', "
+            "'PO_SCHEDULE_LINE_COUNT', 'QUANTITY', 'WEIGHT', 'VOLUME', "
+            "'CHARGEABLE_WEIGHT', 'DURATION_HOURS', 'DURATION_DAYS', 'FIXED_VALUE')",
+            name="ck_charge_calculation_profile_factor_resolver",
+        ),
+        Index("ix_charge_calculation_profile_factor_profile_version", "profile_version_id"),
     )
 
 
@@ -450,6 +545,7 @@ class ChargeRateBookEntryRow(Base):
     rate_amount: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False)
     basis: Mapped[str] = mapped_column(String(40), nullable=False, default="SHIPMENT")
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    calculation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile.id"))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
     origin_code: Mapped[str | None] = mapped_column(String(40))
@@ -519,6 +615,7 @@ class ChargeContractLineRow(Base):
     charge_component_id: Mapped[int] = mapped_column(ForeignKey("charge_component.id"), nullable=False)
     rate_book_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book.id"))
     calculation_template_id: Mapped[int | None] = mapped_column(Integer)
+    calculation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile.id"))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
     origin_code: Mapped[str | None] = mapped_column(String(40))
@@ -720,7 +817,12 @@ class ChargeQuoteOptionLineRow(Base):
     amount: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     basis: Mapped[str] = mapped_column(String(40), nullable=False)
+    rate_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    quantity: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False, default=1, server_default="1")
     quantity_uom: Mapped[str | None] = mapped_column(String(30))
+    calculation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile_version.id"))
+    calculation_config_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
+    calculation_input_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     allocation_basis: Mapped[str | None] = mapped_column(String(40))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
@@ -870,10 +972,14 @@ class ChargeLineRow(Base):
     charge_date: Mapped[object | None] = mapped_column(Date)
     charge_date_basis: Mapped[str | None] = mapped_column(String(40))
     expected_amount: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False)
+    rate_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     actual_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     approved_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     quantity_uom: Mapped[str | None] = mapped_column(String(30))
+    calculation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile_version.id"))
+    calculation_config_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
+    calculation_input_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     source_currency: Mapped[str | None] = mapped_column(String(3))
     source_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     exchange_rate: Mapped[object | None] = mapped_column(Numeric(18, 8))

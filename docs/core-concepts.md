@@ -7,6 +7,9 @@ This guide explains what each charge-management module represents, when to use i
 ```mermaid
 flowchart LR
     C["Charge component\nWhat is charged?"] --> R["Rate book entry\nHow much?"]
+    P["Calculation profile\nHow is the rate extended?"] --> C
+    P --> R
+    P --> K
     R --> T["Calculation template\nIn what order?"]
     R --> K["Rate contract\nFor which parties and scope?"]
     T --> K
@@ -30,6 +33,7 @@ The simplest way to remember the boundary is:
 | --- | --- |
 | What kind of amount is this? | Charge component |
 | How much should be charged? | Rate book / rate table |
+| How should a unit rate become a total amount? | Calculation profile |
 | Which charge steps should run? | Calculation template |
 | Which commercial agreement applies? | Rate contract |
 | Where should the amount be distributed or posted? | Allocation profile |
@@ -41,21 +45,22 @@ The simplest way to remember the boundary is:
 ## Recommended Setup Order
 
 1. Review seeded charge components and create any missing components.
-2. Create and publish allocation profiles used by those components or rates.
-3. Create and publish business-date profiles, then assign them to applicable scopes.
-4. Configure component defaults and optional component aliases.
-5. Maintain FX sources and directional FX rates.
-6. Create rate books and their rate entries.
-7. Create calculation templates when rating needs ordered multi-component logic.
-8. Create payer/payee contracts, attach rate books or templates, and release the contracts.
-9. Create direct charge documents or run the quote lifecycle.
-10. Capture invoices, match them, approve the charge document, and export it.
+2. Create and publish calculation profiles for single- or multi-axis rate extension.
+3. Create and publish allocation profiles used by those components or rates.
+4. Create and publish business-date profiles, then assign them to applicable scopes.
+5. Configure component defaults and optional component aliases.
+6. Maintain FX sources and directional FX rates.
+7. Create rate books and their rate entries.
+8. Create calculation templates when rating needs ordered multi-component logic.
+9. Create payer/payee contracts, attach rate books or templates, and release the contracts.
+10. Create direct charge documents or run the quote lifecycle.
+11. Capture invoices, match them, approve the charge document, and export it.
 
 You do not need every module for every integration. A direct-charge implementation can start with components, optional allocation/date/FX setup, and charge documents. Contract-based quotation needs the pricing and quote modules as well.
 
 ## Current Execution Boundary
 
-The API separates maintained business configuration from executable built-in behavior. Rate-book matching, basis calculation, quote ranking/award, date resolution, FX resolution, allocation-policy snapshots, document lifecycle, and invoice matching are executable today.
+The API separates maintained business configuration from executable built-in behavior. Rate-book matching, calculation-profile execution, quote ranking/award, date resolution, FX resolution, allocation-policy snapshots, document lifecycle, and invoice matching are executable today.
 
 Calculation templates currently persist an ordered, reusable calculation definition, but the built-in contract rater does not yet execute template steps, subtotal expressions, statistical behavior, or precondition rules. An integrating calculation engine can consume that metadata; for built-in contract rating, each contract line must resolve to a rate book.
 
@@ -78,6 +83,7 @@ Examples:
 - Category and transport/business context.
 - Whether the amount normally belongs to the payer, payee, or both sides.
 - Default calculation basis.
+- Optional default calculation profile.
 - Default charge-date behavior.
 - Optional business-date and allocation profile references.
 - Tax and active flags.
@@ -130,6 +136,7 @@ Each entry connects a charge component to an amount and optional applicability c
 - Scale range, minimum, and maximum.
 - Validity dates.
 - Optional allocation profile/version.
+- Optional calculation profile, which overrides the component default for that rate row.
 
 ### Example
 
@@ -149,6 +156,36 @@ A rate book named `EU_OCEAN_2026` could contain:
 5. Reference the rate book from a contract header, contract line, or calculation-template step.
 
 A rate book defines reusable prices. A contract determines the parties and commercial scope under which those prices apply.
+
+## Calculation Profile
+
+### What It Is
+
+A calculation profile is a versioned formula that turns a unit rate into a source charge amount. It is optional on every component: simple flat charges can use the seeded flat profile, while compound charges can multiply the rate by several independent axes.
+
+For example, a container storage rate can use:
+
+`unit rate x eligible container count x duration hours`
+
+With a rate of `12`, three eligible containers, and eight entered hours, the calculated amount is `288`.
+
+### Factors And Trust Boundary
+
+Each ordered factor has a resolver. Object-derived resolvers such as container count, House count, quantity, weight, volume, and chargeable weight come from the persisted source-object context. A line request cannot replace those values. Transaction resolvers such as manual quantity and duration can be entered for the specific charge.
+
+Missing required factors block calculation; the engine does not silently substitute an equal share or a value of one.
+
+### Lifecycle, Resolution, And Audit
+
+1. Create a profile and initial draft version with `POST /calculation-profiles`.
+2. Edit the draft through `PUT /calculation-profile-versions/{version_id}`.
+3. Publish it through `POST /calculation-profile-versions/{version_id}/publish`.
+4. Assign the profile as a component default or as an override on a rate-book entry or contract line.
+5. For a direct charge line, explicitly pin a published profile version when the component default is not appropriate.
+
+Published versions are immutable. Contract-line profile takes precedence over rate-book-entry profile, which takes precedence over component default. A direct line's explicit published version takes precedence over its component default. The effective version, factor values, and calculation configuration are snapshotted on quote-option and charge-document lines.
+
+Calculation and allocation are separate stages: calculation creates one source amount first, then allocation propagates that amount without recalculating it.
 
 ## Calculation Template
 
@@ -201,6 +238,7 @@ The names describe the line relationship in the charge model, not hardcoded acco
 - Default rate book and calculation template.
 - Contract lines that narrow applicability by lane, mode, equipment, commodity, service level, or dates.
 - Optional line-level overrides for rate book, template, and allocation profile.
+- Optional line-level calculation-profile override.
 
 ### Lifecycle And Use
 
@@ -388,6 +426,7 @@ A charge line records one component amount and its audit context:
 - Allocation profile, target, ratio, and driver snapshot.
 - Source contract/rate or quote lineage.
 - Calculation audit JSON.
+- Pinned calculation profile/version plus configuration and factor-input snapshots.
 
 `POSTING` lines count toward totals. `CALCULATION` lines can retain intermediate/audit rows without changing commercial totals.
 
@@ -446,6 +485,7 @@ Only approved or exported documents can be reversed. Reversal preserves the docu
 | A component contains the customer price. | A component defines meaning; rate books/contracts define price. |
 | A rate table and rate book are different modules. | A rate book is the table header; rate book entries are its rows. |
 | Allocation basis and allocation profile are synonyms. | A basis is one driver; a profile is the versioned end-to-end allocation policy. |
+| Calculation and allocation are the same step. | Calculation creates the source amount; allocation distributes that already-calculated amount. |
 | A date driver is an FX rate. | A date driver selects the date; FX resolution selects the rate. |
 | A provider offer is already the awarded charge. | The offer becomes a comparable option; award creates the charge document/commitment. |
 | A quote commitment is a shipment. | It is neutral awarded capacity/value that a shipment or other host object can consume. |

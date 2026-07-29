@@ -8,6 +8,7 @@ PostgreSQL is the supported runtime database. SQLAlchemy defines the relational 
 | --- | --- |
 | Setup and IDs | `charge_management_settings`, `charge_id_sequence` |
 | Master data | `charge_component`, `charge_component_alias` |
+| Calculation | `charge_calculation_profile`, `charge_calculation_profile_version`, `charge_calculation_profile_factor` |
 | Allocation | `charge_allocation_profile`, `charge_allocation_profile_version` |
 | Business dates | `charge_business_date_profile`, `charge_business_date_profile_version`, `charge_business_date_profile_step`, `charge_business_date_profile_assignment` |
 | FX | `charge_fx_rate_source`, `charge_fx_rate` |
@@ -21,6 +22,8 @@ PostgreSQL is the supported runtime database. SQLAlchemy defines the relational 
 ```mermaid
 erDiagram
     CHARGE_ALLOCATION_PROFILE ||--o{ CHARGE_ALLOCATION_PROFILE_VERSION : versions
+    CHARGE_CALCULATION_PROFILE ||--o{ CHARGE_CALCULATION_PROFILE_VERSION : versions
+    CHARGE_CALCULATION_PROFILE_VERSION ||--o{ CHARGE_CALCULATION_PROFILE_FACTOR : factors
     CHARGE_BUSINESS_DATE_PROFILE ||--o{ CHARGE_BUSINESS_DATE_PROFILE_VERSION : versions
     CHARGE_BUSINESS_DATE_PROFILE_VERSION ||--o{ CHARGE_BUSINESS_DATE_PROFILE_STEP : steps
     CHARGE_BUSINESS_DATE_PROFILE ||--o{ CHARGE_BUSINESS_DATE_PROFILE_ASSIGNMENT : assignments
@@ -41,7 +44,7 @@ The diagram highlights major ownership relationships; inspect `app/db/models.py`
 
 ## Seed Data
 
-Migrations and repository initialization provide generic settings, common charge components, standard business-date concepts, stable ID sequences, and a `MANUAL` FX source. Seed data is product-neutral and safe to extend through APIs or future migrations.
+Migrations and repository initialization provide generic settings, common charge components, standard calculation and allocation profiles, business-date concepts, stable ID sequences, and a `MANUAL` FX source. Seed data is product-neutral and safe to extend through APIs or future migrations.
 
 ## FX Semantics
 
