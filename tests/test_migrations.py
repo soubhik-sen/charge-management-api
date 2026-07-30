@@ -47,6 +47,8 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "calculation_input_snapshot_json",
         "status",
         "source",
+        "target_scope_mode",
+        "selected_target_references_json",
     } <= line_columns
     assert line_column_metadata["status"]["nullable"] is False
     assert line_column_metadata["source"]["nullable"] is False
@@ -73,7 +75,7 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         flat_count = connection.execute(
             text("select count(*) from charge_calculation_profile where profile_code = 'FLAT_AMOUNT'")
         ).scalar_one()
-    assert version == "0014_charge_line_lifecycle"
+    assert version == "0015_charge_line_target_scope_subset"
     assert source_code == "MANUAL"
     assert flat_count == 1
 

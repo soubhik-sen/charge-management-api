@@ -288,6 +288,8 @@ The effective profile is resolved from the most specific available reference, in
 
 The current API resolves and persists allocation policy, target references, ratios, and driver values. It does not hydrate a host application's shipment/house/item hierarchy or independently fan one source amount into target rows. The integrating application supplies target objects and calculated ratios/driver values when it creates posting lines.
 
+Manual lines may set `target_scope_mode=SELECTED_TARGETS` and provide a homogeneous `selected_target_references_json` list. Those references constrain calculation-profile target counts and remain pinned for audit; the host adapter is responsible for authorizing each target against its business object. One selected target may carry a direct flat amount. Multiple selected targets require a calculation profile because allocation profiles propagate a calculated total but do not define per-target rate multiplication.
+
 ## Business-Date Profile And Date Driver
 
 ### What It Is

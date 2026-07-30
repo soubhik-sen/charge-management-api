@@ -107,6 +107,16 @@ def _model_from_row(model_type: Any, row: Any, **extra: Any) -> Any:
     return model_type.model_validate(data)
 
 
+def _json_ready_value(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_json_ready_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_ready_value(item) for key, item in value.items()}
+    return value
+
+
 def _normalize_model_datetimes(value: Any) -> None:
     if isinstance(value, BaseModel):
         for field_name in type(value).model_fields:
@@ -176,9 +186,11 @@ def _charge_line_row(line: ChargeLine, component_id: int) -> ChargeLineRow:
         line_number=line.line_number,
         parent_line_id=line.parent_line_id,
         line_role=line.line_role,
+        target_scope_mode=line.target_scope_mode,
         target_level=line.target_level,
         target_object_type=line.target_object_type,
         target_object_id=line.target_object_id,
+        selected_target_references_json=_json_ready_value(line.selected_target_references_json),
         payer_party_ref=line.payer_party_ref,
         payee_party_ref=line.payee_party_ref,
         party_role_ref=line.party_role_ref,

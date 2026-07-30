@@ -963,9 +963,16 @@ class ChargeLineRow(Base):
     line_number: Mapped[int | None] = mapped_column(Integer)
     parent_line_id: Mapped[int | None] = mapped_column(ForeignKey("charge_line.id", ondelete="SET NULL"))
     line_role: Mapped[str] = mapped_column(String(20), nullable=False, default="POSTING", server_default="POSTING")
+    target_scope_mode: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="ALL_ELIGIBLE",
+        server_default="ALL_ELIGIBLE",
+    )
     target_level: Mapped[str | None] = mapped_column(String(30))
     target_object_type: Mapped[str | None] = mapped_column(String(80))
     target_object_id: Mapped[str | None] = mapped_column(String(120))
+    selected_target_references_json: Mapped[list[dict] | None] = mapped_column(JSON)
     payer_party_ref: Mapped[str | None] = mapped_column(String(120))
     payee_party_ref: Mapped[str | None] = mapped_column(String(120))
     party_role_ref: Mapped[str | None] = mapped_column(String(120))
@@ -1033,6 +1040,10 @@ class ChargeLineRow(Base):
         CheckConstraint(
             "target_level is null or target_level in ('HEADER', 'ITEM', 'CONTAINER', 'HOUSE', 'PO_SCHEDULE_LINE')",
             name="ck_charge_line_target_level",
+        ),
+        CheckConstraint(
+            "target_scope_mode in ('ALL_ELIGIBLE', 'SELECTED_TARGETS')",
+            name="ck_charge_line_target_scope_mode",
         ),
         UniqueConstraint("charge_document_id", "line_number", name="uq_charge_line_document_line_number"),
         Index("ix_charge_line_document_line_number", "charge_document_id", "line_number"),

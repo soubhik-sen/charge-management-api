@@ -3344,6 +3344,20 @@
             "title": "Relationship Role",
             "type": "string"
           },
+          "selected_target_references_json": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChargeTargetReferenceSelection"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Target References Json"
+          },
           "source": {
             "default": "MANUAL",
             "title": "Source",
@@ -3426,6 +3440,15 @@
               }
             ],
             "title": "Target Reference Snapshot Json"
+          },
+          "target_scope_mode": {
+            "default": "ALL_ELIGIBLE",
+            "enum": [
+              "ALL_ELIGIBLE",
+              "SELECTED_TARGETS"
+            ],
+            "title": "Target Scope Mode",
+            "type": "string"
           }
         },
         "required": [
@@ -3812,6 +3835,20 @@
             "title": "Relationship Role",
             "type": "string"
           },
+          "selected_target_references_json": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChargeTargetReferenceSelection"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Target References Json"
+          },
           "source": {
             "default": "MANUAL",
             "title": "Source",
@@ -3894,6 +3931,15 @@
               }
             ],
             "title": "Target Reference Snapshot Json"
+          },
+          "target_scope_mode": {
+            "default": "ALL_ELIGIBLE",
+            "enum": [
+              "ALL_ELIGIBLE",
+              "SELECTED_TARGETS"
+            ],
+            "title": "Target Scope Mode",
+            "type": "string"
           }
         },
         "required": [
@@ -4727,6 +4773,20 @@
             "title": "Relationship Role",
             "type": "string"
           },
+          "selected_target_references_json": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChargeTargetReferenceSelection"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Target References Json"
+          },
           "source": {
             "default": "MANUAL",
             "title": "Source",
@@ -4822,6 +4882,15 @@
               }
             ],
             "title": "Target Reference Snapshot Json"
+          },
+          "target_scope_mode": {
+            "default": "ALL_ELIGIBLE",
+            "enum": [
+              "ALL_ELIGIBLE",
+              "SELECTED_TARGETS"
+            ],
+            "title": "Target Scope Mode",
+            "type": "string"
           }
         },
         "required": [
@@ -5343,6 +5412,48 @@
           "reason"
         ],
         "title": "ChargeReverseRequest",
+        "type": "object"
+      },
+      "ChargeTargetReferenceSelection": {
+        "properties": {
+          "target_level": {
+            "enum": [
+              "HEADER",
+              "ITEM",
+              "CONTAINER",
+              "HOUSE",
+              "PO_SCHEDULE_LINE"
+            ],
+            "title": "Target Level",
+            "type": "string"
+          },
+          "target_object_id": {
+            "title": "Target Object Id",
+            "type": "string"
+          },
+          "target_object_type": {
+            "title": "Target Object Type",
+            "type": "string"
+          },
+          "target_reference_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Reference Snapshot Json"
+          }
+        },
+        "required": [
+          "target_level",
+          "target_object_type",
+          "target_object_id"
+        ],
+        "title": "ChargeTargetReferenceSelection",
         "type": "object"
       },
       "ContractDeterminationResponse": {

@@ -115,6 +115,7 @@ ALLOCATION_PROFILE_SOURCE_LEVELS = {"SHIPMENT", "CONTAINER", "HOUSE"}
 ALLOCATION_PROFILE_FINAL_POSTING_LEVELS = {"HOUSE", "PO_SCHEDULE_LINE"}
 ALLOCATION_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 ALLOCATION_OVERRIDE_MODES = {"INHERIT_PROFILE", "OVERRIDE_PROFILE", "NO_ALLOCATION"}
+CHARGE_TARGET_SCOPE_MODES = {"ALL_ELIGIBLE", "SELECTED_TARGETS"}
 CALCULATION_PROFILE_APPLICATION_LEVELS = {"SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"}
 CALCULATION_PROFILE_METHODS = {"FLAT_AMOUNT", "RATE_TIMES_PRODUCT"}
 CALCULATION_PROFILE_FACTOR_RESOLVERS = {
@@ -244,6 +245,11 @@ def _clean_optional(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _target_scope_mode(value: Any) -> str:
+    cleaned = value.strip().upper() if isinstance(value, str) else ""
+    return cleaned if cleaned in CHARGE_TARGET_SCOPE_MODES else "ALL_ELIGIBLE"
+
+
 def _charge_date_basis(value: Any) -> str:
     cleaned = value.strip().upper() if isinstance(value, str) else ""
     return cleaned or "DOCUMENT_DATE"
@@ -285,22 +291,151 @@ def _payload_line_number(payload: Any, *, default: int) -> int:
 
 
 def _validate_target_payload(payload: Any) -> None:
+    _normalized_charge_target_scope(payload)
+
+
+def _normalize_selected_target_reference_payload(selected: Any) -> dict[str, Any]:
+    data = selected.model_dump() if hasattr(selected, "model_dump") else dict(selected)
+    target_level = _clean_optional(data.get("target_level"))
+    target_object_type = _clean_optional(data.get("target_object_type"))
+    target_object_id = _clean_optional(data.get("target_object_id"))
+    if target_level is None or target_object_type is None or target_object_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected target references require target_level, target_object_type, and target_object_id.",
+        )
+    snapshot = data.get("target_reference_snapshot_json")
+    return {
+        "target_level": target_level,
+        "target_object_type": target_object_type,
+        "target_object_id": target_object_id,
+        "target_reference_snapshot_json": dict(snapshot) if isinstance(snapshot, dict) else snapshot,
+    }
+
+
+def _normalized_charge_target_scope(payload: Any) -> tuple[str, str | None, str | None, str | None, list[dict[str, Any]]]:
+    raw_mode = getattr(payload, "target_scope_mode", None)
+    cleaned_mode = _target_scope_mode(raw_mode)
+    if raw_mode not in (None, "") and cleaned_mode != str(raw_mode).strip().upper():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported charge target_scope_mode: {raw_mode}",
+        )
+    selected = [
+        _normalize_selected_target_reference_payload(item)
+        for item in (getattr(payload, "selected_target_references_json", None) or [])
+    ]
     target_level = _clean_optional(getattr(payload, "target_level", None))
     target_object_type = _clean_optional(getattr(payload, "target_object_type", None))
     target_object_id = _clean_optional(getattr(payload, "target_object_id", None))
-    has_target_object = target_object_type is not None or target_object_id is not None
     if target_level is not None and target_level not in CHARGE_TARGET_LEVELS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported charge target_level: {target_level}")
-    if target_level is not None and (target_object_type is None or target_object_id is None):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Charge target_level requires target_object_type and target_object_id.",
+            detail=f"Unsupported charge target_level: {target_level}",
         )
-    if has_target_object and target_level is None:
+    if cleaned_mode == "ALL_ELIGIBLE":
+        if selected:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="selected_target_references_json is only allowed when target_scope_mode is SELECTED_TARGETS.",
+            )
+        has_target_object = target_object_type is not None or target_object_id is not None
+        if target_level is not None and (target_object_type is None or target_object_id is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Charge target_level requires target_object_type and target_object_id.",
+            )
+        if has_target_object and target_level is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Charge target_object_type and target_object_id require target_level.",
+            )
+        return cleaned_mode, target_level, target_object_type, target_object_id, selected
+    if cleaned_mode == "SELECTED_TARGETS":
+        if not selected:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="selected_target_references_json is required when target_scope_mode is SELECTED_TARGETS.",
+            )
+        selected_level = selected[0]["target_level"]
+        selected_type = selected[0]["target_object_type"]
+        selected_object_ids = {item["target_object_id"] for item in selected}
+        if len(selected_object_ids) != len(selected):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="selected_target_references_json must not contain duplicate target_object_id values.",
+            )
+        for item in selected[1:]:
+            if item["target_level"] != selected_level:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="selected_target_references_json must use a single target_level.",
+                )
+            if item["target_object_type"] != selected_type:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="selected_target_references_json must use a single target_object_type.",
+                )
+        target_level = target_level or selected_level
+        target_object_type = target_object_type or selected_type
+        if target_level != selected_level:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_level does not match selected_target_references_json.",
+            )
+        if target_object_type != selected_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_object_type does not match selected_target_references_json.",
+            )
+        if len(selected) == 1:
+            if target_object_id is None:
+                target_object_id = selected[0]["target_object_id"]
+        elif target_object_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_object_id must be omitted when multiple selected_target_references_json values are provided.",
+            )
+        if len(selected) > 1:
+            target_object_id = None
+    return cleaned_mode, target_level, target_object_type, target_object_id, selected
+
+
+def _target_reference_snapshot(
+    *,
+    payload: Any,
+    target_scope_mode: str,
+    target_level: str | None,
+    target_object_type: str | None,
+    target_object_id: str | None,
+    selected_target_references: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    snapshot = getattr(payload, "target_reference_snapshot_json", None)
+    if snapshot is not None and not isinstance(snapshot, dict):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Charge target_object_type and target_object_id require target_level.",
+            detail="target_reference_snapshot_json must be an object when provided.",
         )
+    normalized = dict(snapshot or {})
+    if target_scope_mode == "SELECTED_TARGETS" and selected_target_references:
+        normalized["target_scope_mode"] = target_scope_mode
+        if target_level is not None:
+            normalized.setdefault("target_level", target_level)
+        if target_object_type is not None:
+            normalized.setdefault("target_object_type", target_object_type)
+        if target_object_id is not None:
+            normalized.setdefault("target_object_id", target_object_id)
+        normalized["selected_target_count"] = len(selected_target_references)
+        normalized["selected_target_references"] = [
+            {
+                "target_level": item["target_level"],
+                "target_object_type": item["target_object_type"],
+                "target_object_id": item["target_object_id"],
+                "target_reference_snapshot_json": item["target_reference_snapshot_json"],
+            }
+            for item in selected_target_references
+        ]
+    return normalized or None
 
 
 def _charge_line_sort_key(line: ChargeLine) -> tuple[int, int, int]:
@@ -2144,6 +2279,17 @@ class ChargeManagementService:
             if line_number in lines_by_number:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Duplicate charge line_number: {line_number}")
             _validate_target_payload(line_payload)
+            target_scope_mode, resolved_target_level, resolved_target_object_type, resolved_target_object_id, selected_target_references = _normalized_charge_target_scope(
+                line_payload
+            )
+            target_reference_snapshot_json = _target_reference_snapshot(
+                payload=line_payload,
+                target_scope_mode=target_scope_mode,
+                target_level=resolved_target_level,
+                target_object_type=resolved_target_object_type,
+                target_object_id=resolved_target_object_id,
+                selected_target_references=selected_target_references,
+            )
             (
                 allocation_profile_id,
                 allocation_profile_version_id,
@@ -2178,6 +2324,18 @@ class ChargeManagementService:
                 document=document,
                 line_payload=line_payload,
             )
+            if (
+                target_scope_mode == "SELECTED_TARGETS"
+                and len(selected_target_references) > 1
+                and calculation_profile_version_id is None
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Multiple selected targets require a calculation profile; "
+                        "allocation profiles only propagate an already-calculated amount."
+                    ),
+                )
             line = ChargeLine(
                 id=self.repository.next_id("charge_line"),
                 charge_document_id=document.id,
@@ -2186,9 +2344,11 @@ class ChargeManagementService:
                 relationship_role=line_payload.relationship_role,
                 line_number=line_number,
                 line_role=line_payload.line_role,
-                target_level=_clean_optional(line_payload.target_level),
-                target_object_type=_clean_optional(line_payload.target_object_type),
-                target_object_id=_clean_optional(line_payload.target_object_id),
+                target_scope_mode=target_scope_mode,
+                target_level=resolved_target_level,
+                target_object_type=resolved_target_object_type,
+                target_object_id=resolved_target_object_id,
+                selected_target_references_json=selected_target_references or None,
                 payer_party_ref=line_payload.payer_party_ref,
                 payee_party_ref=line_payload.payee_party_ref,
                 party_role_ref=line_payload.party_role_ref,
@@ -2235,7 +2395,7 @@ class ChargeManagementService:
                 allocation_basis=_clean_optional(line_payload.allocation_basis) or effective_allocation_basis,
                 allocation_ratio=line_payload.allocation_ratio,
                 allocation_driver_value=line_payload.allocation_driver_value,
-                target_reference_snapshot_json=line_payload.target_reference_snapshot_json,
+                target_reference_snapshot_json=target_reference_snapshot_json,
                 calculation_audit_json=line_payload.calculation_audit_json,
                 basis=line_payload.basis,
             )
@@ -3256,10 +3416,13 @@ class ChargeManagementService:
         document: ChargeDocument,
         line_payload: Any,
         application_level: str,
-    ) -> dict[str, Decimal]:
+    ) -> dict[str, Any]:
         source = document.source_reference_snapshot_json or {}
         target = getattr(line_payload, "target_reference_snapshot_json", None) or {}
-        target_level = _clean_optional(getattr(line_payload, "target_level", None))
+        target_scope_mode, target_level, target_object_type, target_object_id, selected_target_references = _normalized_charge_target_scope(
+            line_payload
+        )
+        selected_target_count = Decimal(len(selected_target_references)) if selected_target_references else Decimal("0")
         shipment_count = Decimal("1")
         container_count = self._snapshot_decimal(target, source, "container_count", "containers", "target_container_count")
         house_count = self._snapshot_decimal(target, source, "house_count", "houses", "target_house_count")
@@ -3278,6 +3441,15 @@ class ChargeManagementService:
             po_count = Decimal("1")
         if target_level == "HEADER" and application_level == "SHIPMENT":
             shipment_count = Decimal("1")
+        if target_scope_mode == "SELECTED_TARGETS" and selected_target_count > 0:
+            if target_level == "CONTAINER":
+                container_count = selected_target_count
+            elif target_level == "HOUSE":
+                house_count = selected_target_count
+            elif target_level == "PO_SCHEDULE_LINE":
+                po_count = selected_target_count
+            elif target_level == "HEADER":
+                shipment_count = selected_target_count
         quantity = self._snapshot_decimal(target, source, "quantity", "target_quantity")
         weight = self._snapshot_decimal(target, source, "weight", "gross_weight", "target_weight")
         volume = self._snapshot_decimal(target, source, "volume", "gross_volume_cbm", "cbm", "target_volume")
@@ -3302,6 +3474,9 @@ class ChargeManagementService:
             "chargeable_weight": chargeable_weight,
             "duration_hours": duration_hours,
             "duration_days": duration_days,
+            "target_scope_mode": target_scope_mode,
+            "selected_target_count": selected_target_count,
+            "selected_target_references_json": selected_target_references,
             "target_count": dec(
                 {
                     "SHIPMENT": shipment_count,
@@ -3789,6 +3964,11 @@ class ChargeManagementService:
             context["charge_date"] = charge_date
         context.update(self._flatten_json_paths(document.source_reference_snapshot_json or {}))
         context.update(self._flatten_json_paths(getattr(line_payload, "target_reference_snapshot_json", None) or {}))
+        selected_target_references = getattr(line_payload, "selected_target_references_json", None) or []
+        if len(selected_target_references) == 1:
+            selected = selected_target_references[0]
+            selected_data = selected.model_dump() if hasattr(selected, "model_dump") else dict(selected)
+            context.update(self._flatten_json_paths(selected_data.get("target_reference_snapshot_json") or {}))
         return context
 
     def _resolve_business_date_value(self, date_key: str, context: dict[str, Any]) -> date | None:

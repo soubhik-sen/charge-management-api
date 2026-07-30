@@ -2107,6 +2107,176 @@ def test_direct_charge_document_supports_generic_line_hierarchy_and_targets() ->
     assert body["lines"][1]["target_reference_snapshot_json"] == {"container_number": "CONT-1"}
 
 
+def test_direct_charge_document_supports_selected_target_subsets_and_validation() -> None:
+    created_profile = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "CONTAINER_SELECTED_SUBSET",
+            "profile_name": "Container selected subset",
+            "initial_version": {
+                "application_level": "CONTAINER",
+                "calculation_method": "RATE_TIMES_PRODUCT",
+                "rate_uom": "USD",
+                "factors": [
+                    {
+                        "sequence": 10,
+                        "factor_code": "CONTAINER_COUNT",
+                        "factor_label": "Selected containers",
+                        "resolver": "CONTAINER_COUNT",
+                        "uom": "EA",
+                    }
+                ],
+            },
+        },
+    )
+    assert created_profile.status_code == 201, created_profile.text
+    version_id = created_profile.json()["versions"][0]["id"]
+    published = client.post(
+        f"/api/v1/charge-management/calculation-profile-versions/{version_id}/publish",
+        headers=AUTH,
+    )
+    assert published.status_code == 200, published.text
+
+    created = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT_V2",
+            "source_object_id": "SV2-SELECTED-SUBSET",
+            "document_scope_level": "HEADER",
+            "document_date": "2026-06-29",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 10,
+                    "line_role": "POSTING",
+                    "target_scope_mode": "SELECTED_TARGETS",
+                    "target_level": "CONTAINER",
+                    "target_object_type": "CONTAINER",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "description": "Selected container subset",
+                    "expected_amount": "0.00",
+                    "rate_amount": "25.00",
+                    "currency": "USD",
+                    "basis": "CONTAINER",
+                    "calculation_profile_version_id": version_id,
+                    "selected_target_references_json": [
+                        {
+                            "target_level": "CONTAINER",
+                            "target_object_type": "CONTAINER",
+                            "target_object_id": "CONT-1",
+                            "target_reference_snapshot_json": {"container_number": "CONT-1"},
+                        },
+                        {
+                            "target_level": "CONTAINER",
+                            "target_object_type": "CONTAINER",
+                            "target_object_id": "CONT-2",
+                            "target_reference_snapshot_json": {"container_number": "CONT-2"},
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    line = created.json()["lines"][0]
+    assert line["target_scope_mode"] == "SELECTED_TARGETS"
+    assert line["selected_target_references_json"][0]["target_object_id"] == "CONT-1"
+    assert line["selected_target_references_json"][1]["target_object_id"] == "CONT-2"
+    assert line["target_reference_snapshot_json"]["selected_target_count"] == 2
+    assert line["expected_amount"] == "50.00"
+
+    missing_calculation = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT_V2",
+            "source_object_id": "SV2-SELECTED-SUBSET-NO-CALC",
+            "document_scope_level": "HEADER",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 10,
+                    "line_role": "POSTING",
+                    "target_scope_mode": "SELECTED_TARGETS",
+                    "target_level": "CONTAINER",
+                    "target_object_type": "CONTAINER",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "50.00",
+                    "currency": "USD",
+                    "basis": "CONTAINER",
+                    "selected_target_references_json": [
+                        {
+                            "target_level": "CONTAINER",
+                            "target_object_type": "CONTAINER",
+                            "target_object_id": "CONT-1",
+                        },
+                        {
+                            "target_level": "CONTAINER",
+                            "target_object_type": "CONTAINER",
+                            "target_object_id": "CONT-2",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    assert missing_calculation.status_code == 400
+    assert "require a calculation profile" in missing_calculation.text
+
+    rejected = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT_V2",
+            "source_object_id": "SV2-SELECTED-SUBSET-INVALID",
+            "document_scope_level": "HEADER",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 10,
+                    "line_role": "POSTING",
+                    "target_scope_mode": "SELECTED_TARGETS",
+                    "target_level": "CONTAINER",
+                    "target_object_type": "CONTAINER",
+                    "target_object_id": "CONT-ONLY",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "0.00",
+                    "currency": "USD",
+                    "basis": "CONTAINER",
+                    "calculation_profile_version_id": version_id,
+                    "selected_target_references_json": [
+                        {
+                            "target_level": "CONTAINER",
+                            "target_object_type": "CONTAINER",
+                            "target_object_id": "CONT-1",
+                            "target_reference_snapshot_json": {"container_number": "CONT-1"},
+                        },
+                        {
+                            "target_level": "HOUSE",
+                            "target_object_type": "HOUSE",
+                            "target_object_id": "HOUSE-1",
+                            "target_reference_snapshot_json": {"house_number": "HOUSE-1"},
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    assert rejected.status_code == 400
+    assert "single target_level" in rejected.text
+
+
 def test_direct_only_quotation_policy_blocks_quote_request() -> None:
     repository.quotation_policy = "DIRECT_ONLY"
 
@@ -2692,6 +2862,10 @@ def test_openapi_exposes_core_paths() -> None:
     assert "shipment_scope" in contract["components"]["schemas"]["ChargeDocument"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    assert "target_scope_mode" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
+    assert "selected_target_references_json" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
+    assert "target_scope_mode" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    assert "selected_target_references_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "status" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "calculation_profile_version_id" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
     assert "rate_amount" in contract["components"]["schemas"]["ChargeLine"]["properties"]

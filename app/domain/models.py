@@ -32,6 +32,7 @@ CalculationFactorResolver = Literal[
     "DURATION_DAYS",
     "FIXED_VALUE",
 ]
+ChargeTargetScopeMode = Literal["ALL_ELIGIBLE", "SELECTED_TARGETS"]
 
 
 class ChargeComponent(ApiModel):
@@ -877,15 +878,24 @@ class QuoteAwardRequest(ApiModel):
     quote_option_id: int
 
 
+class ChargeTargetReferenceSelection(ApiModel):
+    target_level: Literal["HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
+    target_object_type: str
+    target_object_id: str
+    target_reference_snapshot_json: dict[str, Any] | None = None
+
+
 class ChargeDocumentLineCreate(ApiModel):
     source: str = "MANUAL"
     relationship_role: Literal["PAYER", "PAYEE"]
     line_number: int | None = None
     parent_line_number: int | None = None
     line_role: Literal["CALCULATION", "POSTING"] = "POSTING"
+    target_scope_mode: ChargeTargetScopeMode = "ALL_ELIGIBLE"
     target_level: Literal["HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"] | None = None
     target_object_type: str | None = None
     target_object_id: str | None = None
+    selected_target_references_json: list[ChargeTargetReferenceSelection] | None = None
     payer_party_ref: str | None = None
     payee_party_ref: str | None = None
     party_role_ref: str | None = None
@@ -956,9 +966,11 @@ class ChargeLine(ApiModel):
     parent_line_id: int | None = None
     parent_line_number: int | None = None
     line_role: Literal["CALCULATION", "POSTING"] = "POSTING"
+    target_scope_mode: ChargeTargetScopeMode = "ALL_ELIGIBLE"
     target_level: Literal["HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"] | None = None
     target_object_type: str | None = None
     target_object_id: str | None = None
+    selected_target_references_json: list[ChargeTargetReferenceSelection] | None = None
     payer_party_ref: str | None = None
     payee_party_ref: str | None = None
     party_role_ref: str | None = None
