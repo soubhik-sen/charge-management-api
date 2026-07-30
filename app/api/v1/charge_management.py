@@ -1030,6 +1030,19 @@ def update_charge_document_workspace(
     return service.update_charge_document_workspace(charge_document_id, payload)
 
 
+@router.delete(
+    "/charge-documents/{charge_document_id}/lines/{charge_line_id}",
+    response_model=ChargeDocumentWorkspace,
+)
+def delete_charge_document_line(
+    charge_document_id: int,
+    charge_line_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeDocumentWorkspace:
+    _allow(principal, "charge.charge_documents.lines.delete")
+    return service.delete_charge_document_line(charge_document_id, charge_line_id)
+
+
 @router.post("/invoices", response_model=ChargeInvoice, status_code=201)
 def create_invoice(
     payload: ChargeInvoiceCreate,

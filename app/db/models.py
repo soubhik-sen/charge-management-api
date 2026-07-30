@@ -957,6 +957,8 @@ class ChargeLineRow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     charge_document_id: Mapped[int] = mapped_column(ForeignKey("charge_document.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="MANUAL", server_default="MANUAL")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="ESTIMATED", server_default="ESTIMATED")
     relationship_role: Mapped[str] = mapped_column(String(20), nullable=False)
     line_number: Mapped[int | None] = mapped_column(Integer)
     parent_line_id: Mapped[int | None] = mapped_column(ForeignKey("charge_line.id", ondelete="SET NULL"))
@@ -1014,6 +1016,10 @@ class ChargeLineRow(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "status in ('ESTIMATED', 'ACCRUED', 'ACTUAL', 'DISPUTED', 'APPROVED', 'EXPORTED', 'REVERSED')",
+            name="ck_charge_line_status",
+        ),
         CheckConstraint("relationship_role in ('PAYER', 'PAYEE')", name="ck_charge_line_role"),
         CheckConstraint("line_role in ('CALCULATION', 'POSTING')", name="ck_charge_line_line_role"),
         CheckConstraint(

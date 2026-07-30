@@ -878,6 +878,7 @@ class QuoteAwardRequest(ApiModel):
 
 
 class ChargeDocumentLineCreate(ApiModel):
+    source: str = "MANUAL"
     relationship_role: Literal["PAYER", "PAYEE"]
     line_number: int | None = None
     parent_line_number: int | None = None
@@ -948,6 +949,8 @@ class ChargeDocumentCreate(ApiModel):
 class ChargeLine(ApiModel):
     id: int
     charge_document_id: int
+    source: str = "MANUAL"
+    status: str = "ESTIMATED"
     relationship_role: Literal["PAYER", "PAYEE"]
     line_number: int | None = None
     parent_line_id: int | None = None

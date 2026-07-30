@@ -170,6 +170,8 @@ def _charge_line_row(line: ChargeLine, component_id: int) -> ChargeLineRow:
     return ChargeLineRow(
         id=line.id,
         charge_document_id=line.charge_document_id,
+        source=line.source,
+        status=line.status,
         relationship_role=line.relationship_role,
         line_number=line.line_number,
         parent_line_id=line.parent_line_id,
@@ -1080,6 +1082,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 ChargeLine,
                 row,
                 charge_component_code=component.component_code,
+                status=row.status,
                 expected_amount=_money_decimal(row.expected_amount),
                 rate_amount=_money_decimal(row.rate_amount),
                 actual_amount=_money_decimal(row.actual_amount),

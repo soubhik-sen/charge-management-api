@@ -1848,6 +1848,164 @@ def test_direct_charge_document_can_be_deleted_before_lifecycle_lock() -> None:
     assert workspace.status_code == 404
 
 
+def test_manual_root_charge_line_delete_removes_subtree_and_recalculates_workspace() -> None:
+    response = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT_V2",
+            "source_object_id": "SV2-DELETE-LINE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 10,
+                    "line_role": "CALCULATION",
+                    "target_level": "HEADER",
+                    "target_object_type": "SHIPMENT_V2",
+                    "target_object_id": "SV2-DELETE-LINE",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "0.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                },
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 20,
+                    "parent_line_number": 10,
+                    "line_role": "POSTING",
+                    "target_level": "CONTAINER",
+                    "target_object_type": "CONTAINER",
+                    "target_object_id": "CONT-DEL-1",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "120.00",
+                    "currency": "USD",
+                    "basis": "CONTAINER",
+                },
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 30,
+                    "line_role": "POSTING",
+                    "target_level": "HEADER",
+                    "target_object_type": "SHIPMENT_V2",
+                    "target_object_id": "SV2-DELETE-LINE",
+                    "charge_component_code": "MARGIN_MARKUP",
+                    "expected_amount": "45.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    document_id = body["id"]
+    root_line_id = next(line["id"] for line in body["lines"] if line["line_number"] == 10)
+
+    deleted = client.delete(
+        f"/api/v1/charge-management/charge-documents/{document_id}/lines/{root_line_id}",
+        headers=AUTH,
+    )
+    assert deleted.status_code == 200, deleted.text
+    workspace = deleted.json()
+    assert workspace["document"]["payee_total_amount"] == "45.00"
+    assert workspace["document"]["margin_amount"] == "45.00"
+    assert [line["line_number"] for line in workspace["document"]["lines"]] == [30]
+    assert workspace["document"]["lines"][0]["status"] == "ESTIMATED"
+
+    reloaded = client.get(
+        f"/api/v1/charge-management/charge-documents/{document_id}/workspace",
+        headers=AUTH,
+    )
+    assert reloaded.status_code == 200, reloaded.text
+    assert [line["line_number"] for line in reloaded.json()["document"]["lines"]] == [30]
+
+
+def test_manual_charge_line_delete_requires_root_line() -> None:
+    response = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT",
+            "source_object_id": "SHP-ROOT-ONLY",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 10,
+                    "line_role": "CALCULATION",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "0.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                },
+                {
+                    "relationship_role": "PAYEE",
+                    "line_number": 20,
+                    "parent_line_number": 10,
+                    "line_role": "POSTING",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "55.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    document_id = body["id"]
+    child_line_id = next(line["id"] for line in body["lines"] if line["line_number"] == 20)
+
+    blocked = client.delete(
+        f"/api/v1/charge-management/charge-documents/{document_id}/lines/{child_line_id}",
+        headers=AUTH,
+    )
+    assert blocked.status_code == 409
+    assert "root conceptual lines" in blocked.text
+
+
+def test_nonmanual_root_charge_line_delete_is_blocked() -> None:
+    response = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT",
+            "source_object_id": "SHP-SYSTEM-LINE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "source": "RATE_BOOK",
+                    "relationship_role": "PAYEE",
+                    "line_number": 10,
+                    "line_role": "POSTING",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "75.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    document = response.json()
+    assert document["lines"][0]["source"] == "RATE_BOOK"
+
+    blocked = client.delete(
+        f"/api/v1/charge-management/charge-documents/{document['id']}/lines/{document['lines'][0]['id']}",
+        headers=AUTH,
+    )
+
+    assert blocked.status_code == 409
+    assert "derived charge lines" in blocked.text
+
+
 def test_direct_charge_document_delete_blocks_after_approval() -> None:
     response = client.post(
         "/api/v1/charge-management/charge-documents",
@@ -2216,6 +2374,14 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
     )
     assert approved.status_code == 200
     assert approved.json()["document"]["status"] == "APPROVED"
+    assert {line["status"] for line in approved.json()["document"]["lines"]} == {"APPROVED"}
+
+    approved_again = client.post(
+        f"/api/v1/charge-management/charge-documents/{document_id}/approve",
+        headers=AUTH,
+    )
+    assert approved_again.status_code == 200
+    assert approved_again.json()["document"]["status"] == "APPROVED"
 
     exported = client.post(
         f"/api/v1/charge-management/charge-documents/{document_id}/post-export",
@@ -2223,6 +2389,14 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
     )
     assert exported.status_code == 200
     assert exported.json()["status"] == "POSTED"
+    assert {line["status"] for line in exported.json()["document"]["lines"]} == {"EXPORTED"}
+
+    exported_again = client.post(
+        f"/api/v1/charge-management/charge-documents/{document_id}/post-export",
+        headers=AUTH,
+    )
+    assert exported_again.status_code == 200
+    assert exported_again.json()["export_number"] == exported.json()["export_number"]
 
     reversed_response = client.post(
         f"/api/v1/charge-management/charge-documents/{document_id}/reverse",
@@ -2231,6 +2405,122 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
     )
     assert reversed_response.status_code == 200
     assert reversed_response.json()["document"]["status"] == "REVERSED"
+    assert {line["status"] for line in reversed_response.json()["document"]["lines"]} == {"REVERSED"}
+
+    blocked_reapprove = client.post(
+        f"/api/v1/charge-management/charge-documents/{document_id}/approve",
+        headers=AUTH,
+    )
+    assert blocked_reapprove.status_code == 409
+
+
+def test_charge_document_approval_blocks_failed_processing_and_locked_reopen() -> None:
+    response = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT",
+            "source_object_id": "SHP-PROCESSING-BLOCK",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYEE",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "80.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                    "calculation_audit_json": {"status": "FAILED"},
+                }
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+
+    blocked = client.post(
+        f"/api/v1/charge-management/charge-documents/{document_id}/approve",
+        headers=AUTH,
+    )
+    assert blocked.status_code == 409
+    assert "failed calculation" in blocked.text
+
+    fixed = client.put(
+        f"/api/v1/charge-management/charge-documents/{document_id}/workspace",
+        headers=AUTH,
+        json={
+            "lines": [
+                {
+                    "relationship_role": "PAYEE",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "80.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                    "calculation_audit_json": {},
+                }
+            ]
+        },
+    )
+    assert fixed.status_code == 200, fixed.text
+
+    approved = client.post(
+        f"/api/v1/charge-management/charge-documents/{document_id}/approve",
+        headers=AUTH,
+    )
+    assert approved.status_code == 200
+
+    reopen = client.put(
+        f"/api/v1/charge-management/charge-documents/{document_id}/workspace",
+        headers=AUTH,
+        json={"status": "ESTIMATED"},
+    )
+    assert reopen.status_code == 409
+
+
+def test_quote_awarded_charge_line_delete_is_blocked() -> None:
+    rate_book_id = _create_rate_book()
+    payer_contract_id = _create_contract("PAYER-DELETE-BLOCK", "PAYER", rate_book_id)
+    payee_contract_id = _create_contract("PAYEE-DELETE-BLOCK", "PAYEE", rate_book_id)
+    assert client.post(f"/api/v1/charge-management/contracts/{payer_contract_id}/release", headers=AUTH).status_code == 200
+    assert client.post(f"/api/v1/charge-management/contracts/{payee_contract_id}/release", headers=AUTH).status_code == 200
+
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "source_object_type": "MANUAL",
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BRSSZ",
+            "destination_code": "USNYC",
+            "mode": "OCEAN",
+            "currency": "USD",
+            "container_count": "1",
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    quote_id = quote.json()["id"]
+    _submit_quote(quote_id)
+    assert client.post(f"/api/v1/charge-management/quote-requests/{quote_id}/rate", headers=AUTH).status_code == 200
+    ranked = client.post(f"/api/v1/charge-management/quote-requests/{quote_id}/rank", headers=AUTH)
+    assert ranked.status_code == 200, ranked.text
+    awarded = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/award",
+        headers=AUTH,
+        json={"quote_option_id": ranked.json()["options"][0]["id"]},
+    )
+    assert awarded.status_code == 200, awarded.text
+    document = awarded.json()["charge_document"]
+    line_id = document["lines"][0]["id"]
+    assert document["lines"][0]["source"] == "QUOTE"
+
+    blocked = client.delete(
+        f"/api/v1/charge-management/charge-documents/{document['id']}/lines/{line_id}",
+        headers=AUTH,
+    )
+    assert blocked.status_code == 409
+    assert "source quote" in blocked.text
 
 
 def test_default_customer_pricing_rates_without_provider_cost_layer() -> None:
@@ -2333,6 +2623,8 @@ def test_openapi_exposes_core_paths() -> None:
     assert "get" in paths["/api/v1/charge-management/charge-documents"]
     assert "/api/v1/charge-management/charge-documents/{charge_document_id}" in paths
     assert "delete" in paths["/api/v1/charge-management/charge-documents/{charge_document_id}"]
+    assert "/api/v1/charge-management/charge-documents/{charge_document_id}/lines/{charge_line_id}" in paths
+    assert "delete" in paths["/api/v1/charge-management/charge-documents/{charge_document_id}/lines/{charge_line_id}"]
     assert "/api/v1/charge-management/invoices" in paths
     assert "get" in paths["/api/v1/charge-management/invoices"]
     assert "/api/v1/charge-management/invoices/{invoice_id}/workspace" in paths
@@ -2361,6 +2653,8 @@ def test_openapi_exposes_core_paths() -> None:
     assert "get" in contract["paths"]["/api/v1/charge-management/charge-documents"]
     assert "/api/v1/charge-management/charge-documents/{charge_document_id}" in contract["paths"]
     assert "delete" in contract["paths"]["/api/v1/charge-management/charge-documents/{charge_document_id}"]
+    assert "/api/v1/charge-management/charge-documents/{charge_document_id}/lines/{charge_line_id}" in contract["paths"]
+    assert "delete" in contract["paths"]["/api/v1/charge-management/charge-documents/{charge_document_id}/lines/{charge_line_id}"]
     assert "/api/v1/charge-management/invoices" in contract["paths"]
     assert "get" in contract["paths"]["/api/v1/charge-management/invoices"]
     assert "/api/v1/charge-management/invoices/{invoice_id}/workspace" in contract["paths"]
@@ -2398,6 +2692,7 @@ def test_openapi_exposes_core_paths() -> None:
     assert "shipment_scope" in contract["components"]["schemas"]["ChargeDocument"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    assert "status" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "calculation_profile_version_id" in contract["components"]["schemas"]["ChargeDocumentLineCreate"]["properties"]
     assert "rate_amount" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "calculation_profile_version_id" in contract["components"]["schemas"]["ChargeLine"]["properties"]

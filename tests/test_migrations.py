@@ -32,7 +32,10 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
     assert "charge_calculation_profile_version" in tables
     assert "charge_calculation_profile_factor" in tables
     assert "charge_business_date_profile" in tables
-    line_columns = {column["name"] for column in inspector.get_columns("charge_line")}
+    line_column_metadata = {
+        column["name"]: column for column in inspector.get_columns("charge_line")
+    }
+    line_columns = set(line_column_metadata)
     assert {
         "fx_rate_id",
         "exchange_rate_source_code",
@@ -42,7 +45,11 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "calculation_profile_version_id",
         "calculation_config_snapshot_json",
         "calculation_input_snapshot_json",
+        "status",
+        "source",
     } <= line_columns
+    assert line_column_metadata["status"]["nullable"] is False
+    assert line_column_metadata["source"]["nullable"] is False
     quote_line_columns = {column["name"] for column in inspector.get_columns("charge_quote_option_line")}
     assert {
         "rate_amount",
@@ -66,7 +73,7 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         flat_count = connection.execute(
             text("select count(*) from charge_calculation_profile where profile_code = 'FLAT_AMOUNT'")
         ).scalar_one()
-    assert version == "0013_add_charge_calculation_profiles"
+    assert version == "0014_charge_line_lifecycle"
     assert source_code == "MANUAL"
     assert flat_count == 1
 

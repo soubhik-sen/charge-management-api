@@ -142,6 +142,12 @@ BUSINESS_DATE_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 BUSINESS_DATE_ASSIGNMENT_SCOPE_TYPES = {"GLOBAL", "COMPANY", "CUSTOMER", "VENDOR", "FORWARDER", "CARRIER"}
 BUSINESS_DATE_SHIPMENT_SCOPES = {"OCEAN_HOUSE", "AIR_HOUSE"}
 BUSINESS_DATE_PURPOSES = {"EXCHANGE_RATE_DATE"}
+CHARGE_DOCUMENT_MUTABLE_STATUSES = {"ESTIMATED", "ACCRUED", "ACTUAL", "DISPUTED"}
+CHARGE_DOCUMENT_LOCKED_STATUSES = {"APPROVED", "EXPORTED", "REVERSED"}
+CHARGE_LINE_LIFECYCLE_STATUSES = CHARGE_DOCUMENT_MUTABLE_STATUSES | CHARGE_DOCUMENT_LOCKED_STATUSES
+CHARGE_LINE_DELETE_ALLOWED_ROLES = {"CALCULATION", "POSTING"}
+CHARGE_LINE_MANUAL_SOURCES = {"MANUAL", "DIRECT"}
+PROCESSING_BLOCKED_STATUSES = {"PENDING", "PENDING_CONTEXT", "FAILED"}
 BUSINESS_DATE_BASIS_KEYS = {
     "DOCUMENT_DATE",
     "MANUAL_LINE_DATE",
@@ -1950,6 +1956,8 @@ class ChargeManagementService:
                 ChargeLine(
                     id=self.repository.next_id("charge_line"),
                     charge_document_id=document_id,
+                    source="QUOTE",
+                    status="ESTIMATED",
                     line_number=index,
                     line_role="POSTING",
                     relationship_role=line.relationship_role,
@@ -2173,6 +2181,8 @@ class ChargeManagementService:
             line = ChargeLine(
                 id=self.repository.next_id("charge_line"),
                 charge_document_id=document.id,
+                source=(line_payload.source or "MANUAL").strip().upper(),
+                status=document.status,
                 relationship_role=line_payload.relationship_role,
                 line_number=line_number,
                 line_role=line_payload.line_role,
@@ -2313,34 +2323,57 @@ class ChargeManagementService:
 
     def delete_charge_document(self, charge_document_id: int) -> ChargeActionResponse:
         document = self._require_document(charge_document_id)
-        if document.status.upper() in {"APPROVED", "EXPORTED", "REVERSED"}:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Charge document cannot be deleted after approval, export, or reversal.",
-            )
-        if document.quote_request_id is not None or document.quote_option_id is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Quote-awarded charge documents cannot be deleted from the workspace.",
-            )
-        if any(invoice.charge_document_id == document.id for invoice in self.repository.invoices.values()):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Charge document cannot be deleted after invoices are captured.",
-            )
-        if any(response.document.id == document.id for response in self.repository.exports.values()):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Charge document cannot be deleted after export batches exist.",
-            )
-        if any(commitment.charge_document_id == document.id for commitment in self.repository.quote_commitments.values()):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Charge document cannot be deleted while quote commitments are linked.",
-            )
+        self._assert_document_line_mutation_allowed(
+            document,
+            action="delete",
+            line_message="Charge document cannot be deleted after approval, export, or reversal.",
+            object_label="Charge document",
+        )
         deleted = document.model_copy(deep=True)
         self.repository.documents.pop(document.id, None)
         return ChargeActionResponse(document=deleted)
+
+    def delete_charge_document_line(
+        self,
+        charge_document_id: int,
+        charge_line_id: int,
+    ) -> ChargeDocumentWorkspace:
+        document = self._require_document(charge_document_id)
+        self._assert_document_line_mutation_allowed(document, action="delete")
+        line = self._require_document_line(document, charge_line_id)
+        if line.parent_line_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only root conceptual lines can be deleted. Delete the root charge line instead.",
+            )
+        if line.line_role not in CHARGE_LINE_DELETE_ALLOWED_ROLES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only root conceptual charge lines can be deleted.",
+            )
+        subtree_ids = self._collect_document_line_subtree_ids(document, line.id)
+        subtree = [existing for existing in document.lines if existing.id in subtree_ids]
+        if any(
+            existing.source.strip().upper() not in CHARGE_LINE_MANUAL_SOURCES
+            or existing.source_quote_option_line_id is not None
+            for existing in subtree
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Quote, rate-book, contract, or other derived charge lines cannot be deleted manually.",
+            )
+        if any(
+            result.charge_document_id == document.id and result.charge_line_id in subtree_ids
+            for result in self.repository.match_results.values()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Charge document lines cannot be deleted after invoice matches exist.",
+            )
+        document.lines = [existing for existing in document.lines if existing.id not in subtree_ids]
+        document.payer_total_amount, document.payee_total_amount = _document_totals(document.lines)
+        document.margin_amount = money(document.payee_total_amount - document.payer_total_amount)
+        return self.get_charge_document_workspace(charge_document_id)
 
     def update_charge_document_workspace(
         self,
@@ -2350,28 +2383,20 @@ class ChargeManagementService:
         document = self._require_document(charge_document_id)
         if payload.status is not None:
             next_status = payload.status.upper()
-            if next_status not in {"ESTIMATED", "ACCRUED", "ACTUAL", "DISPUTED"}:
+            if next_status not in CHARGE_DOCUMENT_MUTABLE_STATUSES:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Workspace status update is limited to ESTIMATED, ACCRUED, ACTUAL, or DISPUTED.",
                 )
+            if document.status.upper() in CHARGE_DOCUMENT_LOCKED_STATUSES and next_status != document.status.upper():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Charge document status cannot be reopened after approval, export, or reversal.",
+                )
             document.status = next_status
+            self._sync_document_line_statuses(document, next_status)
         if payload.lines is not None:
-            if document.status.upper() in {"APPROVED", "EXPORTED", "REVERSED"}:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Charge document lines cannot be updated after approval, export, or reversal.",
-                )
-            if document.quote_request_id is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Quote-awarded charge document lines are controlled by the awarded quote and cannot be edited here.",
-                )
-            if any(invoice.charge_document_id == document.id for invoice in self.repository.invoices.values()):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Charge document lines cannot be updated after invoices are captured.",
-                )
+            self._assert_document_line_mutation_allowed(document, action="update")
             document.lines = self._charge_lines_from_payloads(document, payload.lines)
         document.payer_total_amount, document.payee_total_amount = _document_totals(document.lines)
         document.margin_amount = money(document.payee_total_amount - document.payer_total_amount)
@@ -2523,18 +2548,39 @@ class ChargeManagementService:
 
     def approve_document(self, charge_document_id: int) -> ChargeActionResponse:
         document = self._require_document(charge_document_id)
+        if document.status == "APPROVED":
+            return ChargeActionResponse(document=document)
+        if document.status in {"EXPORTED", "REVERSED", "DISPUTED"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only mutable non-disputed charge documents can be approved.",
+            )
+        blocker = self._document_processing_blocker(document)
+        if blocker is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=blocker)
         document.status = "APPROVED"
         document.approved_at = utcnow()
+        self._sync_document_line_statuses(document, "APPROVED")
         for line in document.lines:
             line.approved_amount = line.actual_amount or line.expected_amount
         return ChargeActionResponse(document=document)
 
     def post_export(self, charge_document_id: int) -> ChargeExportResponse:
         document = self._require_document(charge_document_id)
-        if document.status not in {"APPROVED", "EXPORTED"}:
+        if document.status == "EXPORTED":
+            existing = next(
+                (response for response in self.repository.exports.values() if response.document.id == document.id),
+                None,
+            )
+            if existing is not None:
+                self._sync_document_line_statuses(document, "EXPORTED")
+                existing.document = document
+                return existing
+        if document.status != "APPROVED":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document must be approved first")
         document.status = "EXPORTED"
         document.exported_at = utcnow()
+        self._sync_document_line_statuses(document, "EXPORTED")
         export_number = f"EXP-{self.repository.next_id('export'):08d}"
         response = ChargeExportResponse(
             document=document,
@@ -2556,6 +2602,7 @@ class ChargeManagementService:
         document.status = "REVERSED"
         document.reversed_at = utcnow()
         document.reversal_reason = reason
+        self._sync_document_line_statuses(document, "REVERSED")
         return ChargeActionResponse(document=document)
 
     def _ensure_quote_commitment(
@@ -4482,6 +4529,130 @@ class ChargeManagementService:
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Charge document not found")
         return row
+
+    def _require_document_line(self, document: ChargeDocument, charge_line_id: int) -> ChargeLine:
+        for line in document.lines:
+            if line.id == charge_line_id:
+                return line
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Charge document line not found")
+
+    def _collect_document_line_subtree_ids(self, document: ChargeDocument, root_line_id: int) -> set[int]:
+        child_ids_by_parent: dict[int, set[int]] = defaultdict(set)
+        for line in document.lines:
+            if line.parent_line_id is not None:
+                child_ids_by_parent[int(line.parent_line_id)].add(line.id)
+        pending = [root_line_id]
+        subtree_ids: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if current in subtree_ids:
+                continue
+            subtree_ids.add(current)
+            pending.extend(sorted(child_ids_by_parent.get(current, set()), reverse=True))
+        return subtree_ids
+
+    def _sync_document_line_statuses(self, document: ChargeDocument, status_value: str) -> None:
+        normalized = status_value.upper()
+        if normalized not in CHARGE_LINE_LIFECYCLE_STATUSES:
+            return
+        for line in document.lines:
+            line.status = normalized
+
+    def _document_line_action_word(self, action: str) -> str:
+        return {
+            "update": "updated",
+            "delete": "deleted",
+        }.get(action, action)
+
+    def _object_change_phrase(self, object_label: str) -> str:
+        return "This charge document" if object_label == "Charge document" else "These charge document lines"
+
+    def _assert_document_line_mutation_allowed(
+        self,
+        document: ChargeDocument,
+        *,
+        action: str,
+        line_message: str | None = None,
+        object_label: str = "Charge document lines",
+    ) -> None:
+        if document.status.upper() in CHARGE_DOCUMENT_LOCKED_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=line_message
+                or f"{object_label} cannot be {self._document_line_action_word(action)} after approval, export, or reversal.",
+            )
+        if document.quote_request_id is not None or document.quote_option_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This charge document is controlled by its source quote and cannot be changed here."
+                    if object_label == "Charge document"
+                    else "These charge document lines are controlled by their source quote and cannot be changed here."
+                ),
+            )
+        if any(
+            line.source.strip().upper() not in CHARGE_LINE_MANUAL_SOURCES
+            or line.source_quote_option_line_id is not None
+            for line in document.lines
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{self._object_change_phrase(object_label)} cannot be changed when quote, rate-book, contract, or other derived charge lines are present.",
+            )
+        if any(invoice.charge_document_id == document.id for invoice in self.repository.invoices.values()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{object_label} cannot be changed after invoices are captured.",
+            )
+        if any(result.charge_document_id == document.id for result in self.repository.match_results.values()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{object_label} cannot be changed after invoice matches exist.",
+            )
+        if any(response.document.id == document.id for response in self.repository.exports.values()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{object_label} cannot be changed after export batches exist.",
+            )
+        if any(commitment.charge_document_id == document.id for commitment in self.repository.quote_commitments.values()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{object_label} cannot be changed while quote commitments are linked.",
+            )
+
+    def _processing_status_from_snapshot(self, snapshot: dict[str, Any] | None) -> str | None:
+        if not isinstance(snapshot, dict):
+            return None
+        for key in ("status", "state", "calculation_status", "allocation_status"):
+            value = snapshot.get(key)
+            if value is None:
+                continue
+            normalized = str(value).strip().upper()
+            if normalized in PROCESSING_BLOCKED_STATUSES:
+                return normalized
+        return None
+
+    def _line_processing_blocker(self, line: ChargeLine) -> str | None:
+        snapshot_specs = (
+            (line.calculation_audit_json, "calculation"),
+            (line.effective_allocation_snapshot_json, "allocation"),
+            (line.pinned_allocation_snapshot_json, "allocation"),
+        )
+        for snapshot, label in snapshot_specs:
+            state_value = self._processing_status_from_snapshot(snapshot)
+            if state_value is None:
+                continue
+            if state_value in {"PENDING", "PENDING_CONTEXT"}:
+                return f"Line {line.line_number or line.id} still has pending {label}."
+            return f"Line {line.line_number or line.id} has failed {label}."
+        return None
+
+    def _document_processing_blocker(self, document: ChargeDocument) -> str | None:
+        for line in document.lines:
+            blocker = self._line_processing_blocker(line)
+            if blocker is not None:
+                return f"Charge document cannot be approved while {blocker.lower()}"
+        return None
 
     def _require_invoice(self, invoice_id: int) -> ChargeInvoice:
         row = self.repository.invoices.get(invoice_id)

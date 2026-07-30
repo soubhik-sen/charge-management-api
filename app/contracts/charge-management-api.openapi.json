@@ -3344,6 +3344,11 @@
             "title": "Relationship Role",
             "type": "string"
           },
+          "source": {
+            "default": "MANUAL",
+            "title": "Source",
+            "type": "string"
+          },
           "source_amount": {
             "anyOf": [
               {
@@ -3805,6 +3810,11 @@
               "PAYEE"
             ],
             "title": "Relationship Role",
+            "type": "string"
+          },
+          "source": {
+            "default": "MANUAL",
+            "title": "Source",
             "type": "string"
           },
           "source_amount": {
@@ -4717,6 +4727,11 @@
             "title": "Relationship Role",
             "type": "string"
           },
+          "source": {
+            "default": "MANUAL",
+            "title": "Source",
+            "type": "string"
+          },
           "source_amount": {
             "anyOf": [
               {
@@ -4750,6 +4765,11 @@
               }
             ],
             "title": "Source Quote Option Line Id"
+          },
+          "status": {
+            "default": "ESTIMATED",
+            "title": "Status",
+            "type": "string"
           },
           "target_level": {
             "anyOf": [
@@ -13737,6 +13757,110 @@
           }
         ],
         "summary": "Approve Document",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/charge-documents/{charge_document_id}/lines/{charge_line_id}": {
+      "delete": {
+        "operationId": "delete_charge_document_line_api_v1_charge_management_charge_documents__charge_document_id__lines__charge_line_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "charge_document_id",
+            "required": true,
+            "schema": {
+              "title": "Charge Document Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "charge_line_id",
+            "required": true,
+            "schema": {
+              "title": "Charge Line Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeDocumentWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Charge Document Line",
         "tags": [
           "Charge Management"
         ]

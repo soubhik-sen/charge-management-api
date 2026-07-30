@@ -425,6 +425,7 @@ A charge line records one component amount and its audit context:
 - Business date and date-basis decision.
 - Allocation profile, target, ratio, and driver snapshot.
 - Source contract/rate or quote lineage.
+- Line provenance such as `MANUAL`, legacy `DIRECT`, or `QUOTE`.
 - Calculation audit JSON.
 - Pinned calculation profile/version plus configuration and factor-input snapshots.
 
@@ -435,12 +436,13 @@ A charge line records one component amount and its audit context:
 1. Create directly with `POST /charge-documents` or award a quote.
 2. Find documents with `GET /charge-documents`.
 3. Open/update through `/charge-documents/{id}/workspace` while editable.
-4. Capture and match related invoices.
-5. Approve with `POST /charge-documents/{id}/approve`.
-6. Export with `POST /charge-documents/{id}/post-export`.
-7. Reverse an approved/exported document with `POST /charge-documents/{id}/reverse`.
+4. Delete only direct/manual root conceptual lines with `DELETE /charge-documents/{id}/lines/{line_id}`. The API removes the selected root and its descendant allocation/calculation subtree and recalculates totals.
+5. Capture and match related invoices.
+6. Approve with `POST /charge-documents/{id}/approve`.
+7. Export with `POST /charge-documents/{id}/post-export`.
+8. Reverse an approved/exported document with `POST /charge-documents/{id}/reverse`.
 
-Quote-controlled lines remain tied to the awarded outcome. Direct-document lines can be replaced while the document remains editable and before downstream lifecycle locks apply.
+Quote-controlled lines remain tied to the awarded outcome. Direct-document lines can be replaced while the document remains editable and before downstream lifecycle locks apply. Child posting/allocation rows cannot be deleted independently; delete the root conceptual line instead.
 
 ## Invoice And Matching
 
@@ -468,15 +470,17 @@ Updating an invoice clears stale match results and returns it to `CAPTURED` so i
 
 ### Approval
 
-Approval moves the charge document to `APPROVED` and copies each line's actual amount, or expected amount when actual is absent, into `approved_amount`.
+Approval moves the charge document to `APPROVED`, synchronizes each line to `APPROVED`, and copies each line's actual amount, or expected amount when actual is absent, into `approved_amount`.
+
+`APPROVED` is the formal immutable boundary for workspace editing. The API treats a repeated approval request on an already approved document as idempotent, but it blocks approval from `DISPUTED`, `EXPORTED`, and `REVERSED`, and from lines carrying pending/failed calculation or allocation snapshot states.
 
 ### Export
 
-Export requires an approved document. The default endpoint creates an export number, marks the document as exported, stores the result in the configured repository, and returns an `INTERNAL_LEDGER` JSON payload. The codebase declares a `FinancialExportAdapter` extension seam, but it is not wired into the default service. Integrators must wire that adapter or replace the service composition before assuming a payload is sent to a ledger, ERP, billing system, or event bus.
+Export requires an approved document. The default endpoint creates an export number, marks the document and its lines as `EXPORTED`, stores the result in the configured repository, and returns an `INTERNAL_LEDGER` JSON payload. A repeated export call on the same document returns the existing export batch instead of creating a duplicate. The codebase declares a `FinancialExportAdapter` extension seam, but it is not wired into the default service. Integrators must wire that adapter or replace the service composition before assuming a payload is sent to a ledger, ERP, billing system, or event bus.
 
 ### Reversal
 
-Only approved or exported documents can be reversed. Reversal preserves the document and records status, timestamp, and reason rather than deleting financial history.
+Only approved or exported documents can be reversed. Reversal synchronizes document lines to `REVERSED` and preserves the document with its status, timestamp, and reason rather than deleting financial history.
 
 ## Common Misunderstandings
 
