@@ -1,9 +1,9 @@
-# Charge Management API
+# LedgerFlow
 
 [![CI](https://github.com/soubhik-sen/charge-management-api/actions/workflows/ci.yml/badge.svg)](https://github.com/soubhik-sen/charge-management-api/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-An open-source, adapter-neutral API for defining, calculating, allocating, converting, approving, and reconciling charges. It is designed for logistics and other multi-party pricing workflows without requiring a particular ERP, identity provider, or host application.
+An open-source charge-management monorepo for defining, calculating, allocating, converting, approving, and reconciling charges. LedgerFlow includes an adapter-neutral FastAPI service, PostgreSQL schema and migrations, and a responsive Flutter web workspace without requiring a particular ERP or identity provider.
 
 > **Project status:** `0.2.0` beta. The API and database are usable, but compatibility may still change before `1.0.0`.
 
@@ -25,6 +25,7 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 - PostgreSQL runtime with SQLAlchemy and Alembic migrations.
 - JWT authentication using any standards-compliant issuer through JWKS or a shared secret.
 - Generated OpenAPI contract and PostgreSQL-backed API tests with JUnit/coverage reports.
+- Responsive operations UI for quotes, charge documents, invoice reconciliation, rate books, components, profiles, business dates, and FX rates.
 
 ## Five-Minute Start
 
@@ -49,6 +50,16 @@ curl -H "Authorization: Bearer local-dev-token" \
 ```
 
 The compose profile deliberately uses `AUTH_MODE=development` for evaluation. It still requires a bearer token, but it does not verify the token. Configure JWT mode before exposing the API to any network.
+
+Run the web workspace in a second terminal:
+
+```bash
+cd apps/ledgerflow_web
+flutter pub get
+flutter run -d chrome --dart-define=LEDGERFLOW_API_URL=http://localhost:8000
+```
+
+The UI opens with representative demo data. Select **Connect API**, enter `http://localhost:8000`, and use `local-dev-token` for the Docker development profile. The token is held only in application memory.
 
 ## Authentication Decision
 
@@ -75,6 +86,7 @@ On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1` instead. Set
 The repository includes `render.yaml` for the `LEDGERFLOW` project's `Dev & QA` environment. The Blueprint provisions:
 
 - `ledgerflow-api-devqa`, a Python web service that applies Alembic migrations before startup.
+- `ledgerflow-web-devqa`, a static Flutter web application with demo and live API modes.
 - `ledgerflow-db-devqa`, a private Render PostgreSQL database.
 - Secure JWT validation with a Render-generated HS256 secret.
 
@@ -91,6 +103,7 @@ Create or update the Blueprint from this repository in Render. The API health en
 | [Database](docs/database.md) | Schema groups, migrations, and persistence behavior |
 | [Testing](docs/testing.md) | Local and CI reports, PostgreSQL tests, and OpenAPI checks |
 | [Architecture](docs/architecture.md) | Layers, domain boundary, and extension adapters |
+| [Web application](docs/web-application.md) | UI modules, local use, authentication, and deployment |
 | [Generated OpenAPI](app/contracts/charge-management-api.openapi.json) | Complete machine-readable endpoint contract |
 
 ## Test Results
@@ -105,7 +118,7 @@ The command writes `test-results/summary.md`, `junit.xml`, and `coverage.xml`. G
 
 ## Project Boundary
 
-The service owns generic charge-management API contracts, database schemas, migrations, rating behavior, and lifecycle behavior. Integrators own product UI, identity issuance, authorization rules, tenant isolation policy, source-object hydration, document storage, and ERP/ledger export implementations.
+The monorepo owns generic charge-management API contracts, database schemas, migrations, rating behavior, lifecycle behavior, and an optional reference UI. Integrators still own identity issuance, authorization rules, tenant isolation policy, source-object hydration, document storage, and ERP/ledger export implementations. The Flutter UI is an API client, not a privileged security boundary.
 
 ## Contributing And Security
 

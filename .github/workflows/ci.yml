@@ -55,3 +55,23 @@ jobs:
           name: test-results-python-${{ matrix.python-version }}
           path: test-results/
           if-no-files-found: warn
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/ledgerflow_web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install web dependencies
+        run: flutter pub get
+      - name: Analyze web application
+        run: flutter analyze
+      - name: Test web application
+        run: flutter test
+      - name: Build web application
+        run: flutter build web --release --dart-define=LEDGERFLOW_API_URL=https://api.example.com

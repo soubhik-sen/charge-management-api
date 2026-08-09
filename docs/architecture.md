@@ -1,6 +1,6 @@
 # Architecture
 
-The service separates reusable charge behavior from the consuming application's identity, source objects, UI, and financial systems.
+LedgerFlow separates reusable charge behavior from the consuming application's identity, source objects, and financial systems. The monorepo includes an optional reference web application that consumes only the public API contract.
 
 ## Layers
 
@@ -9,12 +9,14 @@ The service separates reusable charge behavior from the consuming application's 
 - `app.db`: SQLAlchemy schema and database session management.
 - `app.infrastructure`: database-backed repository/services and replaceable integration adapters.
 - `alembic`: ordered schema migrations and generic seed data.
+- `apps/ledgerflow_web`: responsive Flutter workspace, API client, and local demo dataset.
 
 ## Request Flow
 
 ```mermaid
 flowchart LR
-    C["Client or API gateway"] --> J["JWT validation"]
+    U["LedgerFlow web or another client"] --> C["API gateway / CORS boundary"]
+    C --> J["JWT validation"]
     J --> P["PolicyAdapter"]
     P --> A["FastAPI route"]
     A --> D["Domain service"]
@@ -48,7 +50,7 @@ It intentionally does not own:
 
 - Host-application role names or user administration.
 - Host-specific shipment, purchase-order, or sales-order schemas.
-- UI navigation, workspace metadata, or translation policy.
+- Host-application navigation, workspace metadata, or translation policy.
 - ERP-specific posting objects or ledger mappings.
 - Customer-specific authorization and tenant policy.
 
@@ -60,3 +62,7 @@ It intentionally does not own:
 - Document storage can be connected at the consuming application boundary.
 
 Adapters should translate external concepts into the neutral API contract rather than adding product-specific names to the core schema.
+
+## Web Application Boundary
+
+The Flutter application is a replaceable reference client. It has no direct database access, does not mint or validate JWTs, and does not import FLUX or another host product. It starts in a local demo mode for evaluation and accepts a bearer token in memory when an operator connects to a live API. All authorization decisions remain server-side.
