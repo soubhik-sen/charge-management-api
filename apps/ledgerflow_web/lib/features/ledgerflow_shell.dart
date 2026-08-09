@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/api_client.dart';
 import '../core/design.dart';
 import '../data/workspace_data.dart';
+import 'management_workspaces.dart';
 import 'workspace_pages.dart';
 
 class LedgerFlowShell extends StatefulWidget {
@@ -31,6 +32,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
   bool _live = false;
   String _apiUrl = LedgerFlowApiClient.defaultBaseUrl;
   String? _lastError;
+  LedgerFlowApiClient? _client;
 
   @override
   Widget build(BuildContext context) {
@@ -198,22 +200,21 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
     2 => ChargeDocumentWorkspace(documents: _data['documents']),
     3 => InvoiceWorkspace(invoices: _data['invoices']),
     4 => RateBookWorkspace(rateBooks: _data['rateBooks']),
-    5 => CatalogWorkspace(
-      title: 'Charge components',
-      description:
-          'Reusable charge identities define category, payer/payee role, calculation basis, date basis, and profile defaults.',
+    5 => ComponentManagementWorkspace(
       records: _data['components'],
-      columns: const [
-        'component_code',
-        'component_name',
-        'category',
-        'default_party_role',
-        'calculation_basis',
-        'charge_date_basis',
-      ],
+      calculationProfiles: _data['calculationProfiles'],
+      allocationProfiles: _data['allocationProfiles'],
+      businessDateProfiles: _data['dateProfiles'],
+      live: _live,
+      onMutation: _mutate,
     ),
-    6 => ProfileHub(data: _data),
-    _ => FxAndDatesWorkspace(data: _data),
+    6 => ProfileManagementHub(data: _data, live: _live, onMutation: _mutate),
+    _ => FxDateManagementHub(
+      data: _data,
+      live: _live,
+      onMutation: _mutate,
+      loadAssignments: _live ? _loadAssignments : null,
+    ),
   };
 
   void _selectPage(int index) => setState(() => _selectedIndex = index);
@@ -285,6 +286,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
         _data = WorkspaceData.demo();
         _live = false;
         _lastError = null;
+        _client = null;
       });
       return;
     }
@@ -301,15 +303,14 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
       _lastError = null;
     });
     try {
-      final data = await LedgerFlowApiClient(
-        baseUrl: url,
-        token: token,
-      ).loadWorkspace();
+      final client = LedgerFlowApiClient(baseUrl: url, token: token);
+      final data = await client.loadWorkspace();
       if (!mounted) return;
       setState(() {
         _data = data;
         _apiUrl = url;
         _live = true;
+        _client = client;
       });
       _token = token;
     } catch (error) {
@@ -326,6 +327,65 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
     final token = _token;
     if (token == null) return;
     await _connect(_apiUrl, token);
+  }
+
+  Future<bool> _mutate({
+    required String method,
+    required String path,
+    JsonMap? body,
+    required String successMessage,
+  }) async {
+    final client = _client;
+    if (client == null) return false;
+    setState(() {
+      _loading = true;
+      _lastError = null;
+    });
+    try {
+      try {
+        await client.requestJson(method, path, body: body);
+      } catch (error) {
+        if (mounted) {
+          setState(() => _lastError = 'The change could not be saved: $error');
+        }
+        return false;
+      }
+      try {
+        final data = await client.loadWorkspace();
+        if (mounted) setState(() => _data = data);
+      } catch (error) {
+        if (mounted) {
+          setState(
+            () => _lastError =
+                '$successMessage Refresh failed; use the refresh action: $error',
+          );
+        }
+      }
+      if (!mounted) return true;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(successMessage)));
+      return true;
+    } catch (error) {
+      // Defensive fallback for unexpected client failures.
+      if (mounted) setState(() => _lastError = 'Request failed: $error');
+      return false;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<List<JsonMap>> _loadAssignments(int profileId) async {
+    final client = _client;
+    if (client == null) return const [];
+    try {
+      return await client.loadBusinessDateAssignments(profileId);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _lastError = 'Assignments could not be loaded: $error');
+      }
+      return const [];
+    }
   }
 }
 

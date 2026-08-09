@@ -47,6 +47,39 @@ class LedgerFlowApiClient {
     return WorkspaceData(Map.fromEntries(loaded));
   }
 
+  Future<JsonMap> requestJson(
+    String method,
+    String path, {
+    JsonMap? body,
+  }) async {
+    final request = http.Request(
+      method.toUpperCase(),
+      Uri.parse('$baseUrl$path'),
+    )..headers.addAll(_headers);
+    if (body != null) {
+      request.headers['Content-Type'] = 'application/json';
+      request.body = jsonEncode(body);
+    }
+    final streamed = await _httpClient.send(request);
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw LedgerFlowApiException.fromResponse(response);
+    }
+    if (response.body.trim().isEmpty) return <String, dynamic>{};
+    final payload = jsonDecode(response.body);
+    if (payload is! Map<String, dynamic>) {
+      throw const LedgerFlowApiException(
+        'The API returned an unexpected object response.',
+      );
+    }
+    return JsonMap.from(payload);
+  }
+
+  Future<List<JsonMap>> loadBusinessDateAssignments(int profileId) => _list(
+    '/api/v1/charge-management/business-date-profiles/$profileId/assignments'
+    '?limit=100&offset=0',
+  );
+
   Future<List<JsonMap>> _list(String path) async {
     final response = await _httpClient.get(
       Uri.parse('$baseUrl$path'),

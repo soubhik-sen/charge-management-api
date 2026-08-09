@@ -11,9 +11,9 @@ The Flutter web application under `apps/ledgerflow_web` is the reference user in
 | Charge documents | Expected charges, status, approval checks, and calculation, allocation, business-date, rate, and FX provenance. |
 | Invoices | Exception-first line matching, variance totals, resolution choices, match health, and linked document context. |
 | Rate books | Version/status context, date-effective rate rows, applicability, calculation/allocation profile references, and selected-rate inspection. |
-| Components | Canonical charge identity, category, payer/payee role, calculation basis, date basis, and active state. |
-| Profiles | Calculation profiles and allocation profiles with published-version visibility. |
-| FX & dates | Directional FX rates with source provenance and versioned business-date profiles. |
+| Components | Search, inspect, create, edit, deactivate, and attach calculation, allocation, and business-date defaults. |
+| Profiles | Create/edit calculation and allocation profiles, manage draft versions, publish releases, and inspect usage. |
+| FX & dates | Inspect directional FX rates; create/version/publish business-date profiles and maintain scoped assignments. |
 
 The UI fields use the public JSON names from the OpenAPI contract. Unknown optional fields degrade to empty or inherited values instead of requiring host-specific metadata.
 
@@ -59,6 +59,10 @@ flutter build web --release --dart-define=LEDGERFLOW_API_URL=https://api.example
 
 The compiled site is written to `apps/ledgerflow_web/build/web`. Configure an SPA rewrite from `/*` to `/index.html` on the static host.
 
-## API Mutations
+## Administration Workflows
 
-The current reference UI focuses on operations, comparison, provenance, and maintenance visibility. The API remains the complete contract for create, update, publish, award, approve, reverse, match, and export actions. Use `/docs` and [API examples](api-examples.md) while integrating those actions into an adopter-specific authorization and approval model.
+When connected to a live API, the reference UI performs persisted component and profile administration through the public REST contract. It supports component create/edit/deactivate, calculation and allocation profile create/edit/version/publish, business-date profile create/edit/version/publish, and business-date assignment create/edit/remove.
+
+Demo mode deliberately disables writes. Profile selectors show published definitions only, while inspectors retain complete version history. API lifecycle and authorization checks remain authoritative.
+
+See [UI administration](ui-administration.md) for task-oriented instructions. Other API lifecycle operations, including rate-book workspace replacement, quote award, charge approval/reversal/export, and invoice matching, remain documented in [API examples](api-examples.md) and interactive Swagger at `/docs` until their reference UI actions are implemented.

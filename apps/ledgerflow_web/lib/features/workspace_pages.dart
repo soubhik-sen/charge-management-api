@@ -1120,37 +1120,52 @@ class PageCanvas extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
               ],
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final heading = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 30,
+                          height: 1.1,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: LedgerFlowDesign.muted,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                  );
+                  if (trailing == null) return heading;
+                  if (constraints.maxWidth < 760) {
+                    return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 30,
-                            height: 1.1,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          subtitle,
-                          style: const TextStyle(
-                            color: LedgerFlowDesign.muted,
-                            height: 1.45,
-                          ),
+                        heading,
+                        const SizedBox(height: 16),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: trailing!,
                         ),
                       ],
-                    ),
-                  ),
-                  if (trailing != null) ...[
-                    const SizedBox(width: 16),
-                    trailing!,
-                  ],
-                ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: heading),
+                      const SizedBox(width: 16),
+                      trailing!,
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 24),
               ...children,

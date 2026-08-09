@@ -31,6 +31,10 @@ final List<JsonMap> _components = [
     'charge_context': 'TRANSPORT',
     'calculation_basis': 'CONTAINER',
     'charge_date_basis': 'SHIPMENT_DEPARTURE_DATE',
+    'business_date_policy_mode': 'PROFILE_OVERRIDE',
+    'business_date_profile_id': 1,
+    'allocation_profile_id': 1,
+    'default_calculation_profile_id': 1,
     'is_active': true,
   },
   {
@@ -42,6 +46,8 @@ final List<JsonMap> _components = [
     'charge_context': 'TRANSPORT',
     'calculation_basis': 'PERCENTAGE',
     'charge_date_basis': 'SHIPMENT_DEPARTURE_DATE',
+    'business_date_policy_mode': 'INHERIT_PROFILE',
+    'default_calculation_profile_id': 2,
     'is_active': true,
   },
   {
@@ -53,6 +59,9 @@ final List<JsonMap> _components = [
     'charge_context': 'TRANSPORT',
     'calculation_basis': 'CONTAINER',
     'charge_date_basis': 'DOCUMENT_DATE',
+    'business_date_policy_mode': 'LEGACY_BASIS',
+    'allocation_profile_id': 1,
+    'default_calculation_profile_id': 1,
     'is_active': true,
   },
   {
@@ -64,6 +73,7 @@ final List<JsonMap> _components = [
     'charge_context': 'TRANSPORT',
     'calculation_basis': 'SHIPMENT',
     'charge_date_basis': 'DOCUMENT_DATE',
+    'business_date_policy_mode': 'LEGACY_BASIS',
     'is_active': true,
   },
 ];
@@ -494,14 +504,56 @@ final List<JsonMap> _dateProfiles = [
     'published_version_number': 3,
     'versions': [
       {
+        'id': 103,
         'version_number': 3,
         'status': 'PUBLISHED',
         'notes': 'Current production resolution order',
+        'steps': [
+          {
+            'id': 301,
+            'step_number': 1,
+            'date_key': 'SHIPMENT_ACTUAL_DEPARTURE_DATE',
+            'notes': 'Primary service date',
+          },
+          {
+            'id': 302,
+            'step_number': 2,
+            'date_key': 'SHIPMENT_PLANNED_DEPARTURE_DATE',
+            'notes': 'Use when actual departure is unavailable',
+          },
+          {
+            'id': 303,
+            'step_number': 3,
+            'date_key': 'SHIPMENT_ARRIVAL_DATE',
+            'notes': 'Use when departure dates are unavailable',
+          },
+          {
+            'id': 304,
+            'step_number': 4,
+            'date_key': 'DOCUMENT_DATE',
+            'notes': 'Final fallback',
+          },
+        ],
       },
       {
+        'id': 102,
         'version_number': 2,
-        'status': 'ARCHIVED',
+        'status': 'RETIRED',
         'notes': 'Previous fallback order',
+        'steps': [
+          {'step_number': 1, 'date_key': 'DOCUMENT_DATE'},
+        ],
+      },
+    ],
+    'assignments': [
+      {
+        'id': 501,
+        'scope_type': 'GLOBAL',
+        'scope_id': null,
+        'shipment_scope': 'OCEAN_HOUSE',
+        'business_purpose': 'EXCHANGE_RATE_DATE',
+        'priority': 100,
+        'is_active': true,
       },
     ],
   },
@@ -515,11 +567,16 @@ final List<JsonMap> _allocationProfiles = [
     'published_version_number': 2,
     'versions': [
       {
+        'id': 202,
         'version_number': 2,
         'status': 'PUBLISHED',
         'source_level': 'SHIPMENT',
         'final_posting_level': 'HOUSE',
         'source_to_house_driver': 'GROSS_WEIGHT',
+        'house_to_item_driver': null,
+        'default_quantity_uom': 'KG',
+        'settings_json': {},
+        'notes': 'Production allocation policy',
       },
     ],
   },
@@ -533,6 +590,27 @@ final List<JsonMap> _calculationProfiles = [
     'description': 'Multiply a flat rate by eligible container quantity.',
     'published_version_number': 3,
     'is_active': true,
+    'versions': [
+      {
+        'id': 403,
+        'version_number': 3,
+        'status': 'PUBLISHED',
+        'application_level': 'CONTAINER',
+        'calculation_method': 'RATE_TIMES_PRODUCT',
+        'rate_uom': 'USD/CONTAINER',
+        'missing_factor_policy': 'BLOCK',
+        'factors': [
+          {
+            'sequence': 1,
+            'factor_code': 'CONTAINER_COUNT',
+            'factor_label': 'Eligible container count',
+            'resolver': 'CONTAINER_COUNT',
+            'uom': 'CONTAINER',
+            'is_required': true,
+          },
+        ],
+      },
+    ],
   },
   {
     'id': 2,
@@ -541,6 +619,27 @@ final List<JsonMap> _calculationProfiles = [
     'description': 'Calculate a surcharge as a percentage of another charge.',
     'published_version_number': 2,
     'is_active': true,
+    'versions': [
+      {
+        'id': 412,
+        'version_number': 2,
+        'status': 'PUBLISHED',
+        'application_level': 'SHIPMENT',
+        'calculation_method': 'RATE_TIMES_PRODUCT',
+        'rate_uom': 'PERCENT',
+        'missing_factor_policy': 'BLOCK',
+        'factors': [
+          {
+            'sequence': 1,
+            'factor_code': 'BASE_AMOUNT',
+            'factor_label': 'Eligible base charge amount',
+            'resolver': 'MANUAL',
+            'uom': 'AMOUNT',
+            'is_required': true,
+          },
+        ],
+      },
+    ],
   },
 ];
 

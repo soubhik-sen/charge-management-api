@@ -104,6 +104,7 @@ Create or update the Blueprint from this repository in Render. The API health en
 | [Testing](docs/testing.md) | Local and CI reports, PostgreSQL tests, and OpenAPI checks |
 | [Architecture](docs/architecture.md) | Layers, domain boundary, and extension adapters |
 | [Web application](docs/web-application.md) | UI modules, local use, authentication, and deployment |
+| [UI administration](docs/ui-administration.md) | Create, publish, assign, and use components and profiles |
 | [Generated OpenAPI](app/contracts/charge-management-api.openapi.json) | Complete machine-readable endpoint contract |
 
 ## Test Results
