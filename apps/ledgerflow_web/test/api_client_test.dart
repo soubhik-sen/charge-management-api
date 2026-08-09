@@ -33,6 +33,53 @@ void main() {
     expect(data['components'], isEmpty);
   });
 
+  test('loads workspace resources across all server pages', () async {
+    final componentOffsets = <String>[];
+    final client = MockClient((request) async {
+      expect(request.headers['Authorization'], 'Bearer test-token');
+
+      if (request.url.path == '/api/v1/charge-management/components') {
+        final offset = request.url.queryParameters['offset'] ?? '0';
+        componentOffsets.add(offset);
+        final start = int.parse(offset);
+        final end = (start + 100).clamp(0, 205);
+        return http.Response(
+          jsonEncode({
+            'items': [
+              for (var id = start + 1; id <= end; id++)
+                {'id': id, 'component_code': 'COMP-$id'},
+            ],
+            'total': 205,
+            'limit': 100,
+            'offset': start,
+          }),
+          200,
+        );
+      }
+
+      return http.Response(
+        jsonEncode({
+          'items': <Object>[],
+          'total': 0,
+          'limit': 100,
+          'offset': 0,
+        }),
+        200,
+      );
+    });
+
+    final data = await LedgerFlowApiClient(
+      baseUrl: 'https://api.example.test/',
+      token: 'test-token',
+      httpClient: client,
+    ).loadWorkspace();
+
+    expect(componentOffsets, ['0', '100', '200']);
+    expect(data['components'], hasLength(205));
+    expect(data['components'].first['component_code'], 'COMP-1');
+    expect(data['components'].last['component_code'], 'COMP-205');
+  });
+
   test('surfaces API detail errors', () async {
     final client = MockClient(
       (_) async => http.Response(jsonEncode({'detail': 'Token expired'}), 401),
@@ -116,5 +163,37 @@ void main() {
       '/api/v1/charge-management/business-date-profiles/7/assignments',
     );
     expect(assignments.single['scope_type'], 'GLOBAL');
+  });
+
+  test('fails when pagination metadata does not advance safely', () async {
+    final client = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'items': [
+            {'id': 9, 'scope_type': 'GLOBAL'},
+          ],
+          'total': 200,
+          'limit': 100,
+          'offset': 0,
+        }),
+        200,
+      );
+    });
+    final api = LedgerFlowApiClient(
+      baseUrl: 'https://api.example.test',
+      token: 'test-token',
+      httpClient: client,
+    );
+
+    await expectLater(
+      api.loadBusinessDateAssignments(7),
+      throwsA(
+        isA<LedgerFlowApiException>().having(
+          (error) => error.message,
+          'message',
+          'The API returned too many list pages or an invalid pagination sequence.',
+        ),
+      ),
+    );
   });
 }

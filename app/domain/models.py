@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, model_validator
 
 
 def utcnow() -> datetime:
@@ -58,12 +58,29 @@ class ChargeComponent(ApiModel):
     is_tax: bool = False
     is_active: bool = True
 
+    @computed_field
+    @property
+    def default_side(self) -> Literal["PAYER", "PAYEE", "BOTH"]:
+        return self.default_party_role
+
+    @computed_field
+    @property
+    def default_relationship_role(self) -> Literal["PAYER", "PAYEE", "BOTH"]:
+        return self.default_party_role
+
+    @computed_field
+    @property
+    def default_allocation_profile_id(self) -> int | None:
+        return self.allocation_profile_id
+
 
 class ChargeComponentPayload(ApiModel):
     component_code: str
     component_name: str
     category: str = "ACCESSORIAL"
-    default_party_role: Literal["PAYER", "PAYEE", "BOTH"] = "BOTH"
+    default_party_role: Literal["PAYER", "PAYEE", "BOTH"] | None = None
+    default_side: Literal["PAYER", "PAYEE", "BOTH"] | None = None
+    default_relationship_role: Literal["PAYER", "PAYEE", "BOTH"] | None = None
     charge_context: str = "TRANSPORT"
     calculation_basis: str = "FLAT"
     charge_date_basis: Literal[
@@ -76,10 +93,43 @@ class ChargeComponentPayload(ApiModel):
     business_date_policy_mode: Literal["LEGACY_BASIS", "INHERIT_PROFILE", "PROFILE_OVERRIDE"] = "LEGACY_BASIS"
     business_date_profile_id: int | None = None
     allocation_profile_id: int | None = None
+    default_allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
     default_calculation_profile_id: int | None = None
     is_tax: bool = False
     is_active: bool = True
+
+    @model_validator(mode="after")
+    def normalize_flux_compatibility_fields(self) -> "ChargeComponentPayload":
+        roles = {
+            value
+            for value in (
+                self.default_party_role,
+                self.default_side,
+                self.default_relationship_role,
+            )
+            if value is not None
+        }
+        if len(roles) > 1:
+            raise ValueError(
+                "default_party_role, default_side, and default_relationship_role must agree"
+            )
+        resolved_role = next(iter(roles), "BOTH")
+        self.default_party_role = resolved_role
+        self.default_side = resolved_role
+        self.default_relationship_role = resolved_role
+        if (
+            self.allocation_profile_id is not None
+            and self.default_allocation_profile_id is not None
+            and self.allocation_profile_id != self.default_allocation_profile_id
+        ):
+            raise ValueError(
+                "allocation_profile_id and default_allocation_profile_id must agree"
+            )
+        resolved_profile_id = self.allocation_profile_id or self.default_allocation_profile_id
+        self.allocation_profile_id = resolved_profile_id
+        self.default_allocation_profile_id = resolved_profile_id
+        return self
 
 
 class ChargeComponentListResponse(ApiModel):
@@ -135,17 +185,27 @@ class ChargeComponentAliasListResponse(ApiModel):
 
 
 class ChargeAllocationProfileVersionPayload(ApiModel):
+    effective_from: date | None = None
+    effective_to: date | None = None
     source_level: Literal["SHIPMENT", "CONTAINER", "HOUSE"]
     source_to_house_driver: str | None = None
     house_to_item_driver: str | None = None
     final_posting_level: Literal["HOUSE", "PO_SCHEDULE_LINE"]
     default_quantity_uom: str | None = None
+    missing_driver_policy: Literal["BLOCK", "EQUAL"] = "BLOCK"
     settings_json: dict[str, Any] = Field(default_factory=dict)
     notes: str | None = None
 
+    @model_validator(mode="after")
+    def validate_effective_period(self) -> "ChargeAllocationProfileVersionPayload":
+        if self.effective_from is not None and self.effective_to is not None:
+            if self.effective_from > self.effective_to:
+                raise ValueError("effective_from must be less than or equal to effective_to")
+        return self
+
 
 class ChargeAllocationProfileVersionCreate(ChargeAllocationProfileVersionPayload):
-    pass
+    expected_lock_version: int | None = Field(default=None, ge=1)
 
 
 class ChargeAllocationProfileCreate(ApiModel):
@@ -164,6 +224,7 @@ class ChargeAllocationProfileVersion(ChargeAllocationProfileVersionPayload):
     profile_id: int
     version_number: int
     status: Literal["DRAFT", "PUBLISHED", "RETIRED"] = "DRAFT"
+    lock_version: int = 1
     published_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -213,7 +274,7 @@ class ChargeCalculationProfileVersionPayload(ApiModel):
 
 
 class ChargeCalculationProfileVersionCreate(ChargeCalculationProfileVersionPayload):
-    pass
+    expected_lock_version: int | None = Field(default=None, ge=1)
 
 
 class ChargeCalculationProfileVersion(ChargeCalculationProfileVersionPayload):
@@ -277,21 +338,55 @@ class BusinessDateProfileStepCreate(BusinessDateProfileStepPayload):
 class BusinessDateProfileVersionPayload(ApiModel):
     steps: list[BusinessDateProfileStepCreate] = Field(default_factory=list)
     notes: str | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+
+    @model_validator(mode="after")
+    def validate_effective_period(self) -> "BusinessDateProfileVersionPayload":
+        if self.effective_from is not None and self.effective_to is not None:
+            if self.effective_from > self.effective_to:
+                raise ValueError("effective_from must be less than or equal to effective_to")
+        return self
 
 
 class BusinessDateProfileVersionCreate(BusinessDateProfileVersionPayload):
-    pass
+    expected_lock_version: int | None = Field(default=None, ge=1)
 
 
 class BusinessDateProfileCreate(ApiModel):
-    profile_code: str
+    profile_code: str = Field(
+        validation_alias=AliasChoices("profile_code", "profile_key")
+    )
     profile_name: str
     description: str | None = None
-    initial_version: BusinessDateProfileVersionCreate
+    initial_version: BusinessDateProfileVersionCreate | None = None
+    event_codes: list[str] | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+
+    @model_validator(mode="after")
+    def normalize_flat_version(self) -> "BusinessDateProfileCreate":
+        if self.initial_version is None:
+            if not self.event_codes:
+                raise ValueError("initial_version or event_codes is required")
+            self.initial_version = BusinessDateProfileVersionCreate(
+                effective_from=self.effective_from,
+                effective_to=self.effective_to,
+                steps=[
+                    BusinessDateProfileStepCreate(
+                        step_number=index * 10,
+                        date_key=event_code,
+                    )
+                    for index, event_code in enumerate(self.event_codes, start=1)
+                ],
+            )
+        return self
 
 
 class BusinessDateProfileUpdate(ApiModel):
-    profile_code: str
+    profile_code: str = Field(
+        validation_alias=AliasChoices("profile_code", "profile_key")
+    )
     profile_name: str
     description: str | None = None
 
@@ -306,10 +401,19 @@ class BusinessDateProfileVersion(BusinessDateProfileVersionPayload):
     profile_id: int
     version_number: int
     status: Literal["DRAFT", "PUBLISHED", "RETIRED"] = "DRAFT"
+    lock_version: int = 1
     published_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     steps: list[BusinessDateProfileStep] = Field(default_factory=list)
+
+    @computed_field
+    @property
+    def event_codes(self) -> list[str]:
+        return [
+            step.date_key
+            for step in sorted(self.steps, key=lambda item: (item.step_number, item.id))
+        ]
 
 
 class BusinessDateProfile(ApiModel):
@@ -322,6 +426,35 @@ class BusinessDateProfile(ApiModel):
     versions: list[BusinessDateProfileVersion] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+    @computed_field
+    @property
+    def profile_key(self) -> str:
+        return self.profile_code
+
+
+class BusinessDateResolveRequest(ApiModel):
+    profile_id: int | None = None
+    profile_version_id: int | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+    fallback_date: date | None = None
+
+    @model_validator(mode="after")
+    def validate_profile_reference(self) -> "BusinessDateResolveRequest":
+        if self.profile_id is None and self.profile_version_id is None:
+            raise ValueError("profile_id or profile_version_id is required")
+        return self
+
+
+class BusinessDateResolveResponse(ApiModel):
+    profile_id: int
+    profile_code: str
+    profile_version_id: int
+    version_number: int
+    resolved_date: date
+    selected_date_key: str | None = None
+    fallback_applied: bool = False
+    attempted_date_keys: list[str] = Field(default_factory=list)
 
 
 class BusinessDateProfileListResponse(ApiModel):
@@ -429,6 +562,86 @@ class FxRateResolution(ApiModel):
     requested_rate_date: date
     selected_rate_date: date | None = None
     inverse_applied: bool = False
+
+
+class ChargeAllocationTargetInput(ApiModel):
+    target_level: Literal["HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
+    target_object_type: str
+    target_object_id: str
+    driver_value: Decimal = Field(default=Decimal("1"), ge=0)
+    target_reference_snapshot_json: dict[str, Any] | None = None
+
+
+class ChargeAllocationPreviewResult(ChargeAllocationTargetInput):
+    allocation_ratio: Decimal
+    allocated_amount: Decimal
+    currency: str
+
+
+class ChargeCalculationPreviewRequest(ApiModel):
+    basis: str = "FLAT"
+    rate_amount: Decimal | None = None
+    rate_percent: Decimal | None = None
+    quantity: Decimal = Field(default=Decimal("1"), ge=0)
+    percentage_base_amount: Decimal | None = None
+    minimum_amount: Decimal | None = None
+    maximum_amount: Decimal | None = None
+    source_currency: str = "USD"
+    target_currency: str = "USD"
+    rate_date: date | None = None
+    fx_source_id: int | None = None
+    fx_source_code: str | None = None
+    fx_rate_type: Literal["MID", "BUY", "SELL", "CUSTOM"] = "MID"
+    fx_conversion_method: str = "DIRECT"
+    allow_inverse_fx: bool = True
+    allow_prior_fx_date: bool = True
+    calculation_profile_version_id: int | None = None
+    calculation_inputs: dict[str, Any] = Field(default_factory=dict)
+    calculation_context: dict[str, Any] = Field(default_factory=dict)
+    allocation_profile_version_id: int | None = None
+    allocation_targets: list[ChargeAllocationTargetInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_calculation_request(self) -> "ChargeCalculationPreviewRequest":
+        basis = self.basis.strip().upper()
+        if basis in {"PERCENT", "PERCENTAGE"}:
+            if self.rate_percent is None:
+                raise ValueError("rate_percent is required for percentage basis")
+            if self.percentage_base_amount is None:
+                raise ValueError("percentage_base_amount is required for percentage basis")
+            if self.calculation_profile_version_id is not None:
+                raise ValueError("percentage basis cannot be combined with a calculation profile")
+        elif self.rate_amount is None:
+            raise ValueError("rate_amount is required for non-percentage basis")
+        if self.minimum_amount is not None and self.maximum_amount is not None:
+            if self.minimum_amount > self.maximum_amount:
+                raise ValueError("minimum_amount must be less than or equal to maximum_amount")
+        return self
+
+
+class ChargeCalculationPreviewResponse(ApiModel):
+    basis: str
+    calculation_method: str
+    rate_amount: Decimal | None = None
+    rate_percent: Decimal | None = None
+    quantity: Decimal
+    percentage_base_amount: Decimal | None = None
+    source_amount: Decimal
+    source_currency: str
+    amount: Decimal
+    currency: str
+    minimum_applied: bool = False
+    maximum_applied: bool = False
+    calculation_profile_version_id: int | None = None
+    calculation_config_snapshot_json: dict[str, Any] | None = None
+    calculation_input_snapshot_json: dict[str, Any] | None = None
+    calculation_audit_json: dict[str, Any]
+    fx_resolution: FxRateResolution
+    allocation_profile_version_id: int | None = None
+    allocation_config_snapshot_json: dict[str, Any] | None = None
+    allocations: list[ChargeAllocationPreviewResult] = Field(default_factory=list)
+    allocated_amount: Decimal = Decimal("0")
+    unallocated_amount: Decimal = Decimal("0")
 
 
 class ChargeReferenceData(ApiModel):
@@ -573,6 +786,7 @@ class RateBookPayload(ApiModel):
     status: str = "DRAFT"
     is_active: bool = True
     entries: list[RateBookEntryPayload] = Field(default_factory=list)
+    expected_lock_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_validity(self) -> "RateBookPayload":
@@ -596,6 +810,10 @@ class RateBook(ApiModel):
     valid_to: date | None = None
     calculation_basis: str = "FLAT"
     status: str = "DRAFT"
+    version_number: int = 1
+    supersedes_rate_book_id: int | None = None
+    lock_version: int = 1
+    published_at: datetime | None = None
     entries: list[RateBookEntry] = Field(default_factory=list)
     is_active: bool = True
 
@@ -610,6 +828,7 @@ class RateBookListResponse(ApiModel):
 class RateBookWorkspace(ApiModel):
     rate_book: RateBook
     entries: list[RateBookEntry] = Field(default_factory=list)
+    versions: list[RateBook] = Field(default_factory=list)
 
 
 class CalculationTemplateStepPayload(ApiModel):
@@ -896,6 +1115,14 @@ class QuoteOptionLine(ApiModel):
     amount: Decimal
     currency: str
     basis: str
+    source_currency: str | None = None
+    source_amount: Decimal | None = None
+    exchange_rate: Decimal | None = None
+    exchange_rate_date: date | None = None
+    fx_rate_id: int | None = None
+    exchange_rate_source_code: str | None = None
+    exchange_rate_type: Literal["MID", "BUY", "SELL", "CUSTOM"] | None = None
+    exchange_rate_method: str | None = None
     quantity_uom: str | None = None
     rate_amount: Decimal | None = None
     quantity: Decimal = Decimal("1")
@@ -915,6 +1142,8 @@ class QuoteOptionLine(ApiModel):
     effective_allocation_snapshot_json: dict[str, Any] | None = None
     source_contract_id: int | None = None
     source_rate_book_id: int | None = None
+    source_rate_book_entry_id: int | None = None
+    is_statistical: bool = False
     is_margin_line: bool = False
 
 
@@ -997,7 +1226,7 @@ class ChargeDocumentLineCreate(ApiModel):
     ] | None = None
     expected_amount: Decimal
     rate_amount: Decimal | None = None
-    currency: str = "USD"
+    currency: str | None = None
     quantity_uom: str | None = None
     calculation_profile_version_id: int | None = None
     calculation_mode: str = "DIRECT"
@@ -1298,7 +1527,7 @@ class ChargeInvoiceCreate(ApiModel):
     invoice_number: str
     invoice_type: Literal["SUPPLIER", "CUSTOMER"] = "SUPPLIER"
     invoice_date: date | None = None
-    currency: str = "USD"
+    currency: str | None = None
     lines: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -1312,6 +1541,7 @@ class ChargeInvoiceWorkspaceUpdate(ApiModel):
 
 class ChargeInvoice(ChargeInvoiceCreate):
     id: int
+    currency: str = "USD"
     charge_document_number: str | None = None
     charge_document_status: str | None = None
     status: str = "CAPTURED"

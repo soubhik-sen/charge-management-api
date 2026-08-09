@@ -28,11 +28,14 @@ curl -sS -X POST "$BASE_URL/allocation-profiles" \
     "profile_code": "SHIPMENT_BY_WEIGHT",
     "profile_name": "Shipment charges by weight",
     "initial_version": {
+      "effective_from": "2026-01-01",
+      "effective_to": "2026-12-31",
       "source_level": "SHIPMENT",
       "source_to_house_driver": "GROSS_WEIGHT",
       "house_to_item_driver": "ITEM_WEIGHT",
       "final_posting_level": "PO_SCHEDULE_LINE",
-      "default_quantity_uom": "KG"
+      "default_quantity_uom": "KG",
+      "missing_driver_policy": "BLOCK"
     }
   }'
 ```
@@ -94,6 +97,24 @@ curl -sS -X POST "$BASE_URL/business-date-profiles/$PROFILE_ID/assignments" \
 
 Only one effective profile can own the same owner scope, shipment scope, and business purpose slot.
 
+Resolve the profile independently against operational context:
+
+```bash
+curl -sS -X POST "$BASE_URL/business-dates/resolve" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"profile_id\": $PROFILE_ID,
+    \"context\": {
+      \"SHIPMENT_ACTUAL_DEPARTURE_DATE\": \"2026-07-20\",
+      \"DOCUMENT_DATE\": \"2026-07-21\"
+    },
+    \"fallback_date\": \"2026-07-22\"
+  }"
+```
+
+The response identifies the published profile version, attempted keys, selected key, resolved date, and whether the explicit fallback was used.
+
 ## Maintain And Resolve An FX Rate
 
 Migrations seed source `MANUAL` with ID `1`. Create a directional EUR-to-USD rate:
@@ -135,6 +156,42 @@ curl -sS -X POST "$BASE_URL/fx-rates/resolve" \
 
 The response includes the selected rate and date, effective rate, converted amount, and whether inverse lookup was applied.
 
+## Preview A Charge Calculation And Allocation
+
+Use the preview endpoint when an ERP, TMS, or other host needs the reusable calculation engine without creating a quote or document. This example calculates 12.5% of USD 200 and allocates the exact USD 25 result by a 1:2 driver ratio:
+
+```bash
+ALLOCATION_VERSION_ID=replace_with_published_allocation_version_id
+
+curl -sS -X POST "$BASE_URL/calculations/preview" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"basis\": \"PERCENTAGE\",
+    \"rate_percent\": \"12.5\",
+    \"percentage_base_amount\": \"200\",
+    \"source_currency\": \"USD\",
+    \"target_currency\": \"USD\",
+    \"allocation_profile_version_id\": $ALLOCATION_VERSION_ID,
+    \"allocation_targets\": [
+      {
+        \"target_level\": \"HOUSE\",
+        \"target_object_type\": \"house\",
+        \"target_object_id\": \"H-1\",
+        \"driver_value\": \"1\"
+      },
+      {
+        \"target_level\": \"HOUSE\",
+        \"target_object_type\": \"house\",
+        \"target_object_id\": \"H-2\",
+        \"driver_value\": \"2\"
+      }
+    ]
+  }"
+```
+
+The result is side-effect free. It returns source and target amounts, calculation snapshots, FX resolution, allocation-profile snapshot, ratios, and deterministic `8.33` / `16.67` target amounts. For cross-currency preview, set different source/target currencies and supply `rate_date`; the resolver applies exact/prior and direct/inverse policy.
+
 ## Rate A Quote From A Contract
 
 Create an effective-dated rate book. Overlapping rows are allowed; the engine selects one winner by applicability, specificity, priority, and scale floor.
@@ -146,7 +203,7 @@ curl -sS -X POST "$BASE_URL/rate-books" \
   -d '{
     "rate_book_code": "EU_OCEAN_2026",
     "rate_book_name": "EU ocean customer rates",
-    "status": "ACTIVE",
+    "status": "DRAFT",
     "valid_from": "2026-01-01",
     "valid_to": "2026-12-31",
     "entries": [{
@@ -168,6 +225,9 @@ Use the returned rate-book `id` in a payee contract, then release it:
 
 ```bash
 RATE_BOOK_ID=replace_with_returned_rate_book_id
+
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/rate-books/$RATE_BOOK_ID/publish"
 
 curl -sS -X POST "$BASE_URL/contracts" \
   -H "Authorization: Bearer $TOKEN" \
@@ -224,6 +284,33 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
 ```
 
 The final response contains one option line for `BASE_FREIGHT` with amount `5000.00`.
+
+To change published pricing, create a new draft version rather than mutating the published row:
+
+```bash
+curl -sS -X POST "$BASE_URL/rate-books/$RATE_BOOK_ID/versions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rate_book_code": "EU_OCEAN_2026",
+    "rate_book_name": "EU ocean customer rates",
+    "status": "DRAFT",
+    "currency": "USD",
+    "valid_from": "2026-01-01",
+    "valid_to": "2026-12-31",
+    "entries": [{
+      "charge_component_code": "BASE_FREIGHT",
+      "rate_amount": "2600",
+      "basis": "PER_CONTAINER",
+      "currency": "USD",
+      "origin_code": "ESBCN",
+      "destination_code": "USNYC",
+      "mode": "OCEAN"
+    }]
+  }'
+```
+
+The response contains the complete version history. Publish the returned draft ID when it is ready; the API retires the prior published version while contracts pinned to it remain reproducible.
 
 ## Discover The Remaining API
 

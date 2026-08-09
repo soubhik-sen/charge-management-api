@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
 import unicodedata
 
@@ -10,16 +10,19 @@ from fastapi import HTTPException, status
 
 from app.domain.models import (
     ChargeActionResponse,
+    ChargeAllocationPreviewResult,
     ChargeAllocationProfile,
     ChargeAllocationProfileCreate,
     ChargeAllocationProfileListResponse,
     ChargeAllocationProfileUpdate,
     ChargeAllocationProfileVersion,
     ChargeAllocationProfileVersionCreate,
+    ChargeAllocationTargetInput,
+    ChargeCalculationPreviewRequest,
+    ChargeCalculationPreviewResponse,
     ChargeCalculationProfile,
     ChargeCalculationProfileCreate,
     ChargeCalculationProfileFactor,
-    ChargeCalculationProfileFactorPayload,
     ChargeCalculationProfileListResponse,
     ChargeCalculationProfileUpdate,
     ChargeCalculationProfileVersion,
@@ -28,16 +31,14 @@ from app.domain.models import (
     BusinessDateProfileAssignment,
     BusinessDateProfileAssignmentCreate,
     BusinessDateProfileAssignmentListResponse,
-    BusinessDateProfileAssignmentPayload,
     BusinessDateProfileCreate,
     BusinessDateProfileListResponse,
+    BusinessDateResolveRequest,
+    BusinessDateResolveResponse,
     BusinessDateProfileUpdate,
     BusinessDateProfileStep,
-    BusinessDateProfileStepCreate,
-    BusinessDateProfileStepPayload,
     BusinessDateProfileVersion,
     BusinessDateProfileVersionCreate,
-    BusinessDateProfileVersionPayload,
     ChargeComponent,
     ChargeComponentAlias,
     ChargeComponentAliasListResponse,
@@ -67,6 +68,10 @@ from app.domain.models import (
     ContractDeterminationResponse,
     ContractLine,
     ContractWorkspace,
+    FxRate,
+    FxRateResolution,
+    FxRateResolveRequest,
+    FxRateSource,
     InvoiceMatchResponse,
     QuoteAwardRequest,
     QuoteAwardResponse,
@@ -442,8 +447,19 @@ def _charge_line_sort_key(line: ChargeLine) -> tuple[int, int, int]:
     return (1 if line.line_number is None else 0, int(line.line_number or 0), int(line.id))
 
 
-def _document_totals(lines: list[ChargeLine]) -> tuple[Decimal, Decimal]:
+def _document_totals(lines: list[ChargeLine], currency: str) -> tuple[Decimal, Decimal]:
     posting_lines = [line for line in lines if line.line_role == "POSTING"]
+    mismatches = sorted(
+        {line.currency.upper() for line in posting_lines if line.currency.upper() != currency.upper()}
+    )
+    if mismatches:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Posting lines must be normalized to document currency {currency.upper()}; "
+                f"found {', '.join(mismatches)}."
+            ),
+        )
     payer_total = money(
         sum((line.expected_amount for line in posting_lines if line.relationship_role == "PAYER"), Decimal("0"))
     )
@@ -481,6 +497,8 @@ class InMemoryChargeRepository:
         self.invoices: dict[int, ChargeInvoice] = {}
         self.match_results: dict[int, ChargeMatchResult] = {}
         self.exports: dict[str, ChargeExportResponse] = {}
+        self._fx_sources: dict[int, FxRateSource] = {}
+        self._fx_rates: dict[int, FxRate] = {}
         self.quotation_policy = "OPTIONAL"
         self.quote_acceptance_mode = "CUSTOMER_ACCEPTANCE"
         self.provider_cost_layer_enabled = False
@@ -772,9 +790,21 @@ class ChargeManagementService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Published allocation profile versions are immutable; create a new version instead.",
             )
+        if (
+            payload.expected_lock_version is not None
+            and payload.expected_lock_version != version.lock_version
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Allocation profile version was modified concurrently; expected lock version "
+                    f"{payload.expected_lock_version}, current value is {version.lock_version}."
+                ),
+            )
         normalized = self._normalized_allocation_profile_version_payload(payload)
         for key, value in normalized.items():
             setattr(version, key, value)
+        version.lock_version += 1
         version.updated_at = utcnow()
         profile = self._require_allocation_profile(version.profile_id)
         profile.updated_at = utcnow()
@@ -787,6 +817,7 @@ class ChargeManagementService:
             if existing.id == version.id:
                 existing.status = "PUBLISHED"
                 existing.published_at = utcnow()
+                existing.lock_version += 1
                 existing.updated_at = utcnow()
             elif existing.status == "PUBLISHED":
                 existing.status = "RETIRED"
@@ -929,6 +960,17 @@ class ChargeManagementService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Only draft calculation profile versions can be updated.",
             )
+        if (
+            payload.expected_lock_version is not None
+            and payload.expected_lock_version != version.lock_version
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Calculation profile version was modified concurrently; expected lock version "
+                    f"{payload.expected_lock_version}, current value is {version.lock_version}."
+                ),
+            )
         normalized = self._normalized_calculation_profile_version_payload(payload)
         version.effective_from = normalized["effective_from"]
         version.effective_to = normalized["effective_to"]
@@ -950,6 +992,7 @@ class ChargeManagementService:
             )
             for item in normalized["factors"]
         ]
+        version.lock_version += 1
         version.updated_at = utcnow()
         profile = self._require_calculation_profile(version.profile_id)
         profile.updated_at = utcnow()
@@ -975,6 +1018,7 @@ class ChargeManagementService:
                 existing.status = "PUBLISHED"
                 existing.published_at = utcnow()
                 existing.published_by = "SYSTEM"
+                existing.lock_version += 1
                 existing.updated_at = utcnow()
             elif existing.status == "PUBLISHED":
                 existing.status = "RETIRED"
@@ -1024,6 +1068,67 @@ class ChargeManagementService:
     def get_business_date_profile(self, profile_id: int) -> BusinessDateProfile:
         return self._require_business_date_profile(profile_id)
 
+    def resolve_business_date(
+        self,
+        payload: BusinessDateResolveRequest,
+    ) -> BusinessDateResolveResponse:
+        if payload.profile_version_id is not None:
+            version = self._require_business_date_profile_version(payload.profile_version_id)
+            profile = self._require_business_date_profile(version.profile_id)
+            if payload.profile_id is not None and payload.profile_id != profile.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="profile_version_id does not belong to profile_id.",
+                )
+        else:
+            profile = self._require_business_date_profile(int(payload.profile_id or 0))
+            version = self._require_published_business_date_profile_version(profile)
+        reference_date = (
+            _coerce_date(payload.context.get("document_date"))
+            or _coerce_date(payload.context.get("charge_date"))
+            or payload.fallback_date
+            or date.today()
+        )
+        if (
+            version.effective_from is not None
+            and reference_date < version.effective_from
+        ) or (
+            version.effective_to is not None
+            and reference_date > version.effective_to
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Business date profile version is not effective for the supplied context date.",
+            )
+        attempted: list[str] = []
+        for step in sorted(version.steps, key=lambda item: (item.step_number, item.id)):
+            attempted.append(step.date_key)
+            resolved = self._resolve_business_date_value(step.date_key, payload.context)
+            if resolved is not None:
+                return BusinessDateResolveResponse(
+                    profile_id=profile.id,
+                    profile_code=profile.profile_code,
+                    profile_version_id=version.id,
+                    version_number=version.version_number,
+                    resolved_date=resolved,
+                    selected_date_key=step.date_key,
+                    attempted_date_keys=attempted,
+                )
+        if payload.fallback_date is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Business date profile did not resolve a date and no fallback_date was supplied.",
+            )
+        return BusinessDateResolveResponse(
+            profile_id=profile.id,
+            profile_code=profile.profile_code,
+            profile_version_id=version.id,
+            version_number=version.version_number,
+            resolved_date=payload.fallback_date,
+            fallback_applied=True,
+            attempted_date_keys=attempted,
+        )
+
     def create_business_date_profile(self, payload: BusinessDateProfileCreate) -> BusinessDateProfile:
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
@@ -1034,7 +1139,7 @@ class ChargeManagementService:
         profile_id = self.repository.next_id("business_date_profile")
         version = self._business_date_profile_version_from_payload(
             profile_id=profile_id,
-            payload=payload.initial_version,
+            payload=payload.initial_version,  # type: ignore[arg-type]
             version_number=1,
         )
         profile = BusinessDateProfile(
@@ -1094,8 +1199,21 @@ class ChargeManagementService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Published business date profile versions are immutable; create a new version instead.",
             )
+        if (
+            payload.expected_lock_version is not None
+            and payload.expected_lock_version != version.lock_version
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Business date profile version was modified concurrently; expected lock version "
+                    f"{payload.expected_lock_version}, current value is {version.lock_version}."
+                ),
+            )
         normalized = self._normalized_business_date_profile_version_payload(payload)
         version.notes = normalized["notes"]
+        version.effective_from = normalized["effective_from"]
+        version.effective_to = normalized["effective_to"]
         version.steps = [
             BusinessDateProfileStep(
                 id=self.repository.next_id("business_date_profile_step"),
@@ -1106,6 +1224,7 @@ class ChargeManagementService:
             )
             for step_payload in normalized["steps"]
         ]
+        version.lock_version += 1
         version.updated_at = utcnow()
         profile = self._require_business_date_profile(version.profile_id)
         profile.updated_at = utcnow()
@@ -1118,6 +1237,7 @@ class ChargeManagementService:
             if existing.id == version.id:
                 existing.status = "PUBLISHED"
                 existing.published_at = utcnow()
+                existing.lock_version += 1
                 existing.updated_at = utcnow()
             elif existing.status == "PUBLISHED":
                 existing.status = "RETIRED"
@@ -1456,40 +1576,28 @@ class ChargeManagementService:
         return alias
 
     def create_rate_book(self, payload: RateBookPayload) -> RateBook:
+        if payload.status.strip().upper() != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="New rate books must start in DRAFT status and use the publish action.",
+            )
         if any(
             row.rate_book_code.upper() == payload.rate_book_code.upper()
             for row in self.repository.rate_books.values()
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rate book code already exists")
         rate_book_id = self.repository.next_id("rate_book")
-        entries: list[RateBookEntry] = []
-        for entry in payload.entries:
-            self._require_component(entry.charge_component_code)
-            allocation_profile_id, allocation_profile_version_id, _, _ = self._resolve_allocation_profile_reference(
-                entry.allocation_profile_id,
-                entry.allocation_profile_version_id,
-            )
-            calculation_profile_id = self._resolve_calculation_profile_identity_reference(
-                entry.calculation_profile_id
-            )
-            entries.append(
-                RateBookEntry(
-                    **entry.model_dump(
-                        exclude={
-                            "allocation_profile_id",
-                            "allocation_profile_version_id",
-                            "calculation_profile_id",
-                        }
-                    ),
-                    id=self.repository.next_id("rate_book_entry"),
-                    rate_book_id=rate_book_id,
-                    calculation_profile_id=calculation_profile_id,
-                    allocation_profile_id=allocation_profile_id,
-                    allocation_profile_version_id=allocation_profile_version_id,
-                )
-            )
+        entries = self._rate_book_entries_from_payload(rate_book_id, payload)
         row = RateBook(
-            **payload.model_dump(exclude={"entries", "rate_book_code", "currency", "status"}),
+            **payload.model_dump(
+                exclude={
+                    "entries",
+                    "rate_book_code",
+                    "currency",
+                    "status",
+                    "expected_lock_version",
+                }
+            ),
             id=rate_book_id,
             rate_book_code=payload.rate_book_code.strip().upper(),
             currency=payload.currency.strip().upper(),
@@ -1541,7 +1649,91 @@ class ChargeManagementService:
 
     def get_rate_book_workspace(self, rate_book_id: int) -> RateBookWorkspace:
         rate_book = self._require_rate_book(rate_book_id)
-        return RateBookWorkspace(rate_book=rate_book, entries=rate_book.entries)
+        versions = sorted(
+            [
+                row
+                for row in self.repository.rate_books.values()
+                if row.rate_book_code == rate_book.rate_book_code
+            ],
+            key=lambda row: (row.version_number, row.id),
+            reverse=True,
+        )
+        return RateBookWorkspace(
+            rate_book=rate_book,
+            entries=rate_book.entries,
+            versions=versions,
+        )
+
+    def list_rate_book_versions(self, rate_book_id: int) -> list[RateBook]:
+        return self.get_rate_book_workspace(rate_book_id).versions
+
+    def create_rate_book_version(
+        self,
+        rate_book_id: int,
+        payload: RateBookPayload,
+    ) -> RateBookWorkspace:
+        source = self._require_rate_book(rate_book_id)
+        if payload.rate_book_code.strip().upper() != source.rate_book_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A rate book version must keep the source rate_book_code.",
+            )
+        if payload.status.strip().upper() != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="New rate book versions must start in DRAFT status.",
+            )
+        existing_versions = [
+            row
+            for row in self.repository.rate_books.values()
+            if row.rate_book_code == source.rate_book_code
+        ]
+        new_id = self.repository.next_id("rate_book")
+        version = RateBook(
+            **payload.model_dump(
+                exclude={
+                    "entries",
+                    "rate_book_code",
+                    "currency",
+                    "status",
+                    "expected_lock_version",
+                }
+            ),
+            id=new_id,
+            rate_book_code=source.rate_book_code,
+            currency=self._currency(payload.currency),
+            status="DRAFT",
+            version_number=max((row.version_number for row in existing_versions), default=0) + 1,
+            supersedes_rate_book_id=source.id,
+            entries=self._rate_book_entries_from_payload(new_id, payload),
+        )
+        self.repository.rate_books[version.id] = version
+        return self.get_rate_book_workspace(version.id)
+
+    def publish_rate_book(self, rate_book_id: int) -> RateBookWorkspace:
+        rate_book = self._require_rate_book(rate_book_id)
+        if rate_book.status == "PUBLISHED":
+            return self.get_rate_book_workspace(rate_book.id)
+        if rate_book.status != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only a draft rate book version can be published.",
+            )
+        if not rate_book.entries:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A rate book must contain at least one rate entry before publishing.",
+            )
+        for existing in self.repository.rate_books.values():
+            if existing.rate_book_code != rate_book.rate_book_code:
+                continue
+            if existing.id == rate_book.id:
+                existing.status = "PUBLISHED"
+                existing.published_at = utcnow()
+                existing.lock_version += 1
+            elif existing.status in {"PUBLISHED", "ACTIVE"}:
+                existing.status = "RETIRED"
+        return self.get_rate_book_workspace(rate_book.id)
 
     def update_rate_book_workspace(
         self,
@@ -1549,15 +1741,60 @@ class ChargeManagementService:
         payload: RateBookPayload,
     ) -> RateBookWorkspace:
         row = self._require_rate_book(rate_book_id)
-        if any(
-            other.id != row.id and other.rate_book_code.upper() == payload.rate_book_code.upper()
+        if row.status != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Published or active rate book versions are immutable; create a new version instead.",
+            )
+        if payload.status.strip().upper() != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A draft rate book can only become published through the publish action.",
+            )
+        if (
+            payload.expected_lock_version is not None
+            and payload.expected_lock_version != row.lock_version
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Rate book was modified concurrently; expected lock version "
+                    f"{payload.expected_lock_version}, current value is {row.lock_version}."
+                ),
+            )
+        if payload.rate_book_code.strip().upper() != row.rate_book_code and any(
+            other.rate_book_code.upper() == payload.rate_book_code.upper()
             for other in self.repository.rate_books.values()
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rate book code already exists")
+        entries = self._rate_book_entries_from_payload(row.id, payload)
+        row.rate_book_code = payload.rate_book_code.strip().upper()
+        row.rate_book_name = payload.rate_book_name
+        row.description = payload.description
+        row.currency = payload.currency.strip().upper()
+        row.valid_from = payload.valid_from
+        row.valid_to = payload.valid_to
+        row.calculation_basis = payload.calculation_basis
+        row.status = "DRAFT"
+        row.is_active = payload.is_active
+        row.entries = entries
+        row.lock_version += 1
+        return self.get_rate_book_workspace(rate_book_id)
+
+    def _rate_book_entries_from_payload(
+        self,
+        rate_book_id: int,
+        payload: RateBookPayload,
+    ) -> list[RateBookEntry]:
         entries: list[RateBookEntry] = []
         for entry in payload.entries:
             self._require_component(entry.charge_component_code)
-            allocation_profile_id, allocation_profile_version_id, _, _ = self._resolve_allocation_profile_reference(
+            (
+                allocation_profile_id,
+                allocation_profile_version_id,
+                _,
+                _,
+            ) = self._resolve_allocation_profile_reference(
                 entry.allocation_profile_id,
                 entry.allocation_profile_version_id,
             )
@@ -1574,23 +1811,13 @@ class ChargeManagementService:
                         }
                     ),
                     id=self.repository.next_id("rate_book_entry"),
-                    rate_book_id=row.id,
+                    rate_book_id=rate_book_id,
                     calculation_profile_id=calculation_profile_id,
                     allocation_profile_id=allocation_profile_id,
                     allocation_profile_version_id=allocation_profile_version_id,
                 )
             )
-        row.rate_book_code = payload.rate_book_code.strip().upper()
-        row.rate_book_name = payload.rate_book_name
-        row.description = payload.description
-        row.currency = payload.currency.strip().upper()
-        row.valid_from = payload.valid_from
-        row.valid_to = payload.valid_to
-        row.calculation_basis = payload.calculation_basis
-        row.status = payload.status.strip().upper()
-        row.is_active = payload.is_active
-        row.entries = entries
-        return self.get_rate_book_workspace(rate_book_id)
+        return entries
 
     def create_calculation_template(
         self,
@@ -1832,6 +2059,39 @@ class ChargeManagementService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="At least one contract line must reference a rate book or calculation template before release.",
             )
+        rate_book_ids = {
+            rate_book_id
+            for rate_book_id in (
+                [contract.default_rate_book_id]
+                + [line.rate_book_id for line in contract.lines]
+            )
+            if rate_book_id is not None
+        }
+        template_ids = {
+            template_id
+            for template_id in (
+                [contract.default_calculation_template_id]
+                + [line.calculation_template_id for line in contract.lines]
+            )
+            if template_id is not None
+        }
+        for template_id in template_ids:
+            template = self._require_calculation_template(template_id)
+            rate_book_ids.update(
+                step.rate_book_id
+                for step in template.steps
+                if step.rate_book_id is not None
+            )
+        for rate_book_id in rate_book_ids:
+            rate_book = self._require_rate_book(rate_book_id)
+            if not rate_book.is_active or rate_book.status != "PUBLISHED":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Rate book {rate_book.rate_book_code} version "
+                        f"{rate_book.version_number} must be published before contract release."
+                    ),
+                )
         contract.status = "RELEASED"
         contract.updated_at = utcnow()
         return contract
@@ -1850,9 +2110,10 @@ class ChargeManagementService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote request number already exists")
         quote_request_id = self.repository.next_id("quote_request")
         row = QuoteRequest(
-            **payload.model_dump(exclude={"request_number"}),
+            **payload.model_dump(exclude={"request_number", "currency"}),
             id=quote_request_id,
             request_number=(payload.request_number.strip().upper() if payload.request_number else f"Q-{quote_request_id:08d}"),
+            currency=self._currency(payload.currency),
             quotation_policy_snapshot=self.repository.quotation_policy,  # type: ignore[arg-type]
         )
         self.repository.quote_requests[row.id] = row
@@ -1867,9 +2128,10 @@ class ChargeManagementService:
             )
         offer_id = self.repository.next_id("quote_offer")
         offer = QuoteOffer(
-            **payload.model_dump(),
+            **payload.model_dump(exclude={"currency"}),
             id=offer_id,
             quote_request_id=quote.id,
+            currency=self._currency(payload.currency),
             status="SUBMITTED",
         )
         self.repository.quote_offers[offer.id] = offer
@@ -1896,7 +2158,7 @@ class ChargeManagementService:
         for field in payload.model_fields_set:
             value = getattr(payload, field)
             if field == "currency" and value is not None:
-                value = str(value).upper()
+                value = self._currency(str(value))
             if field == "source" and value is not None:
                 value = str(value).upper()
             if field == "amount" and value is not None:
@@ -2017,7 +2279,7 @@ class ChargeManagementService:
                         detail="Draft quote requests can only move to REQUESTED from this workspace.",
                     )
             if field == "currency" and value is not None:
-                value = str(value).upper()
+                value = self._currency(str(value))
             if field == "request_number" and value is not None:
                 value = str(value).strip().upper()
                 if any(
@@ -2176,7 +2438,7 @@ class ChargeManagementService:
                     source="QUOTE",
                     status="ESTIMATED",
                     line_number=index,
-                    line_role="POSTING",
+                    line_role="CALCULATION" if line.is_statistical else "POSTING",
                     relationship_role=line.relationship_role,
                     payer_party_ref=line.payer_party_ref,
                     payee_party_ref=line.payee_party_ref,
@@ -2186,6 +2448,14 @@ class ChargeManagementService:
                     expected_amount=line.amount,
                     rate_amount=line.rate_amount,
                     currency=line.currency,
+                    source_currency=line.source_currency,
+                    source_amount=line.source_amount,
+                    exchange_rate=line.exchange_rate,
+                    exchange_rate_date=line.exchange_rate_date,
+                    fx_rate_id=line.fx_rate_id,
+                    exchange_rate_source_code=line.exchange_rate_source_code,
+                    exchange_rate_type=line.exchange_rate_type,
+                    exchange_rate_method=line.exchange_rate_method,
                     quantity_uom=line.quantity_uom,
                     calculation_profile_version_id=line.calculation_profile_version_id,
                     calculation_mode=line.calculation_mode,
@@ -2338,14 +2608,14 @@ class ChargeManagementService:
             vendor_id=payload.vendor_id,
             forwarder_id=payload.forwarder_id,
             carrier_id=payload.carrier_id,
-            currency=payload.currency,
+            currency=self._currency(payload.currency),
             payer_total_amount=Decimal("0"),
             payee_total_amount=Decimal("0"),
             margin_amount=Decimal("0"),
             lines=[],
         )
         lines = self._charge_lines_from_payloads(document_context, payload.lines)
-        payer_total, payee_total = _document_totals(lines)
+        payer_total, payee_total = _document_totals(lines, document_context.currency)
         document = document_context.model_copy(
             update={
                 "payer_total_amount": payer_total,
@@ -2412,6 +2682,87 @@ class ChargeManagementService:
                 document=document,
                 line_payload=line_payload,
             )
+            target_currency = self._currency(document.currency)
+            declared_currency = self._currency(line_payload.currency or document.currency)
+            source_currency = self._currency(line_payload.source_currency or declared_currency)
+            source_amount = (
+                money(line_payload.source_amount)
+                if line_payload.source_amount is not None
+                else expected_amount
+            )
+            exchange_rate = line_payload.exchange_rate
+            exchange_rate_date = resolved_exchange_rate_date
+            fx_rate_id = getattr(line_payload, "fx_rate_id", None)
+            exchange_rate_source_code = (
+                line_payload.exchange_rate_source_code.strip().upper()
+                if getattr(line_payload, "exchange_rate_source_code", None)
+                else None
+            )
+            exchange_rate_type = (
+                line_payload.exchange_rate_type.strip().upper()
+                if getattr(line_payload, "exchange_rate_type", None)
+                else None
+            )
+            exchange_rate_method = (
+                line_payload.exchange_rate_method.strip().upper()
+                if getattr(line_payload, "exchange_rate_method", None)
+                else None
+            )
+            if source_currency != target_currency:
+                if exchange_rate_date is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"A charge date is required to convert {source_currency} to {target_currency} "
+                            f"for {line_payload.charge_component_code}."
+                        ),
+                    )
+                if exchange_rate is not None:
+                    exchange_rate = dec(exchange_rate)
+                    if exchange_rate <= 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="exchange_rate must be positive.",
+                        )
+                    expected_amount = money(source_amount * exchange_rate)
+                else:
+                    fx_resolution = self._resolve_fx(
+                        FxRateResolveRequest(
+                            source_currency=source_currency,
+                            target_currency=target_currency,
+                            rate_date=exchange_rate_date,
+                            amount=source_amount,
+                            source_code=exchange_rate_source_code,
+                            rate_type=exchange_rate_type or "MID",
+                            conversion_method=exchange_rate_method or "DIRECT",
+                        )
+                    )
+                    if fx_rate_id is not None and (
+                        fx_resolution.rate is None or fx_resolution.rate.id != fx_rate_id
+                    ):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="fx_rate_id does not match the resolved FX rate.",
+                        )
+                    expected_amount = money(fx_resolution.converted_amount)
+                    exchange_rate = fx_resolution.effective_rate
+                    exchange_rate_date = fx_resolution.selected_rate_date
+                    fx_rate_id = fx_resolution.rate.id if fx_resolution.rate else None
+                    exchange_rate_source_code = (
+                        fx_resolution.rate.source_code if fx_resolution.rate else None
+                    )
+                    exchange_rate_type = fx_resolution.rate.rate_type if fx_resolution.rate else None
+                    exchange_rate_method = (
+                        fx_resolution.rate.conversion_method if fx_resolution.rate else None
+                    )
+            elif declared_currency != target_currency:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        "line currency must equal document currency when source_currency already "
+                        "identifies the document currency."
+                    ),
+                )
             if (
                 target_scope_mode == "SELECTED_TARGETS"
                 and len(selected_target_references) > 1
@@ -2446,7 +2797,7 @@ class ChargeManagementService:
                 charge_date_basis=getattr(line_payload, "charge_date_basis", None),
                 expected_amount=expected_amount,
                 rate_amount=rate_amount,
-                currency=line_payload.currency.upper(),
+                currency=target_currency,
                 quantity_uom=(
                     _clean_optional(line_payload.quantity_uom)
                     or calculated_quantity_uom
@@ -2457,26 +2808,16 @@ class ChargeManagementService:
                 calculation_status="CALCULATED",
                 calculation_config_snapshot_json=calculation_config_snapshot_json,
                 calculation_input_snapshot_json=calculation_input_snapshot_json,
-                source_currency=line_payload.source_currency.upper() if line_payload.source_currency else None,
-                source_amount=money(line_payload.source_amount) if line_payload.source_amount is not None else None,
-                exchange_rate=line_payload.exchange_rate,
-                exchange_rate_date=resolved_exchange_rate_date,
-                fx_rate_id=getattr(line_payload, "fx_rate_id", None),
+                source_currency=source_currency if source_currency != target_currency else None,
+                source_amount=source_amount if source_currency != target_currency else None,
+                exchange_rate=exchange_rate if source_currency != target_currency else None,
+                exchange_rate_date=exchange_rate_date,
+                fx_rate_id=fx_rate_id if source_currency != target_currency else None,
                 exchange_rate_source_code=(
-                    line_payload.exchange_rate_source_code.strip().upper()
-                    if getattr(line_payload, "exchange_rate_source_code", None)
-                    else None
+                    exchange_rate_source_code if source_currency != target_currency else None
                 ),
-                exchange_rate_type=(
-                    line_payload.exchange_rate_type.strip().upper()
-                    if getattr(line_payload, "exchange_rate_type", None)
-                    else None
-                ),
-                exchange_rate_method=(
-                    line_payload.exchange_rate_method.strip().upper()
-                    if getattr(line_payload, "exchange_rate_method", None)
-                    else None
-                ),
+                exchange_rate_type=exchange_rate_type if source_currency != target_currency else None,
+                exchange_rate_method=exchange_rate_method if source_currency != target_currency else None,
                 allocation_profile_id=allocation_profile_id,
                 allocation_profile_version_id=allocation_profile_version_id,
                 allocation_mode="PROFILE" if allocation_profile_version_id is not None else "NONE",
@@ -2624,7 +2965,10 @@ class ChargeManagementService:
                 detail="Charge document lines cannot be deleted after invoice matches exist.",
             )
         document.lines = [existing for existing in document.lines if existing.id not in subtree_ids]
-        document.payer_total_amount, document.payee_total_amount = _document_totals(document.lines)
+        document.payer_total_amount, document.payee_total_amount = _document_totals(
+            document.lines,
+            document.currency,
+        )
         document.margin_amount = money(document.payee_total_amount - document.payer_total_amount)
         return self.get_charge_document_workspace(charge_document_id)
 
@@ -2651,12 +2995,24 @@ class ChargeManagementService:
         if payload.lines is not None:
             self._assert_document_line_mutation_allowed(document, action="update")
             document.lines = self._charge_lines_from_payloads(document, payload.lines)
-        document.payer_total_amount, document.payee_total_amount = _document_totals(document.lines)
+        document.payer_total_amount, document.payee_total_amount = _document_totals(
+            document.lines,
+            document.currency,
+        )
         document.margin_amount = money(document.payee_total_amount - document.payer_total_amount)
         return self.get_charge_document_workspace(charge_document_id)
 
     def create_invoice(self, payload: ChargeInvoiceCreate) -> ChargeInvoice:
         document = self._require_document(payload.charge_document_id)
+        invoice_currency = self._currency(payload.currency or document.currency)
+        if invoice_currency != document.currency.upper():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invoice currency {invoice_currency} must match charge document currency "
+                    f"{document.currency.upper()} before matching."
+                ),
+            )
         if any(
             row.charge_document_id == payload.charge_document_id
             and row.invoice_number.upper() == payload.invoice_number.upper()
@@ -2665,8 +3021,9 @@ class ChargeManagementService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice already exists")
         total = money(sum((Decimal(str(line.get("amount", "0"))) for line in payload.lines), Decimal("0")))
         invoice = ChargeInvoice(
-            **payload.model_dump(),
+            **payload.model_dump(exclude={"currency"}),
             id=self.repository.next_id("invoice"),
+            currency=invoice_currency,
             charge_document_number=document.document_number,
             charge_document_status=document.status,
             total_amount=total,
@@ -2755,7 +3112,16 @@ class ChargeManagementService:
         if payload.invoice_date is not None:
             invoice.invoice_date = payload.invoice_date
         if payload.currency is not None:
-            invoice.currency = payload.currency
+            invoice_currency = self._currency(payload.currency)
+            if invoice_currency != document.currency.upper():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Invoice currency {invoice_currency} must match charge document currency "
+                        f"{document.currency.upper()} before matching."
+                    ),
+                )
+            invoice.currency = invoice_currency
         if payload.lines is not None:
             invoice.lines = payload.lines
             invoice.total_amount = money(
@@ -2772,6 +3138,11 @@ class ChargeManagementService:
     def match_invoice(self, invoice_id: int) -> InvoiceMatchResponse:
         invoice = self._require_invoice(invoice_id)
         document = self._require_document(invoice.charge_document_id)
+        if invoice.currency.upper() != document.currency.upper():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invoice and charge document currencies must match before invoice matching.",
+            )
         for result_id, result in list(self.repository.match_results.items()):
             if result.invoice_id == invoice.id:
                 del self.repository.match_results[result_id]
@@ -3204,13 +3575,14 @@ class ChargeManagementService:
         payer_lines: list[QuoteOptionLine],
         payee_lines: list[QuoteOptionLine],
     ) -> QuoteOption:
+        self._assert_quote_line_currencies(quote, [*payer_lines, *payee_lines])
         option_id = self.repository.next_id("quote_option")
         all_lines = []
         for line in [*payer_lines, *payee_lines]:
             line.quote_option_id = option_id
             all_lines.append(line)
-        payer_total = money(sum((line.amount for line in payer_lines), Decimal("0")))
-        payee_total = money(sum((line.amount for line in payee_lines), Decimal("0")))
+        payer_total = money(sum((line.amount for line in payer_lines if not line.is_statistical), Decimal("0")))
+        payee_total = money(sum((line.amount for line in payee_lines if not line.is_statistical), Decimal("0")))
         margin_amount = money(payee_total - payer_total)
         margin_percent = money((margin_amount / payer_total) * Decimal("100")) if payer_total else Decimal("0.00")
         option = QuoteOption(
@@ -3238,10 +3610,11 @@ class ChargeManagementService:
         payee_contract: RateContract,
         payee_lines: list[QuoteOptionLine],
     ) -> QuoteOption:
+        self._assert_quote_line_currencies(quote, payee_lines)
         option_id = self.repository.next_id("quote_option")
         for line in payee_lines:
             line.quote_option_id = option_id
-        payee_total = money(sum((line.amount for line in payee_lines), Decimal("0")))
+        payee_total = money(sum((line.amount for line in payee_lines if not line.is_statistical), Decimal("0")))
         option = QuoteOption(
             id=option_id,
             quote_request_id=quote.id,
@@ -3260,15 +3633,45 @@ class ChargeManagementService:
         self.repository.quote_options[option.id] = option
         return option
 
+    def _assert_quote_line_currencies(
+        self,
+        quote: QuoteRequest,
+        lines: list[QuoteOptionLine],
+    ) -> None:
+        mismatches = sorted(
+            {
+                line.currency.upper()
+                for line in lines
+                if line.currency.upper() != quote.currency.upper()
+            }
+        )
+        if mismatches:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Quote option lines must be normalized to {quote.currency.upper()} before totals are calculated; "
+                    f"found {', '.join(mismatches)}."
+                ),
+            )
+
     def _create_offer_option(self, *, quote: QuoteRequest, offer: QuoteOffer) -> QuoteOption:
         option_id = self.repository.next_id("quote_option")
+        fx_resolution = self._resolve_fx(
+            FxRateResolveRequest(
+                source_currency=offer.currency,
+                target_currency=quote.currency,
+                rate_date=self._quote_pricing_date(quote),
+                amount=offer.amount,
+            )
+        )
+        converted_amount = money(fx_resolution.converted_amount)
         option = QuoteOption(
             id=option_id,
             quote_request_id=quote.id,
             option_name=offer.offer_number or f"{quote.id:08d}-{offer.id:08d}",
             source_offer_id=offer.id,
-            payer_total_amount=money(offer.amount),
-            payee_total_amount=money(offer.amount),
+            payer_total_amount=converted_amount,
+            payee_total_amount=converted_amount,
             margin_amount=Decimal("0.00"),
             margin_percent=Decimal("0.00"),
             transit_time_days=offer.transit_time_days,
@@ -3285,9 +3688,21 @@ class ChargeManagementService:
                     party_role_ref=offer.provider_role_ref,
                     charge_component_code="QUOTE_OFFER_TOTAL",
                     description=offer.offer_number or "Provider Offer Total",
-                    amount=money(offer.amount),
-                    currency=offer.currency,
+                    amount=converted_amount,
+                    currency=quote.currency.upper(),
                     basis="FLAT",
+                    source_currency=offer.currency.upper(),
+                    source_amount=money(offer.amount),
+                    exchange_rate=fx_resolution.effective_rate,
+                    exchange_rate_date=fx_resolution.selected_rate_date,
+                    fx_rate_id=fx_resolution.rate.id if fx_resolution.rate else None,
+                    exchange_rate_source_code=(
+                        fx_resolution.rate.source_code if fx_resolution.rate else None
+                    ),
+                    exchange_rate_type=fx_resolution.rate.rate_type if fx_resolution.rate else None,
+                    exchange_rate_method=(
+                        fx_resolution.rate.conversion_method if fx_resolution.rate else None
+                    ),
                 )
             ],
         )
@@ -3303,10 +3718,45 @@ class ChargeManagementService:
     ) -> list[QuoteOptionLine]:
         lines: list[QuoteOptionLine] = []
         pricing_date = self._quote_pricing_date(quote)
+        expanded_lines: list[tuple[ContractLine, CalculationTemplateStep | None]] = []
         for contract_line in sorted(
             contract.lines,
             key=lambda item: (item.line_number if item.line_number is not None else 999999, item.priority, item.id),
         ):
+            template_id = contract_line.calculation_template_id or contract.default_calculation_template_id
+            if template_id is None:
+                expanded_lines.append((contract_line, None))
+                continue
+            template = self._require_calculation_template(template_id)
+            if not template.is_active or template.status.upper() in {"INACTIVE", "RETIRED"}:
+                continue
+            for step in sorted(template.steps, key=lambda item: (item.step_number, item.id)):
+                if step.relationship_role not in {"BOTH", relationship_role}:
+                    continue
+                if step.precondition_key and not self._quote_precondition_is_true(
+                    quote,
+                    step.precondition_key,
+                ):
+                    continue
+                expanded_lines.append(
+                    (
+                        contract_line.model_copy(
+                            update={
+                                "charge_component_code": step.charge_component_code,
+                                "rate_book_id": (
+                                    step.rate_book_id
+                                    or contract_line.rate_book_id
+                                    or contract.default_rate_book_id
+                                ),
+                                "calculation_template_id": None,
+                            }
+                        ),
+                        step,
+                    )
+                )
+
+        subtotals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        for contract_line, template_step in expanded_lines:
             if not contract_line.is_active or not self._date_is_valid(
                 contract_line.valid_from,
                 contract_line.valid_to,
@@ -3321,13 +3771,29 @@ class ChargeManagementService:
             if (
                 rate_book is None
                 or not rate_book.is_active
-                or rate_book.status.upper() in {"INACTIVE", "RETIRED"}
+                or rate_book.status.upper() != "PUBLISHED"
                 or not self._date_is_valid(rate_book.valid_from, rate_book.valid_to, pricing_date)
             ):
                 continue
             entry = self._best_rate_entry(rate_book, contract_line, quote)
             if entry is None:
                 continue
+            percentage_base_amount: Decimal | None = None
+            if (
+                template_step is not None
+                and template_step.subtotal_key
+                and entry.basis.upper() in {"PERCENT", "PERCENTAGE"}
+            ):
+                subtotal_key = template_step.subtotal_key.strip().upper()
+                if subtotal_key not in subtotals:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Calculation template percentage step {template_step.step_number} "
+                            f"references empty subtotal {subtotal_key}."
+                        ),
+                    )
+                percentage_base_amount = subtotals[subtotal_key]
             component = self._require_component(entry.charge_component_code)
             (
                 allocation_profile_id,
@@ -3353,9 +3819,44 @@ class ChargeManagementService:
                 quote=quote,
                 entry=entry,
                 contract_line=contract_line,
+                percentage_base_amount=percentage_base_amount,
             )
-            lines.append(
-                QuoteOptionLine(
+            percentage_basis = entry.basis.upper() in {"PERCENT", "PERCENTAGE"}
+            source_currency = quote.currency if percentage_basis else (entry.currency or quote.currency)
+            source_amount = amount
+            fx_resolution = self._resolve_fx(
+                FxRateResolveRequest(
+                    source_currency=source_currency,
+                    target_currency=quote.currency,
+                    rate_date=pricing_date,
+                    amount=source_amount,
+                )
+            )
+            amount = money(fx_resolution.converted_amount)
+            if (
+                rate_amount is not None
+                and not percentage_basis
+                and source_currency.upper() != quote.currency.upper()
+            ):
+                rate_amount = money(rate_amount * fx_resolution.effective_rate)
+            calculation_input_snapshot_json = dict(calculation_input_snapshot_json or {})
+            calculation_input_snapshot_json["fx_conversion"] = {
+                "source_currency": source_currency.upper(),
+                "target_currency": quote.currency.upper(),
+                "source_amount": str(source_amount),
+                "converted_amount": str(amount),
+                "effective_rate": str(fx_resolution.effective_rate),
+                "requested_rate_date": str(fx_resolution.requested_rate_date),
+                "selected_rate_date": (
+                    str(fx_resolution.selected_rate_date)
+                    if fx_resolution.selected_rate_date is not None
+                    else None
+                ),
+                "fx_rate_id": fx_resolution.rate.id if fx_resolution.rate else None,
+                "source_code": fx_resolution.rate.source_code if fx_resolution.rate else None,
+                "inverse_applied": fx_resolution.inverse_applied,
+            }
+            line = QuoteOptionLine(
                     id=self.repository.next_id("quote_option_line"),
                     quote_option_id=0,
                     relationship_role=relationship_role,  # type: ignore[arg-type]
@@ -3365,8 +3866,20 @@ class ChargeManagementService:
                     charge_component_code=entry.charge_component_code,
                     description=component.component_name,
                     amount=amount,
-                    currency=entry.currency or quote.currency,
+                    currency=quote.currency.upper(),
                     basis=entry.basis,
+                    source_currency=source_currency.upper(),
+                    source_amount=source_amount,
+                    exchange_rate=fx_resolution.effective_rate,
+                    exchange_rate_date=fx_resolution.selected_rate_date,
+                    fx_rate_id=fx_resolution.rate.id if fx_resolution.rate else None,
+                    exchange_rate_source_code=(
+                        fx_resolution.rate.source_code if fx_resolution.rate else None
+                    ),
+                    exchange_rate_type=fx_resolution.rate.rate_type if fx_resolution.rate else None,
+                    exchange_rate_method=(
+                        fx_resolution.rate.conversion_method if fx_resolution.rate else None
+                    ),
                     rate_amount=rate_amount,
                     quantity=quantity,
                     quantity_uom=calculation_quantity_uom
@@ -3386,9 +3899,21 @@ class ChargeManagementService:
                     effective_allocation_snapshot_json=effective_allocation_snapshot_json,
                     source_contract_id=contract.id,
                     source_rate_book_id=rate_book.id,
+                    source_rate_book_entry_id=entry.id,
+                    is_statistical=template_step.is_statistical if template_step else False,
                 )
-            )
+            lines.append(line)
+            if template_step is not None and template_step.subtotal_key and not template_step.is_statistical:
+                subtotals[template_step.subtotal_key.strip().upper()] += amount
         return lines
+
+    def _quote_precondition_is_true(self, quote: QuoteRequest, key: str) -> bool:
+        value = quote.context.get(key)
+        if value is None:
+            value = quote.context.get(key.strip().upper())
+        if isinstance(value, str):
+            return value.strip().upper() in {"1", "TRUE", "YES", "Y", "ON"}
+        return bool(value)
 
     def _derive_payee_lines_from_margin(
         self,
@@ -3401,7 +3926,7 @@ class ChargeManagementService:
         per_container = Decimal(str(margin_rules.get("per_container") or "0"))
         min_margin = Decimal(str(margin_rules.get("minimum_margin") or "0"))
         container_count = quote.container_count or Decimal("0")
-        payer_total = sum((line.amount for line in payer_lines), Decimal("0"))
+        payer_total = sum((line.amount for line in payer_lines if not line.is_statistical), Decimal("0"))
         margin = fixed_amount + ((payer_total * percent) / Decimal("100")) + (per_container * container_count)
         if margin < min_margin:
             margin = min_margin
@@ -3431,11 +3956,33 @@ class ChargeManagementService:
             )
         return payee_lines
 
-    def _calculate_amount(self, entry: RateBookEntry, quote: QuoteRequest) -> Decimal:
+    def _calculate_amount(
+        self,
+        entry: RateBookEntry,
+        quote: QuoteRequest,
+        *,
+        percentage_base_amount: Decimal | None = None,
+    ) -> Decimal:
         basis = entry.basis.upper()
         rate_amount = dec(entry.rate_amount)
         if basis in {"PERCENT", "PERCENTAGE"}:
-            amount = dec(entry.rate_percent)
+            if percentage_base_amount is None:
+                configured_bases = quote.context.get("percentage_bases") or {}
+                if isinstance(configured_bases, dict):
+                    configured_base = configured_bases.get(entry.charge_component_code)
+                    if configured_base is not None:
+                        percentage_base_amount = dec(configured_base)
+                if percentage_base_amount is None and quote.context.get("percentage_base_amount") is not None:
+                    percentage_base_amount = dec(quote.context["percentage_base_amount"])
+            if percentage_base_amount is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Percentage rate for {entry.charge_component_code} requires "
+                        "context.percentage_base_amount or context.percentage_bases[component_code]."
+                    ),
+                )
+            amount = percentage_base_amount * dec(entry.rate_percent) / Decimal("100")
         elif basis in {"WEIGHT", "CHARGEABLE_WEIGHT"}:
             quantity = quote.chargeable_weight if basis == "CHARGEABLE_WEIGHT" else quote.gross_weight
             amount = rate_amount * max(dec(quantity), Decimal("1"))
@@ -3462,6 +4009,7 @@ class ChargeManagementService:
         quote: QuoteRequest,
         entry: RateBookEntry,
         contract_line: ContractLine,
+        percentage_base_amount: Decimal | None = None,
     ) -> tuple[int | None, dict[str, Any] | None, dict[str, Any] | None, Decimal | None, Decimal, str | None, Decimal]:
         _, version_id, profile, version = self._resolve_calculation_profile_reference(
             contract_line.calculation_profile_id
@@ -3469,6 +4017,30 @@ class ChargeManagementService:
             or component.default_calculation_profile_id,
             None,
         )
+        if entry.basis.upper() in {"PERCENT", "PERCENTAGE"}:
+            percentage_base = (
+                percentage_base_amount
+                if percentage_base_amount is not None
+                else self._percentage_base_for_quote(entry, quote)
+            )
+            amount = self._calculate_amount(
+                entry,
+                quote,
+                percentage_base_amount=percentage_base,
+            )
+            snapshot = self._calculation_snapshot(profile, version) if profile and version else None
+            return (
+                version_id,
+                snapshot,
+                {
+                    "percentage_base_amount": str(percentage_base),
+                    "rate_percent": str(entry.rate_percent),
+                },
+                entry.rate_percent,
+                percentage_base,
+                "PERCENT_BASE",
+                amount,
+            )
         if profile is None or version is None:
             return None, None, None, entry.rate_amount, Decimal("1"), None, self._calculate_amount(entry, quote)
         result = self._evaluate_calculation_profile(
@@ -3485,6 +4057,21 @@ class ChargeManagementService:
             result["quantity_uom"],
             result["amount"],
         )
+
+    def _percentage_base_for_quote(self, entry: RateBookEntry, quote: QuoteRequest) -> Decimal:
+        configured_bases = quote.context.get("percentage_bases") or {}
+        if isinstance(configured_bases, dict) and configured_bases.get(entry.charge_component_code) is not None:
+            return dec(configured_bases[entry.charge_component_code])
+        configured_base = quote.context.get("percentage_base_amount")
+        if configured_base is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Percentage rate for {entry.charge_component_code} requires "
+                    "context.percentage_base_amount or context.percentage_bases[component_code]."
+                ),
+            )
+        return dec(configured_base)
 
     def _resolve_effective_document_calculation(
         self,
@@ -3871,6 +4458,310 @@ class ChargeManagementService:
             ),
         )
 
+    def preview_calculation(
+        self,
+        payload: ChargeCalculationPreviewRequest,
+    ) -> ChargeCalculationPreviewResponse:
+        basis = payload.basis.strip().upper()
+        calculation_profile_version_id = payload.calculation_profile_version_id
+        calculation_config_snapshot: dict[str, Any] | None = None
+        calculation_input_snapshot: dict[str, Any] | None = None
+        calculation_method = "DIRECT"
+        quantity = payload.quantity
+
+        if calculation_profile_version_id is not None:
+            version = self._require_calculation_profile_version(calculation_profile_version_id)
+            profile = self._require_calculation_profile(version.profile_id)
+            result = self._evaluate_calculation_profile(
+                version,
+                rate_amount=payload.rate_amount,
+                flat_amount=payload.rate_amount,
+                inputs=payload.calculation_inputs,
+                context=payload.calculation_context,
+            )
+            source_amount = result["amount"]
+            quantity = result["quantity"]
+            calculation_method = version.calculation_method
+            calculation_config_snapshot = self._calculation_snapshot(profile, version)
+            calculation_input_snapshot = result["input_snapshot"]
+            audit = result["audit"]
+        elif basis in {"PERCENT", "PERCENTAGE"}:
+            source_amount = money(
+                dec(payload.percentage_base_amount)
+                * dec(payload.rate_percent)
+                / Decimal("100")
+            )
+            calculation_method = "PERCENTAGE_OF_BASE"
+            quantity = dec(payload.percentage_base_amount)
+            calculation_input_snapshot = {
+                "percentage_base_amount": str(payload.percentage_base_amount),
+            }
+            audit = {
+                "calculation_method": calculation_method,
+                "formula": "percentage_base_amount * rate_percent / 100",
+                "percentage_base_amount": str(payload.percentage_base_amount),
+                "rate_percent": str(payload.rate_percent),
+            }
+        else:
+            flat_bases = {"FLAT", "SHIPMENT", "DOCUMENT", "HEADER"}
+            effective_quantity = Decimal("1") if basis in flat_bases else payload.quantity
+            source_amount = money(dec(payload.rate_amount) * effective_quantity)
+            quantity = effective_quantity
+            calculation_method = "FLAT_AMOUNT" if basis in flat_bases else "RATE_TIMES_QUANTITY"
+            calculation_input_snapshot = {"quantity": str(effective_quantity)}
+            audit = {
+                "calculation_method": calculation_method,
+                "formula": "rate_amount" if basis in flat_bases else "rate_amount * quantity",
+                "rate_amount": str(payload.rate_amount),
+                "quantity": str(effective_quantity),
+            }
+
+        minimum_applied = payload.minimum_amount is not None and source_amount < payload.minimum_amount
+        maximum_applied = payload.maximum_amount is not None and source_amount > payload.maximum_amount
+        if minimum_applied:
+            source_amount = money(payload.minimum_amount)
+        if maximum_applied:
+            source_amount = money(payload.maximum_amount)
+        audit = dict(audit)
+        audit.update(
+            {
+                "minimum_amount": str(payload.minimum_amount) if payload.minimum_amount is not None else None,
+                "maximum_amount": str(payload.maximum_amount) if payload.maximum_amount is not None else None,
+                "minimum_applied": minimum_applied,
+                "maximum_applied": maximum_applied,
+            }
+        )
+
+        fx_resolution = self._resolve_fx(
+            FxRateResolveRequest(
+                source_currency=payload.source_currency,
+                target_currency=payload.target_currency,
+                rate_date=payload.rate_date or date.today(),
+                amount=source_amount,
+                source_id=payload.fx_source_id,
+                source_code=payload.fx_source_code,
+                rate_type=payload.fx_rate_type,
+                conversion_method=payload.fx_conversion_method,
+                allow_inverse=payload.allow_inverse_fx,
+                allow_prior_date=payload.allow_prior_fx_date,
+            ),
+            require_explicit_date=payload.source_currency.strip().upper()
+            != payload.target_currency.strip().upper()
+            and payload.rate_date is None,
+        )
+        amount = money(fx_resolution.converted_amount)
+        allocations, allocation_snapshot = self._preview_allocations(
+            amount=amount,
+            currency=payload.target_currency,
+            profile_version_id=payload.allocation_profile_version_id,
+            targets=payload.allocation_targets,
+        )
+        allocated_amount = money(sum((row.allocated_amount for row in allocations), Decimal("0")))
+        return ChargeCalculationPreviewResponse(
+            basis=basis,
+            calculation_method=calculation_method,
+            rate_amount=payload.rate_amount,
+            rate_percent=payload.rate_percent,
+            quantity=quantity,
+            percentage_base_amount=payload.percentage_base_amount,
+            source_amount=source_amount,
+            source_currency=payload.source_currency.strip().upper(),
+            amount=amount,
+            currency=payload.target_currency.strip().upper(),
+            minimum_applied=minimum_applied,
+            maximum_applied=maximum_applied,
+            calculation_profile_version_id=calculation_profile_version_id,
+            calculation_config_snapshot_json=calculation_config_snapshot,
+            calculation_input_snapshot_json=calculation_input_snapshot,
+            calculation_audit_json=audit,
+            fx_resolution=fx_resolution.model_copy(update={"converted_amount": amount}),
+            allocation_profile_version_id=payload.allocation_profile_version_id,
+            allocation_config_snapshot_json=allocation_snapshot,
+            allocations=allocations,
+            allocated_amount=allocated_amount,
+            unallocated_amount=money(amount - allocated_amount),
+        )
+
+    def _preview_allocations(
+        self,
+        *,
+        amount: Decimal,
+        currency: str,
+        profile_version_id: int | None,
+        targets: list[ChargeAllocationTargetInput],
+    ) -> tuple[list[ChargeAllocationPreviewResult], dict[str, Any] | None]:
+        allocation_snapshot: dict[str, Any] | None = None
+        expected_target_level: str | None = None
+        if profile_version_id is not None:
+            version = self._require_allocation_profile_version(profile_version_id)
+            profile = self._require_allocation_profile(version.profile_id)
+            allocation_snapshot = self._allocation_snapshot(profile, version)
+            expected_target_level = version.final_posting_level
+        if not targets:
+            return [], allocation_snapshot
+        for target in targets:
+            if not target.target_object_type.strip() or not target.target_object_id.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Allocation targets require target_object_type and target_object_id.",
+                )
+            if expected_target_level is not None and target.target_level != expected_target_level:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Allocation target level {target.target_level} does not match profile "
+                        f"final posting level {expected_target_level}."
+                    ),
+                )
+        driver_values = [dec(target.driver_value) for target in targets]
+        total_driver = sum(driver_values, Decimal("0"))
+        if (
+            total_driver <= 0
+            and allocation_snapshot is not None
+            and allocation_snapshot.get("missing_driver_policy") == "EQUAL"
+        ):
+            driver_values = [Decimal("1") for _ in targets]
+            total_driver = Decimal(len(targets))
+        if total_driver <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Allocation target driver values must have a positive total.",
+            )
+
+        sign = Decimal("-1") if amount < 0 else Decimal("1")
+        absolute_amount = abs(money(amount))
+        raw_amounts = [
+            absolute_amount * driver_value / total_driver
+            for driver_value in driver_values
+        ]
+        rounded_amounts = [raw.quantize(MONEY, rounding=ROUND_DOWN) for raw in raw_amounts]
+        remaining_cents = int(
+            ((absolute_amount - sum(rounded_amounts, Decimal("0"))) / MONEY).to_integral_value()
+        )
+        remainder_order = sorted(
+            range(len(targets)),
+            key=lambda index: (raw_amounts[index] - rounded_amounts[index], -index),
+            reverse=True,
+        )
+        for index in remainder_order[:remaining_cents]:
+            rounded_amounts[index] += MONEY
+
+        result: list[ChargeAllocationPreviewResult] = []
+        for target, driver_value, allocated in zip(
+            targets,
+            driver_values,
+            rounded_amounts,
+            strict=True,
+        ):
+            result.append(
+                ChargeAllocationPreviewResult(
+                    **target.model_dump(),
+                    allocation_ratio=(driver_value / total_driver).quantize(
+                        Decimal("0.00000001"),
+                        rounding=ROUND_HALF_UP,
+                    ),
+                    allocated_amount=money(sign * allocated),
+                    currency=currency.strip().upper(),
+                )
+            )
+        return result, allocation_snapshot
+
+    def _resolve_fx(
+        self,
+        payload: FxRateResolveRequest,
+        *,
+        require_explicit_date: bool = False,
+    ) -> FxRateResolution:
+        source_currency = self._currency(payload.source_currency)
+        target_currency = self._currency(payload.target_currency)
+        if require_explicit_date:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="rate_date is required when source_currency and target_currency differ.",
+            )
+        if source_currency == target_currency:
+            return FxRateResolution(
+                effective_rate=Decimal("1"),
+                converted_amount=payload.amount,
+                requested_rate_date=payload.rate_date,
+                selected_rate_date=payload.rate_date,
+            )
+
+        sources: dict[int, FxRateSource] = getattr(self.repository, "_fx_sources", {})
+        rates: dict[int, FxRate] = getattr(self.repository, "_fx_rates", {})
+        requested_source_id = payload.source_id
+        if payload.source_code:
+            source_code = payload.source_code.strip().upper()
+            source = next((row for row in sources.values() if row.source_code.upper() == source_code), None)
+            if source is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="FX rate source was not found.")
+            if requested_source_id is not None and requested_source_id != source.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="source_id and source_code identify different FX rate sources.",
+                )
+            requested_source_id = source.id
+
+        def select_rate(from_currency: str, to_currency: str) -> FxRate | None:
+            candidates = [
+                row
+                for row in rates.values()
+                if row.is_active
+                and row.source_currency.upper() == from_currency
+                and row.target_currency.upper() == to_currency
+                and row.rate_type.upper() == payload.rate_type.upper()
+                and row.conversion_method.upper() == payload.conversion_method.strip().upper()
+                and (requested_source_id is None or row.source_id == requested_source_id)
+                and row.source_id in sources
+                and sources[row.source_id].is_active
+                and (
+                    row.rate_date <= payload.rate_date
+                    if payload.allow_prior_date
+                    else row.rate_date == payload.rate_date
+                )
+            ]
+            if not candidates:
+                return None
+            return min(
+                candidates,
+                key=lambda row: (
+                    -row.rate_date.toordinal(),
+                    sources[row.source_id].priority,
+                    -row.id,
+                ),
+            )
+
+        selected = select_rate(source_currency, target_currency)
+        inverse_applied = False
+        if selected is None and payload.allow_inverse:
+            selected = select_rate(target_currency, source_currency)
+            inverse_applied = selected is not None
+        if selected is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No active FX rate matched the requested currency pair and date.",
+            )
+        stored_rate = dec(selected.rate)
+        effective_rate = Decimal("1") / stored_rate if inverse_applied else stored_rate
+        return FxRateResolution(
+            rate=selected,
+            effective_rate=effective_rate,
+            converted_amount=payload.amount * effective_rate,
+            requested_rate_date=payload.rate_date,
+            selected_rate_date=selected.rate_date,
+            inverse_applied=inverse_applied,
+        )
+
+    @staticmethod
+    def _currency(value: str) -> str:
+        currency = value.strip().upper()
+        if len(currency) != 3 or not currency.isalpha():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Currencies must be three-letter alphabetic codes.",
+            )
+        return currency
+
     @staticmethod
     def _rate_entry_specificity(entry: RateBookEntry) -> int:
         return sum(
@@ -3959,11 +4850,14 @@ class ChargeManagementService:
             )
         default_quantity_uom = _clean_optional(payload.default_quantity_uom.upper() if payload.default_quantity_uom else None)
         return {
+            "effective_from": payload.effective_from,
+            "effective_to": payload.effective_to,
             "source_level": source_level,
             "source_to_house_driver": source_to_house_driver,
             "house_to_item_driver": house_to_item_driver,
             "final_posting_level": final_posting_level,
             "default_quantity_uom": default_quantity_uom,
+            "missing_driver_policy": payload.missing_driver_policy.strip().upper(),
             "settings_json": dict(payload.settings_json or {}),
             "notes": _clean_optional(payload.notes),
         }
@@ -4355,7 +5249,6 @@ class ChargeManagementService:
         self,
         payload: BusinessDateProfileVersionCreate,
     ) -> dict[str, Any]:
-        steps: list[BusinessDateProfileStep] = []
         normalized_steps: list[dict[str, Any]] = []
         seen_step_numbers: set[int] = set()
         if not payload.steps:
@@ -4393,6 +5286,8 @@ class ChargeManagementService:
         return {
             "steps": normalized_steps,
             "notes": _clean_optional(payload.notes),
+            "effective_from": payload.effective_from,
+            "effective_to": payload.effective_to,
         }
 
     def _business_date_profile_version_from_payload(
@@ -4629,11 +5524,14 @@ class ChargeManagementService:
             "profile_name": profile.profile_name,
             "profile_version_id": version.id,
             "profile_version_number": version.version_number,
+            "effective_from": version.effective_from.isoformat() if version.effective_from else None,
+            "effective_to": version.effective_to.isoformat() if version.effective_to else None,
             "source_level": version.source_level,
             "source_to_house_driver": version.source_to_house_driver,
             "house_to_item_driver": version.house_to_item_driver,
             "final_posting_level": version.final_posting_level,
             "default_quantity_uom": version.default_quantity_uom,
+            "missing_driver_policy": version.missing_driver_policy,
             "settings_json": dict(version.settings_json or {}),
             "notes": version.notes,
         }
@@ -4903,7 +5801,16 @@ class ChargeManagementService:
     def _sync_offer_option(self, offer: QuoteOffer, option: QuoteOption | None) -> None:
         if option is None:
             return
-        amount = money(offer.amount)
+        quote = self._require_quote_request(option.quote_request_id)
+        fx_resolution = self._resolve_fx(
+            FxRateResolveRequest(
+                source_currency=offer.currency,
+                target_currency=quote.currency,
+                rate_date=self._quote_pricing_date(quote),
+                amount=offer.amount,
+            )
+        )
+        amount = money(fx_resolution.converted_amount)
         option.option_name = offer.offer_number or option.option_name
         option.payer_total_amount = amount
         option.payee_total_amount = amount
@@ -4919,7 +5826,15 @@ class ChargeManagementService:
             line.party_role_ref = offer.provider_role_ref
             line.description = offer.offer_number or "Provider Offer Total"
             line.amount = amount
-            line.currency = offer.currency
+            line.currency = quote.currency.upper()
+            line.source_currency = offer.currency.upper()
+            line.source_amount = money(offer.amount)
+            line.exchange_rate = fx_resolution.effective_rate
+            line.exchange_rate_date = fx_resolution.selected_rate_date
+            line.fx_rate_id = fx_resolution.rate.id if fx_resolution.rate else None
+            line.exchange_rate_source_code = fx_resolution.rate.source_code if fx_resolution.rate else None
+            line.exchange_rate_type = fx_resolution.rate.rate_type if fx_resolution.rate else None
+            line.exchange_rate_method = fx_resolution.rate.conversion_method if fx_resolution.rate else None
 
     def _require_quote_commitment(self, commitment_id: int) -> QuoteCommitment:
         row = self.repository.quote_commitments.get(commitment_id)

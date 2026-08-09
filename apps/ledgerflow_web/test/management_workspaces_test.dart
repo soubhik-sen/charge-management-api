@@ -158,4 +158,73 @@ void main() {
     );
     expect(mutationCount, 0);
   });
+
+  testWidgets('creates an effective allocation profile with driver policy', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1300, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    JsonMap? captured;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: LedgerFlowDesign.theme,
+        home: ProfileManagementHub(
+          data: WorkspaceData.demo(),
+          live: true,
+          onMutation:
+              ({
+                required method,
+                required path,
+                body,
+                required successMessage,
+              }) async {
+                captured = body;
+                return true;
+              },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Allocation'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'New'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Profile code'),
+      'ALLOC_EFFECTIVE',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Profile name'),
+      'Effective allocation',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Effective from'),
+      '2026-01-01',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Effective to'),
+      '2026-12-31',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Source-to-house driver'),
+      'WEIGHT',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'House-to-item driver'),
+      'VALUE',
+    );
+    await tester.tap(find.text('BLOCK').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('EQUAL').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create profile'));
+    await tester.pumpAndSettle();
+
+    final initial = captured?['initial_version'] as JsonMap?;
+    expect(initial?['effective_from'], '2026-01-01');
+    expect(initial?['effective_to'], '2026-12-31');
+    expect(initial?['missing_driver_policy'], 'EQUAL');
+  });
 }

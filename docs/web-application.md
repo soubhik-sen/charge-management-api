@@ -10,10 +10,10 @@ The Flutter web application under `apps/ledgerflow_web` is the reference user in
 | Quotes | Quote request context, lifecycle, ranked commercial options, matched contracts, and payer/payee charge-line comparison. |
 | Charge documents | Expected charges, status, approval checks, and calculation, allocation, business-date, rate, and FX provenance. |
 | Invoices | Exception-first line matching, variance totals, resolution choices, match health, and linked document context. |
-| Rate books | Version/status context, date-effective rate rows, applicability, calculation/allocation profile references, and selected-rate inspection. |
+| Rate books | Create books, edit drafts, create/publish versions, inspect real version history, and maintain date-effective rate rows and profile references. |
 | Components | Search, inspect, create, edit, deactivate, and attach calculation, allocation, and business-date defaults. |
 | Profiles | Create/edit calculation and allocation profiles, manage draft versions, publish releases, and inspect usage. |
-| FX & dates | Inspect directional FX rates; create/version/publish business-date profiles and maintain scoped assignments. |
+| FX & dates | Create/edit/deactivate directional FX rates; create/version/publish effective-dated business-date profiles and maintain scoped assignments. |
 
 The UI fields use the public JSON names from the OpenAPI contract. Unknown optional fields degrade to empty or inherited values instead of requiring host-specific metadata.
 
@@ -61,8 +61,8 @@ The compiled site is written to `apps/ledgerflow_web/build/web`. Configure an SP
 
 ## Administration Workflows
 
-When connected to a live API, the reference UI performs persisted component and profile administration through the public REST contract. It supports component create/edit/deactivate, calculation and allocation profile create/edit/version/publish, business-date profile create/edit/version/publish, and business-date assignment create/edit/remove.
+When connected to a live API, the reference UI performs persisted master-data administration through the public REST contract. It supports component create/edit/deactivate; calculation, allocation, and business-date profile create/edit/version/publish; business-date assignment create/edit/remove; rate-book create/draft-edit/version/publish; and FX-rate create/edit/deactivate.
 
 Demo mode deliberately disables writes. Profile selectors show published definitions only, while inspectors retain complete version history. API lifecycle and authorization checks remain authoritative.
 
-See [UI administration](ui-administration.md) for task-oriented instructions. Other API lifecycle operations, including rate-book workspace replacement, quote award, charge approval/reversal/export, and invoice matching, remain documented in [API examples](api-examples.md) and interactive Swagger at `/docs` until their reference UI actions are implemented.
+See [UI administration](ui-administration.md) for task-oriented instructions. Other API lifecycle operations, including quote award, charge approval/reversal/export, and invoice matching, remain documented in [API examples](api-examples.md) and interactive Swagger at `/docs` until their reference UI actions are implemented.

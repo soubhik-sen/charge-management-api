@@ -29,6 +29,7 @@ erDiagram
     CHARGE_BUSINESS_DATE_PROFILE ||--o{ CHARGE_BUSINESS_DATE_PROFILE_ASSIGNMENT : assignments
     CHARGE_FX_RATE_SOURCE ||--o{ CHARGE_FX_RATE : publishes
     CHARGE_RATE_BOOK ||--o{ CHARGE_RATE_BOOK_ENTRY : entries
+    CHARGE_RATE_BOOK ||--o| CHARGE_RATE_BOOK : supersedes
     CHARGE_RATE_CONTRACT ||--o{ CHARGE_CONTRACT_LINE : lines
     CHARGE_QUOTE_REQUEST ||--o{ CHARGE_QUOTE_OFFER : offers
     CHARGE_QUOTE_REQUEST ||--o{ CHARGE_QUOTE_OPTION : options
@@ -59,4 +60,4 @@ Migrations and repository initialization provide generic settings, common charge
 - Back up PostgreSQL and test restore procedures according to the deployment's recovery objectives.
 - Never treat local `.db` files as deployable artifacts; they are ignored by Git.
 
-Migration `0016_align_charge_runtime` adds effective-dated rate-book metadata, percentage rates, entry and contract-line priority/active fields, quote chargeable weight/context, generated request numbers, and explicit calculation/allocation execution state on charge lines. Run `alembic upgrade head` before deploying this application version.
+The current schema head is `0021_version_rate_books`. Migrations `0017` through `0021` add quote-line FX/rate-entry provenance, business-date effectivity, allocation effectivity and missing-driver policy, business-date optimistic locking, and independently persisted rate-book versions. Run `alembic upgrade head` before deploying this application version.

@@ -13,11 +13,12 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 
 ## Capabilities
 
-- Effective-dated charge components, aliases, rate books, calculation templates, and contracts.
+- Effective-dated charge components, aliases, versioned rate books, executable calculation templates, and contracts.
 - Deterministic rate-row selection by applicability, specificity, priority, and scale floor.
 - Versioned calculation profiles for flat, single-axis, and compound rate formulas.
-- Versioned allocation profiles with shipment, container, house, and item-level drivers.
-- Versioned business-date profiles with ordered fallback steps and scoped assignments.
+- A side-effect-free calculation preview API for flat, quantity, percentage, profile, FX, and allocation evaluation.
+- Versioned allocation profiles with effective periods, missing-driver policy, and exact minor-unit distribution.
+- Versioned business-date profiles with effective periods, ordered fallback steps, scoped assignments, and standalone resolution.
 - FX source/rate maintenance plus exact-date, prior-date, direct, and inverse resolution.
 - Quote request, offer, rating, ranking, award, commitment, and consumption lifecycle.
 - Charge documents, calculation audit data, approval, reversal, and export lifecycle.
@@ -90,7 +91,7 @@ The repository includes `render.yaml` for the `LEDGERFLOW` project's `Dev & QA` 
 - `ledgerflow-db-devqa`, a private Render PostgreSQL database.
 - Secure JWT validation with a Render-generated HS256 secret.
 
-Create or update the Blueprint from this repository in Render. The API health endpoint is `/health`, Swagger UI is `/docs`, and all charge-management operations remain protected by bearer authentication. Retrieve the generated JWT secret only through Render's secret controls when minting Dev & QA tokens; never commit it.
+Create or update the Blueprint from this repository in Render. The API exposes `/health` for liveness and `/ready` for database-backed readiness, Swagger UI is `/docs`, and all charge-management operations remain protected by bearer authentication. Retrieve the generated JWT secret only through Render's secret controls when minting Dev & QA tokens; never commit it.
 
 ## Documentation
 
@@ -98,7 +99,7 @@ Create or update the Blueprint from this repository in Render. The API health en
 | --- | --- |
 | [Quickstart](docs/quickstart.md) | First local call with Docker or Python |
 | [Core concepts](docs/core-concepts.md) | What each module means and how the modules work together |
-| [API examples](docs/api-examples.md) | Allocation, business-date, and FX requests |
+| [API examples](docs/api-examples.md) | Calculation preview, allocation, business-date, FX, and rating requests |
 | [Authentication](docs/authentication.md) | JWT, claims, local mode, and authorization boundary |
 | [Database](docs/database.md) | Schema groups, migrations, and persistence behavior |
 | [Testing](docs/testing.md) | Local and CI reports, PostgreSQL tests, and OpenAPI checks |

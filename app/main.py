@@ -4,8 +4,10 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1.charge_management import router as charge_management_router
+from app.operations import readiness
 
 
 def create_app() -> FastAPI:
@@ -40,6 +42,20 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["Operations"], include_in_schema=False)
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ready", tags=["Operations"], include_in_schema=False, response_model=None)
+    def ready():
+        try:
+            readiness.check_database_readiness()
+        except readiness.DatabaseReadinessError:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "checks": {"database": "unavailable"},
+                },
+            )
+        return {"status": "ok", "checks": {"database": "ok"}}
 
     return app
 

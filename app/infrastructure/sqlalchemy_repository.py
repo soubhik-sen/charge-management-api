@@ -49,7 +49,6 @@ from app.db.models import (
 from app.domain.models import (
     BusinessDateProfile,
     BusinessDateProfileAssignment,
-    BusinessDateProfileAssignmentCreate,
     BusinessDateProfileStep,
     BusinessDateProfileVersion,
     ChargeAllocationProfile,
@@ -63,7 +62,6 @@ from app.domain.models import (
     ChargeExportResponse,
     ChargeInvoice,
     ChargeLine,
-    ChargeInitializationData,
     ChargeManagementSettings,
     ChargeMatchResult,
     CalculationTemplate,
@@ -80,15 +78,8 @@ from app.domain.models import (
     RateBook,
     RateBookEntry,
     RateContract,
-    utcnow,
 )
 from app.domain.service import InMemoryChargeRepository
-from app.domain.seeds import (
-    COMMON_BUSINESS_DATE_PROFILES,
-    COMMON_CHARGE_ALLOCATION_PROFILES,
-    COMMON_CHARGE_CALCULATION_PROFILES,
-    COMMON_CHARGE_COMPONENTS,
-)
 
 
 def _row_data(row: Any) -> dict[str, Any]:
@@ -558,6 +549,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._load_allocation_profiles()
         self._load_calculation_profiles()
         self._load_business_date_profiles()
+        self._load_fx_sources()
         self._load_components()
         self._load_rate_books()
         self._load_calculation_templates()
@@ -902,6 +894,10 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 valid_to=row.valid_to,
                 calculation_basis=row.calculation_basis,
                 status=row.status,
+                version_number=row.version_number,
+                supersedes_rate_book_id=row.supersedes_rate_book_id,
+                lock_version=row.lock_version,
+                published_at=row.published_at,
                 entries=sorted(entries_by_book.get(row.id, []), key=lambda item: item.id),
                 is_active=row.is_active,
             )
@@ -1328,11 +1324,15 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     profile_id=version.profile_id,
                     version_number=version.version_number,
                     status=version.status,
+                    effective_from=version.effective_from,
+                    effective_to=version.effective_to,
                     source_level=version.source_level,
                     source_to_house_driver=version.source_to_house_driver,
                     house_to_item_driver=version.house_to_item_driver,
                     final_posting_level=version.final_posting_level,
                     default_quantity_uom=version.default_quantity_uom,
+                    missing_driver_policy=version.missing_driver_policy,
+                    lock_version=version.lock_version,
                     settings_json=dict(version.settings_json or {}),
                     notes=version.notes,
                     published_at=version.published_at,
@@ -1436,6 +1436,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     version_number=version.version_number,
                     status=version.status,
                     notes=version.notes,
+                    effective_from=version.effective_from,
+                    effective_to=version.effective_to,
+                    lock_version=version.lock_version,
                     published_at=version.published_at,
                     created_at=version.created_at,
                     updated_at=version.updated_at,
@@ -1593,6 +1596,10 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     valid_to=book.valid_to,
                     calculation_basis=book.calculation_basis,
                     status=book.status,
+                    version_number=book.version_number,
+                    supersedes_rate_book_id=book.supersedes_rate_book_id,
+                    lock_version=book.lock_version,
+                    published_at=book.published_at,
                     is_active=book.is_active,
                 )
             )
@@ -1834,6 +1841,14 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                         amount=line.amount,
                         currency=line.currency,
                         basis=line.basis,
+                        source_currency=line.source_currency,
+                        source_amount=line.source_amount,
+                        exchange_rate=line.exchange_rate,
+                        exchange_rate_date=line.exchange_rate_date,
+                        fx_rate_id=line.fx_rate_id,
+                        exchange_rate_source_code=line.exchange_rate_source_code,
+                        exchange_rate_type=line.exchange_rate_type,
+                        exchange_rate_method=line.exchange_rate_method,
                         rate_amount=line.rate_amount,
                         quantity=line.quantity,
                         quantity_uom=line.quantity_uom,
@@ -1853,6 +1868,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                         effective_allocation_snapshot_json=dict(line.effective_allocation_snapshot_json or {}),
                         source_contract_id=line.source_contract_id,
                         source_rate_book_id=line.source_rate_book_id,
+                        source_rate_book_entry_id=line.source_rate_book_entry_id,
+                        is_statistical=line.is_statistical,
                         is_margin_line=line.is_margin_line,
                     )
                 )

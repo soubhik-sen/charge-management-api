@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/design.dart';
 import '../data/workspace_data.dart';
-import 'workspace_pages.dart';
+import 'workspace_pages.dart' hide WorkspaceMutation;
 
 typedef WorkspaceMutation =
     Future<bool> Function({
@@ -507,6 +507,8 @@ class _FxDateManagementHubState extends State<FxDateManagementHub> {
           loadAssignments: widget.loadAssignments,
         ),
       ] else ...[
+        if (!widget.live) const _LiveWriteNotice(),
+        if (!widget.live) const SizedBox(height: 16),
         const _ModulePrimer(
           title: 'How FX rates are used',
           text:
@@ -518,7 +520,11 @@ class _FxDateManagementHubState extends State<FxDateManagementHub> {
           ],
         ),
         const SizedBox(height: 16),
-        _FxRateTable(records: widget.data['fxRates']),
+        _FxRateManager(
+          records: widget.data['fxRates'],
+          live: widget.live,
+          onMutation: widget.onMutation,
+        ),
       ],
     ],
   );
@@ -1555,7 +1561,14 @@ class _VersionDialogState extends State<_VersionDialog> {
         onPressed: () {
           if (!_formKey.currentState!.validate()) return;
           try {
-            Navigator.pop<JsonMap>(context, _editorKey.currentState!.payload());
+            final payload = _editorKey.currentState!.payload();
+            if (widget.version?['status'] == 'DRAFT') {
+              final lockVersion = _idValue(widget.version?['lock_version']);
+              if (lockVersion != null) {
+                payload['expected_lock_version'] = lockVersion;
+              }
+            }
+            Navigator.pop<JsonMap>(context, payload);
           } on FormatException catch (error) {
             setState(() => _error = error.message);
           }
@@ -1589,6 +1602,7 @@ class _VersionEditorState extends State<_VersionEditor> {
   late final TextEditingController _sourceDriver;
   late final TextEditingController _itemDriver;
   late final TextEditingController _quantityUom;
+  late String _missingDriverPolicy;
   late final TextEditingController _settings;
   late final TextEditingController _notes;
 
@@ -1636,6 +1650,11 @@ class _VersionEditorState extends State<_VersionEditor> {
     );
     _quantityUom = TextEditingController(
       text: _value(initial, 'default_quantity_uom', fallback: ''),
+    );
+    _missingDriverPolicy = _value(
+      initial,
+      'missing_driver_policy',
+      fallback: 'BLOCK',
     );
     _settings = TextEditingController(
       text: const JsonEncoder.withIndent(
@@ -1867,9 +1886,36 @@ class _VersionEditorState extends State<_VersionEditor> {
         ),
       ),
       const SizedBox(height: 12),
-      TextFormField(
-        controller: _quantityUom,
-        decoration: const InputDecoration(labelText: 'Default quantity UOM'),
+      _TwoFields(
+        left: TextFormField(
+          controller: _effectiveFrom,
+          decoration: const InputDecoration(
+            labelText: 'Effective from',
+            hintText: 'YYYY-MM-DD',
+          ),
+          validator: _optionalIsoDate,
+        ),
+        right: TextFormField(
+          controller: _effectiveTo,
+          decoration: const InputDecoration(
+            labelText: 'Effective to',
+            hintText: 'YYYY-MM-DD',
+          ),
+          validator: _optionalIsoDate,
+        ),
+      ),
+      const SizedBox(height: 12),
+      _TwoFields(
+        left: TextFormField(
+          controller: _quantityUom,
+          decoration: const InputDecoration(labelText: 'Default quantity UOM'),
+        ),
+        right: _dropdown(
+          label: 'Missing driver policy',
+          value: _missingDriverPolicy,
+          values: const ['BLOCK', 'EQUAL'],
+          onChanged: (value) => setState(() => _missingDriverPolicy = value!),
+        ),
       ),
       const SizedBox(height: 12),
       TextFormField(
@@ -1895,6 +1941,25 @@ class _VersionEditorState extends State<_VersionEditor> {
   Widget _businessDateFields() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
+      _TwoFields(
+        left: TextFormField(
+          controller: _effectiveFrom,
+          decoration: const InputDecoration(
+            labelText: 'Effective from',
+            hintText: 'YYYY-MM-DD',
+          ),
+          validator: _optionalIsoDate,
+        ),
+        right: TextFormField(
+          controller: _effectiveTo,
+          decoration: const InputDecoration(
+            labelText: 'Effective to',
+            hintText: 'YYYY-MM-DD',
+          ),
+          validator: _optionalIsoDate,
+        ),
+      ),
+      const SizedBox(height: 18),
       SectionHeading(
         title: 'Ordered date fallback',
         subtitle: 'The first available date wins.',
@@ -2006,15 +2071,20 @@ class _VersionEditorState extends State<_VersionEditor> {
       ),
     },
     ProfileKind.allocation => {
+      'effective_from': _nullable(_effectiveFrom.text),
+      'effective_to': _nullable(_effectiveTo.text),
       'source_level': _sourceLevel,
       'source_to_house_driver': _nullable(_sourceDriver.text),
       'house_to_item_driver': _nullable(_itemDriver.text),
       'final_posting_level': _postingLevel,
       'default_quantity_uom': _nullable(_quantityUom.text),
+      'missing_driver_policy': _missingDriverPolicy,
       'settings_json': _jsonObject(_settings.text),
       'notes': _nullable(_notes.text),
     },
     ProfileKind.businessDate => {
+      'effective_from': _nullable(_effectiveFrom.text),
+      'effective_to': _nullable(_effectiveTo.text),
       'steps': List.generate(
         _steps.length,
         (index) => _steps[index].payload(index + 1),
@@ -2261,31 +2331,182 @@ class _VersionPanel extends StatelessWidget {
   }
 }
 
-class _FxRateTable extends StatelessWidget {
-  const _FxRateTable({required this.records});
+class _FxRateManager extends StatefulWidget {
+  const _FxRateManager({
+    required this.records,
+    required this.live,
+    required this.onMutation,
+  });
 
   final List<JsonMap> records;
+  final bool live;
+  final WorkspaceMutation onMutation;
 
   @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: EdgeInsets.zero,
-    child: records.isEmpty
-        ? const EmptyState(message: 'No FX rates are available.')
-        : SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              columns: const [
-                DataColumn(label: Text('Source')),
-                DataColumn(label: Text('Pair')),
-                DataColumn(label: Text('Rate date')),
-                DataColumn(label: Text('Rate')),
-                DataColumn(label: Text('Type')),
-                DataColumn(label: Text('Method')),
-                DataColumn(label: Text('Status')),
-              ],
-              rows: records
-                  .map(
-                    (record) => DataRow(
+  State<_FxRateManager> createState() => _FxRateManagerState();
+}
+
+class _FxRateManagerState extends State<_FxRateManager> {
+  final _search = TextEditingController();
+  int? _selectedId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedId = _id(widget.records.firstOrNull);
+    _search.addListener(_refresh);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FxRateManager oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedId != null &&
+        !widget.records.any((record) => _id(record) == _selectedId)) {
+      _selectedId = _id(widget.records.firstOrNull);
+    }
+  }
+
+  @override
+  void dispose() {
+    _search
+      ..removeListener(_refresh)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _refresh() => setState(() {});
+
+  List<JsonMap> get _filtered {
+    final query = _search.text.trim().toLowerCase();
+    if (query.isEmpty) return widget.records;
+    return widget.records
+        .where((record) {
+          final pair =
+              '${_value(record, 'source_currency')} ${_value(record, 'target_currency')}';
+          return [
+            _value(record, 'source_code'),
+            _value(record, 'source_name'),
+            pair,
+            _value(record, 'rate_date'),
+            _value(record, 'rate_type'),
+            _value(record, 'conversion_method'),
+          ].any((value) => value.toLowerCase().contains(query));
+        })
+        .toList(growable: false);
+  }
+
+  JsonMap? get _selected => widget.records.cast<JsonMap?>().firstWhere(
+    (record) => _id(record) == _selectedId,
+    orElse: () => widget.records.firstOrNull,
+  );
+
+  List<_FxSourceOption> get _sources {
+    final byId = <int, _FxSourceOption>{};
+    for (final record in widget.records) {
+      final sourceId = _idValue(record['source_id']);
+      if (sourceId == null || byId.containsKey(sourceId)) continue;
+      byId[sourceId] = _FxSourceOption(
+        id: sourceId,
+        code: _value(record, 'source_code', fallback: 'SOURCE_$sourceId'),
+        name: _value(record, 'source_name', fallback: 'FX Source #$sourceId'),
+      );
+    }
+    final values = byId.values.toList()
+      ..sort((left, right) {
+        final codeCompare = left.code.compareTo(right.code);
+        return codeCompare == 0 ? left.id.compareTo(right.id) : codeCompare;
+      });
+    return values;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _selected;
+    final sources = _sources;
+    return ResponsiveColumns(
+      leftFlex: 5,
+      rightFlex: 3,
+      left: SurfaceCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'FX rate register',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              sources.isEmpty
+                                  ? 'Loaded rates do not expose any reusable source catalogue yet. Use the API to maintain sources, then create rates against the numeric source ID.'
+                                  : 'Select a maintained rate to inspect or update the live register.',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: LedgerFlowDesign.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        onPressed: widget.live ? () => _editRate() : null,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('New rate'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _search,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      labelText: 'Search source, pair, date, or method',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            if (_filtered.isEmpty)
+              EmptyState(
+                message: widget.records.isEmpty
+                    ? 'No FX rates are available.'
+                    : 'No FX rates match the search.',
+              )
+            else
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  showCheckboxColumn: false,
+                  columns: const [
+                    DataColumn(label: Text('Source')),
+                    DataColumn(label: Text('Pair')),
+                    DataColumn(label: Text('Rate date')),
+                    DataColumn(label: Text('Rate')),
+                    DataColumn(label: Text('Type')),
+                    DataColumn(label: Text('Method')),
+                    DataColumn(label: Text('Status')),
+                  ],
+                  rows: _filtered.map((record) {
+                    final id = _id(record);
+                    final active = record['is_active'] != false;
+                    return DataRow(
+                      selected: id == _selectedId,
+                      onSelectChanged: (_) => setState(() => _selectedId = id),
                       cells: [
                         DataCell(Text(_value(record, 'source_code'))),
                         DataCell(
@@ -2297,20 +2518,410 @@ class _FxRateTable extends StatelessWidget {
                         DataCell(Text(_value(record, 'rate'))),
                         DataCell(Text(_value(record, 'rate_type'))),
                         DataCell(Text(_value(record, 'conversion_method'))),
-                        DataCell(
-                          StatusPill(
-                            record['is_active'] == false
-                                ? 'INACTIVE'
-                                : 'ACTIVE',
-                          ),
-                        ),
+                        DataCell(StatusPill(active ? 'ACTIVE' : 'INACTIVE')),
                       ],
+                    );
+                  }).toList(),
+                ),
+              ),
+          ],
+        ),
+      ),
+      right: selected == null
+          ? SurfaceCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const EmptyState(
+                    message: 'Select a rate to inspect, edit, or deactivate.',
+                  ),
+                  if (sources.isEmpty) ...[
+                    const SizedBox(height: 12),
+                    const _DialogSection(
+                      title: 'Source catalogue',
+                      text:
+                          'FX sources are maintained through the API. When no rates are loaded yet, enter the numeric source ID provided by the source-maintenance endpoint.',
                     ),
-                  )
-                  .toList(),
+                  ],
+                ],
+              ),
+            )
+          : _fxInspector(selected, sources),
+    );
+  }
+
+  Widget _fxInspector(JsonMap rate, List<_FxSourceOption> sources) {
+    final active = rate['is_active'] != false;
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeading(
+            title:
+                '${_value(rate, 'source_currency')} -> ${_value(rate, 'target_currency')}',
+            subtitle:
+                '${_value(rate, 'source_code')} on ${_value(rate, 'rate_date')}',
+            action: PopupMenuButton<String>(
+              tooltip: 'FX rate actions',
+              onSelected: (action) {
+                if (action == 'edit') _editRate(rate);
+                if (action == 'deactivate') _deactivate(rate);
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'edit',
+                  enabled: widget.live,
+                  child: const Text('Edit rate'),
+                ),
+                PopupMenuItem(
+                  value: 'deactivate',
+                  enabled: widget.live && active,
+                  child: const Text('Deactivate'),
+                ),
+              ],
             ),
           ),
-  );
+          const SizedBox(height: 14),
+          StatusPill(active ? 'ACTIVE' : 'INACTIVE'),
+          const SizedBox(height: 14),
+          DetailRow(label: 'Source code', value: _value(rate, 'source_code')),
+          DetailRow(label: 'Source name', value: _value(rate, 'source_name')),
+          DetailRow(label: 'Source ID', value: _value(rate, 'source_id')),
+          DetailRow(
+            label: 'Currency pair',
+            value:
+                '${_value(rate, 'source_currency')} / ${_value(rate, 'target_currency')}',
+          ),
+          DetailRow(label: 'Rate date', value: _value(rate, 'rate_date')),
+          DetailRow(label: 'Rate', value: _value(rate, 'rate')),
+          DetailRow(label: 'Rate type', value: _value(rate, 'rate_type')),
+          DetailRow(
+            label: 'Conversion method',
+            value: _value(rate, 'conversion_method'),
+          ),
+          const SizedBox(height: 12),
+          if (sources.isEmpty)
+            const _DialogSection(
+              title: 'Source maintenance',
+              text:
+                  'This workspace edits live rates only. Add or rename FX sources through the API, then refresh this screen to reuse those source codes here.',
+            ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: widget.live ? () => _editRate(rate) : null,
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Edit rate'),
+            ),
+          ),
+          if (active) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: widget.live ? () => _deactivate(rate) : null,
+                icon: const Icon(Icons.block_outlined),
+                label: const Text('Deactivate'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editRate([JsonMap? rate]) async {
+    final payload = await showDialog<JsonMap>(
+      context: context,
+      builder: (_) => _FxRateDialog(initial: rate, sourceOptions: _sources),
+    );
+    if (payload == null || !mounted) return;
+    final creating = rate == null;
+    await widget.onMutation(
+      method: creating ? 'POST' : 'PUT',
+      path: creating
+          ? '/api/v1/charge-management/fx-rates'
+          : '/api/v1/charge-management/fx-rates/${rate['id']}',
+      body: payload,
+      successMessage: creating ? 'FX rate created.' : 'FX rate updated.',
+    );
+  }
+
+  Future<void> _deactivate(JsonMap rate) async {
+    final confirmed = await _confirm(
+      context,
+      title: 'Deactivate FX rate?',
+      message:
+          '${_value(rate, 'source_code')} ${_value(rate, 'source_currency')}/${_value(rate, 'target_currency')} on ${_value(rate, 'rate_date')} will remain available for audit but no longer resolve for active use.',
+      action: 'Deactivate',
+    );
+    if (!confirmed) return;
+    await widget.onMutation(
+      method: 'DELETE',
+      path: '/api/v1/charge-management/fx-rates/${rate['id']}',
+      successMessage: 'FX rate deactivated.',
+    );
+  }
+}
+
+class _FxSourceOption {
+  const _FxSourceOption({
+    required this.id,
+    required this.code,
+    required this.name,
+  });
+
+  final int id;
+  final String code;
+  final String name;
+
+  String get label => '$code (#$id)';
+}
+
+class _FxRateDialog extends StatefulWidget {
+  const _FxRateDialog({required this.sourceOptions, this.initial});
+
+  final List<_FxSourceOption> sourceOptions;
+  final JsonMap? initial;
+
+  @override
+  State<_FxRateDialog> createState() => _FxRateDialogState();
+}
+
+class _FxRateDialogState extends State<_FxRateDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late int? _selectedSourceId;
+  late final TextEditingController _manualSourceId;
+  late final TextEditingController _sourceCurrency;
+  late final TextEditingController _targetCurrency;
+  late final TextEditingController _rateDate;
+  late final TextEditingController _rate;
+  late final TextEditingController _conversionMethod;
+  late String _rateType;
+
+  bool get _hasSourceOptions => widget.sourceOptions.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initial ?? const <String, dynamic>{};
+    final initialSourceId = _idValue(initial['source_id']);
+    _selectedSourceId =
+        widget.sourceOptions.any((option) => option.id == initialSourceId)
+        ? initialSourceId
+        : widget.sourceOptions.firstOrNull?.id;
+    _manualSourceId = TextEditingController(
+      text: initialSourceId?.toString() ?? '',
+    );
+    _sourceCurrency = TextEditingController(
+      text: _value(initial, 'source_currency', fallback: ''),
+    );
+    _targetCurrency = TextEditingController(
+      text: _value(initial, 'target_currency', fallback: ''),
+    );
+    _rateDate = TextEditingController(
+      text: _value(initial, 'rate_date', fallback: ''),
+    );
+    _rate = TextEditingController(text: _value(initial, 'rate', fallback: ''));
+    _conversionMethod = TextEditingController(
+      text: _value(initial, 'conversion_method', fallback: 'DIRECT'),
+    );
+    _rateType = _value(initial, 'rate_type', fallback: 'MID');
+  }
+
+  @override
+  void dispose() {
+    _manualSourceId.dispose();
+    _sourceCurrency.dispose();
+    _targetCurrency.dispose();
+    _rateDate.dispose();
+    _rate.dispose();
+    _conversionMethod.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editing = widget.initial != null;
+    return AlertDialog(
+      title: Text(editing ? 'Edit FX rate' : 'Create FX rate'),
+      content: SizedBox(
+        width: 560,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _DialogSection(
+                  title: 'Maintained conversion rate',
+                  text:
+                      'Store a directional rate with an effective date, source, and method so charge calculation can reproduce the exact conversion used.',
+                ),
+                if (_hasSourceOptions) ...[
+                  DropdownButtonFormField<int>(
+                    initialValue: _selectedSourceId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Source',
+                      helperText:
+                          'Loaded rate sources. Manage the catalogue via API.',
+                    ),
+                    items: widget.sourceOptions
+                        .map(
+                          (option) => DropdownMenuItem<int>(
+                            value: option.id,
+                            child: Text(
+                              option.label,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    validator: (value) =>
+                        value == null ? 'Source is required' : null,
+                    onChanged: (value) =>
+                        setState(() => _selectedSourceId = value),
+                  ),
+                ] else ...[
+                  const _DialogSection(
+                    title: 'Source reference',
+                    text:
+                        'FX rate sources are maintained via API. Enter the numeric source ID that this rate should reference.',
+                  ),
+                  TextFormField(
+                    controller: _manualSourceId,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Source ID'),
+                    validator: _sourceIdValidator,
+                  ),
+                ],
+                const SizedBox(height: 12),
+                _TwoFields(
+                  left: TextFormField(
+                    controller: _sourceCurrency,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Source currency',
+                      hintText: 'EUR',
+                    ),
+                    validator: (value) =>
+                        _currencyCodeValidator(value, label: 'Source currency'),
+                  ),
+                  right: TextFormField(
+                    controller: _targetCurrency,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Target currency',
+                      hintText: 'USD',
+                    ),
+                    validator: (value) {
+                      final code = _currencyCodeValidator(
+                        value,
+                        label: 'Target currency',
+                      );
+                      if (code != null) return code;
+                      final source = _sourceCurrency.text.trim().toUpperCase();
+                      final target = value?.trim().toUpperCase() ?? '';
+                      return source == target ? 'Currencies must differ' : null;
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _TwoFields(
+                  left: TextFormField(
+                    controller: _rateDate,
+                    decoration: const InputDecoration(
+                      labelText: 'Rate date',
+                      hintText: 'YYYY-MM-DD',
+                    ),
+                    validator: _requiredIsoDate,
+                  ),
+                  right: TextFormField(
+                    controller: _rate,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(labelText: 'Rate'),
+                    validator: _positiveRateValidator,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _TwoFields(
+                  left: DropdownButtonFormField<String>(
+                    initialValue:
+                        const [
+                          'MID',
+                          'BUY',
+                          'SELL',
+                          'CUSTOM',
+                        ].contains(_rateType)
+                        ? _rateType
+                        : 'MID',
+                    decoration: const InputDecoration(labelText: 'Rate type'),
+                    items: const ['MID', 'BUY', 'SELL', 'CUSTOM']
+                        .map(
+                          (value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(value),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) =>
+                        setState(() => _rateType = value ?? 'MID'),
+                  ),
+                  right: TextFormField(
+                    controller: _conversionMethod,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Conversion method',
+                      helperText: 'Examples: DIRECT, PUBLISHED, TREASURY',
+                    ),
+                    validator: (value) {
+                      final text = value?.trim() ?? '';
+                      return text.isEmpty
+                          ? 'Conversion method is required'
+                          : null;
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _save,
+          child: Text(editing ? 'Save rate' : 'Create rate'),
+        ),
+      ],
+    );
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    final payload = <String, dynamic>{
+      'source_id': _hasSourceOptions
+          ? _selectedSourceId
+          : int.parse(_manualSourceId.text.trim()),
+      'source_currency': _sourceCurrency.text.trim().toUpperCase(),
+      'target_currency': _targetCurrency.text.trim().toUpperCase(),
+      'rate_date': _rateDate.text.trim(),
+      'rate': _rate.text.trim(),
+      'rate_type': _rateType,
+      'conversion_method': _conversionMethod.text.trim().toUpperCase(),
+      'is_active': widget.initial?['is_active'] != false,
+      'metadata_json': widget.initial?['metadata_json'] ?? <String, dynamic>{},
+    };
+    Navigator.pop(context, payload);
+  }
 }
 
 class _ModulePrimer extends StatelessWidget {
@@ -2793,6 +3404,36 @@ String? _optionalIsoDate(String? value) {
   return RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text)
       ? null
       : 'Use YYYY-MM-DD';
+}
+
+String? _requiredIsoDate(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return 'Rate date is required';
+  return _optionalIsoDate(text);
+}
+
+String? _currencyCodeValidator(String? value, {required String label}) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return '$label is required';
+  return RegExp(r'^[A-Za-z]{3}$').hasMatch(text)
+      ? null
+      : '$label must be a 3-letter code';
+}
+
+String? _positiveRateValidator(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return 'Rate is required';
+  final parsed = double.tryParse(text);
+  if (parsed == null) return 'Enter a valid rate';
+  return parsed > 0 ? null : 'Enter a positive rate';
+}
+
+String? _sourceIdValidator(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return 'Source ID is required';
+  final parsed = int.tryParse(text);
+  if (parsed == null || parsed <= 0) return 'Enter a positive source ID';
+  return null;
 }
 
 Map<String, dynamic> _jsonObject(String source) {

@@ -199,7 +199,11 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
     1 => QuoteWorkspace(quotes: _data['quotes']),
     2 => ChargeDocumentWorkspace(documents: _data['documents']),
     3 => InvoiceWorkspace(invoices: _data['invoices']),
-    4 => RateBookWorkspace(rateBooks: _data['rateBooks']),
+    4 => RateBookWorkspace(
+      rateBooks: _data['rateBooks'],
+      live: _live,
+      onMutation: _mutate,
+    ),
     5 => ComponentManagementWorkspace(
       records: _data['components'],
       calculationProfiles: _data['calculationProfiles'],

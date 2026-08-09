@@ -21,21 +21,20 @@ class LedgerFlowApiClient {
   final String token;
   final http.Client _httpClient;
 
+  static const _defaultPageSize = 100;
+  static const _maxListRequests = 100;
+
   static const _resources = <String, String>{
-    'components': '/api/v1/charge-management/components?limit=100&offset=0',
-    'rateBooks': '/api/v1/charge-management/rate-books?limit=100&offset=0',
-    'quotes': '/api/v1/charge-management/quote-requests?limit=100&offset=0',
-    'documents':
-        '/api/v1/charge-management/charge-documents?limit=100&offset=0',
-    'invoices': '/api/v1/charge-management/invoices?limit=100&offset=0',
-    'fxRates': '/api/v1/charge-management/fx-rates?limit=100&offset=0',
-    'dateProfiles':
-        '/api/v1/charge-management/business-date-profiles?limit=100&offset=0',
-    'allocationProfiles':
-        '/api/v1/charge-management/allocation-profiles?limit=100&offset=0',
-    'calculationProfiles':
-        '/api/v1/charge-management/calculation-profiles?limit=100&offset=0',
-    'contracts': '/api/v1/charge-management/contracts?limit=100&offset=0',
+    'components': '/api/v1/charge-management/components',
+    'rateBooks': '/api/v1/charge-management/rate-books',
+    'quotes': '/api/v1/charge-management/quote-requests',
+    'documents': '/api/v1/charge-management/charge-documents',
+    'invoices': '/api/v1/charge-management/invoices',
+    'fxRates': '/api/v1/charge-management/fx-rates',
+    'dateProfiles': '/api/v1/charge-management/business-date-profiles',
+    'allocationProfiles': '/api/v1/charge-management/allocation-profiles',
+    'calculationProfiles': '/api/v1/charge-management/calculation-profiles',
+    'contracts': '/api/v1/charge-management/contracts',
   };
 
   Future<WorkspaceData> loadWorkspace() async {
@@ -76,29 +75,83 @@ class LedgerFlowApiClient {
   }
 
   Future<List<JsonMap>> loadBusinessDateAssignments(int profileId) => _list(
-    '/api/v1/charge-management/business-date-profiles/$profileId/assignments'
-    '?limit=100&offset=0',
+    '/api/v1/charge-management/business-date-profiles/$profileId/assignments',
   );
 
   Future<List<JsonMap>> _list(String path) async {
-    final response = await _httpClient.get(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers,
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw LedgerFlowApiException.fromResponse(response);
+    final items = <JsonMap>[];
+    var offset = 0;
+
+    for (
+      var requestCount = 0;
+      requestCount < _maxListRequests;
+      requestCount++
+    ) {
+      final response = await _httpClient.get(
+        _pagedUri(path, limit: _defaultPageSize, offset: offset),
+        headers: _headers,
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw LedgerFlowApiException.fromResponse(response);
+      }
+      final page = _parseListPage(response.body);
+      items.addAll(page.items);
+
+      if (items.length >= page.total) {
+        return List.unmodifiable(items);
+      }
+
+      final nextOffset = page.offset + page.limit;
+      if (page.limit <= 0 || nextOffset <= offset) {
+        break;
+      }
+      offset = nextOffset;
     }
-    final payload = jsonDecode(response.body);
+
+    throw const LedgerFlowApiException(
+      'The API returned too many list pages or an invalid pagination sequence.',
+    );
+  }
+
+  Uri _pagedUri(String path, {required int limit, required int offset}) {
+    final uri = Uri.parse('$baseUrl$path');
+    final queryParameters = Map<String, String>.from(uri.queryParameters);
+    queryParameters['limit'] = '$limit';
+    queryParameters['offset'] = '$offset';
+    return uri.replace(queryParameters: queryParameters);
+  }
+
+  _ListPage _parseListPage(String responseBody) {
+    final payload = jsonDecode(responseBody);
     if (payload is! Map<String, dynamic> || payload['items'] is! List) {
       throw const LedgerFlowApiException(
         'The API returned an unexpected list response.',
       );
     }
-    return (payload['items'] as List)
-        .whereType<Map<String, dynamic>>()
-        .map(JsonMap.from)
-        .toList(growable: false);
+    final total = _readInt(payload['total']);
+    final limit = _readInt(payload['limit']);
+    final offset = _readInt(payload['offset']);
+    if (total == null || limit == null || offset == null) {
+      throw const LedgerFlowApiException(
+        'The API returned an unexpected list response.',
+      );
+    }
+    return _ListPage(
+      items: (payload['items'] as List)
+          .whereType<Map<String, dynamic>>()
+          .map(JsonMap.from)
+          .toList(growable: false),
+      total: total,
+      limit: limit,
+      offset: offset,
+    );
   }
+
+  int? _readInt(dynamic value) => switch (value) {
+    int number => number,
+    String text => int.tryParse(text),
+    _ => null,
+  };
 
   Map<String, String> get _headers => {
     'Accept': 'application/json',
@@ -127,4 +180,18 @@ class LedgerFlowApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+class _ListPage {
+  const _ListPage({
+    required this.items,
+    required this.total,
+    required this.limit,
+    required this.offset,
+  });
+
+  final List<JsonMap> items;
+  final int total;
+  final int limit;
+  final int offset;
 }

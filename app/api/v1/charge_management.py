@@ -16,6 +16,8 @@ from app.domain.models import (
     ChargeAllocationProfileUpdate,
     ChargeAllocationProfileVersion,
     ChargeAllocationProfileVersionCreate,
+    ChargeCalculationPreviewRequest,
+    ChargeCalculationPreviewResponse,
     ChargeCalculationProfile,
     ChargeCalculationProfileCreate,
     ChargeCalculationProfileListResponse,
@@ -31,6 +33,8 @@ from app.domain.models import (
     BusinessDateProfileUpdate,
     BusinessDateProfileVersion,
     BusinessDateProfileVersionCreate,
+    BusinessDateResolveRequest,
+    BusinessDateResolveResponse,
     ChargeComponent,
     ChargeComponentAlias,
     ChargeComponentAliasListResponse,
@@ -124,6 +128,24 @@ def get_initialization_data(
 ) -> ChargeInitializationData:
     _allow(principal, "charge.initialization_data")
     return service.initialization_data()
+
+
+@router.post("/calculations/preview", response_model=ChargeCalculationPreviewResponse)
+def preview_calculation(
+    payload: ChargeCalculationPreviewRequest,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeCalculationPreviewResponse:
+    _allow(principal, "charge.calculations.preview")
+    return service.preview_calculation(payload)
+
+
+@router.post("/business-dates/resolve", response_model=BusinessDateResolveResponse)
+def resolve_business_date(
+    payload: BusinessDateResolveRequest,
+    principal: Principal = Depends(require_bearer_principal),
+) -> BusinessDateResolveResponse:
+    _allow(principal, "charge.business_dates.resolve")
+    return service.resolve_business_date(payload)
 
 
 @router.get("/fx-rate-sources", response_model=FxRateSourceListResponse)
@@ -689,6 +711,38 @@ def get_rate_book_workspace(
 ) -> RateBookWorkspace:
     _allow(principal, "charge.rate_books.workspace.read")
     return service.get_rate_book_workspace(rate_book_id)
+
+
+@router.get("/rate-books/{rate_book_id}/versions", response_model=list[RateBook])
+def list_rate_book_versions(
+    rate_book_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> list[RateBook]:
+    _allow(principal, "charge.rate_books.versions.list")
+    return service.list_rate_book_versions(rate_book_id)
+
+
+@router.post(
+    "/rate-books/{rate_book_id}/versions",
+    response_model=RateBookWorkspace,
+    status_code=201,
+)
+def create_rate_book_version(
+    rate_book_id: int,
+    payload: RateBookPayload,
+    principal: Principal = Depends(require_bearer_principal),
+) -> RateBookWorkspace:
+    _allow(principal, "charge.rate_books.versions.create")
+    return service.create_rate_book_version(rate_book_id, payload)
+
+
+@router.post("/rate-books/{rate_book_id}/publish", response_model=RateBookWorkspace)
+def publish_rate_book(
+    rate_book_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> RateBookWorkspace:
+    _allow(principal, "charge.rate_books.publish")
+    return service.publish_rate_book(rate_book_id)
 
 
 @router.put("/rate-books/{rate_book_id}/workspace", response_model=RateBookWorkspace)

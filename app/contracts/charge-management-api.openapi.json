@@ -27,6 +27,11 @@
             "title": "Profile Code",
             "type": "string"
           },
+          "profile_key": {
+            "readOnly": true,
+            "title": "Profile Key",
+            "type": "string"
+          },
           "profile_name": {
             "title": "Profile Name",
             "type": "string"
@@ -69,7 +74,8 @@
         "required": [
           "id",
           "profile_code",
-          "profile_name"
+          "profile_name",
+          "profile_key"
         ],
         "title": "BusinessDateProfile",
         "type": "object"
@@ -257,8 +263,53 @@
             ],
             "title": "Description"
           },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "event_codes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Codes"
+          },
           "initial_version": {
-            "$ref": "#/components/schemas/BusinessDateProfileVersionCreate"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BusinessDateProfileVersionCreate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "profile_code": {
             "title": "Profile Code",
@@ -271,8 +322,7 @@
         },
         "required": [
           "profile_code",
-          "profile_name",
-          "initial_version"
+          "profile_name"
         ],
         "title": "BusinessDateProfileCreate",
         "type": "object"
@@ -412,8 +462,45 @@
             "title": "Created At",
             "type": "string"
           },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "event_codes": {
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "title": "Event Codes",
+            "type": "array"
+          },
           "id": {
             "title": "Id",
+            "type": "integer"
+          },
+          "lock_version": {
+            "default": 1,
+            "title": "Lock Version",
             "type": "integer"
           },
           "notes": {
@@ -473,13 +560,50 @@
         "required": [
           "id",
           "profile_id",
-          "version_number"
+          "version_number",
+          "event_codes"
         ],
         "title": "BusinessDateProfileVersion",
         "type": "object"
       },
       "BusinessDateProfileVersionCreate": {
         "properties": {
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "expected_lock_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Lock Version"
+          },
           "notes": {
             "anyOf": [
               {
@@ -500,6 +624,108 @@
           }
         },
         "title": "BusinessDateProfileVersionCreate",
+        "type": "object"
+      },
+      "BusinessDateResolveRequest": {
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "fallback_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Date"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version Id"
+          }
+        },
+        "title": "BusinessDateResolveRequest",
+        "type": "object"
+      },
+      "BusinessDateResolveResponse": {
+        "properties": {
+          "attempted_date_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attempted Date Keys",
+            "type": "array"
+          },
+          "fallback_applied": {
+            "default": false,
+            "title": "Fallback Applied",
+            "type": "boolean"
+          },
+          "profile_code": {
+            "title": "Profile Code",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "integer"
+          },
+          "profile_version_id": {
+            "title": "Profile Version Id",
+            "type": "integer"
+          },
+          "resolved_date": {
+            "format": "date",
+            "title": "Resolved Date",
+            "type": "string"
+          },
+          "selected_date_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Date Key"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile_id",
+          "profile_code",
+          "profile_version_id",
+          "version_number",
+          "resolved_date"
+        ],
+        "title": "BusinessDateResolveResponse",
         "type": "object"
       },
       "CalculationTemplate": {
@@ -835,6 +1061,71 @@
         "title": "ChargeActionResponse",
         "type": "object"
       },
+      "ChargeAllocationPreviewResult": {
+        "properties": {
+          "allocated_amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Allocated Amount",
+            "type": "string"
+          },
+          "allocation_ratio": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Allocation Ratio",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "driver_value": {
+            "default": "1",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Driver Value",
+            "type": "string"
+          },
+          "target_level": {
+            "enum": [
+              "HEADER",
+              "ITEM",
+              "CONTAINER",
+              "HOUSE",
+              "PO_SCHEDULE_LINE"
+            ],
+            "title": "Target Level",
+            "type": "string"
+          },
+          "target_object_id": {
+            "title": "Target Object Id",
+            "type": "string"
+          },
+          "target_object_type": {
+            "title": "Target Object Type",
+            "type": "string"
+          },
+          "target_reference_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Reference Snapshot Json"
+          }
+        },
+        "required": [
+          "target_level",
+          "target_object_type",
+          "target_object_id",
+          "allocation_ratio",
+          "allocated_amount",
+          "currency"
+        ],
+        "title": "ChargeAllocationPreviewResult",
+        "type": "object"
+      },
       "ChargeAllocationProfile": {
         "properties": {
           "created_at": {
@@ -986,6 +1277,30 @@
             ],
             "title": "Default Quantity Uom"
           },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
           "final_posting_level": {
             "enum": [
               "HOUSE",
@@ -1008,6 +1323,20 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "lock_version": {
+            "default": 1,
+            "title": "Lock Version",
+            "type": "integer"
+          },
+          "missing_driver_policy": {
+            "default": "BLOCK",
+            "enum": [
+              "BLOCK",
+              "EQUAL"
+            ],
+            "title": "Missing Driver Policy",
+            "type": "string"
           },
           "notes": {
             "anyOf": [
@@ -1104,6 +1433,42 @@
             ],
             "title": "Default Quantity Uom"
           },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "expected_lock_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Lock Version"
+          },
           "final_posting_level": {
             "enum": [
               "HOUSE",
@@ -1122,6 +1487,15 @@
               }
             ],
             "title": "House To Item Driver"
+          },
+          "missing_driver_policy": {
+            "default": "BLOCK",
+            "enum": [
+              "BLOCK",
+              "EQUAL"
+            ],
+            "title": "Missing Driver Policy",
+            "type": "string"
           },
           "notes": {
             "anyOf": [
@@ -1165,6 +1539,450 @@
           "final_posting_level"
         ],
         "title": "ChargeAllocationProfileVersionCreate",
+        "type": "object"
+      },
+      "ChargeAllocationTargetInput": {
+        "properties": {
+          "driver_value": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "1",
+            "title": "Driver Value"
+          },
+          "target_level": {
+            "enum": [
+              "HEADER",
+              "ITEM",
+              "CONTAINER",
+              "HOUSE",
+              "PO_SCHEDULE_LINE"
+            ],
+            "title": "Target Level",
+            "type": "string"
+          },
+          "target_object_id": {
+            "title": "Target Object Id",
+            "type": "string"
+          },
+          "target_object_type": {
+            "title": "Target Object Type",
+            "type": "string"
+          },
+          "target_reference_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Reference Snapshot Json"
+          }
+        },
+        "required": [
+          "target_level",
+          "target_object_type",
+          "target_object_id"
+        ],
+        "title": "ChargeAllocationTargetInput",
+        "type": "object"
+      },
+      "ChargeCalculationPreviewRequest": {
+        "properties": {
+          "allocation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Profile Version Id"
+          },
+          "allocation_targets": {
+            "items": {
+              "$ref": "#/components/schemas/ChargeAllocationTargetInput"
+            },
+            "title": "Allocation Targets",
+            "type": "array"
+          },
+          "allow_inverse_fx": {
+            "default": true,
+            "title": "Allow Inverse Fx",
+            "type": "boolean"
+          },
+          "allow_prior_fx_date": {
+            "default": true,
+            "title": "Allow Prior Fx Date",
+            "type": "boolean"
+          },
+          "basis": {
+            "default": "FLAT",
+            "title": "Basis",
+            "type": "string"
+          },
+          "calculation_context": {
+            "additionalProperties": true,
+            "title": "Calculation Context",
+            "type": "object"
+          },
+          "calculation_inputs": {
+            "additionalProperties": true,
+            "title": "Calculation Inputs",
+            "type": "object"
+          },
+          "calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Version Id"
+          },
+          "fx_conversion_method": {
+            "default": "DIRECT",
+            "title": "Fx Conversion Method",
+            "type": "string"
+          },
+          "fx_rate_type": {
+            "default": "MID",
+            "enum": [
+              "MID",
+              "BUY",
+              "SELL",
+              "CUSTOM"
+            ],
+            "title": "Fx Rate Type",
+            "type": "string"
+          },
+          "fx_source_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Source Code"
+          },
+          "fx_source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Source Id"
+          },
+          "maximum_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Amount"
+          },
+          "minimum_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Amount"
+          },
+          "percentage_base_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage Base Amount"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "1",
+            "title": "Quantity"
+          },
+          "rate_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Amount"
+          },
+          "rate_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Date"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "source_currency": {
+            "default": "USD",
+            "title": "Source Currency",
+            "type": "string"
+          },
+          "target_currency": {
+            "default": "USD",
+            "title": "Target Currency",
+            "type": "string"
+          }
+        },
+        "title": "ChargeCalculationPreviewRequest",
+        "type": "object"
+      },
+      "ChargeCalculationPreviewResponse": {
+        "properties": {
+          "allocated_amount": {
+            "default": "0",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Allocated Amount",
+            "type": "string"
+          },
+          "allocation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Config Snapshot Json"
+          },
+          "allocation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Profile Version Id"
+          },
+          "allocations": {
+            "items": {
+              "$ref": "#/components/schemas/ChargeAllocationPreviewResult"
+            },
+            "title": "Allocations",
+            "type": "array"
+          },
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "calculation_audit_json": {
+            "additionalProperties": true,
+            "title": "Calculation Audit Json",
+            "type": "object"
+          },
+          "calculation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Config Snapshot Json"
+          },
+          "calculation_input_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Input Snapshot Json"
+          },
+          "calculation_method": {
+            "title": "Calculation Method",
+            "type": "string"
+          },
+          "calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Profile Version Id"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "fx_resolution": {
+            "$ref": "#/components/schemas/FxRateResolution"
+          },
+          "maximum_applied": {
+            "default": false,
+            "title": "Maximum Applied",
+            "type": "boolean"
+          },
+          "minimum_applied": {
+            "default": false,
+            "title": "Minimum Applied",
+            "type": "boolean"
+          },
+          "percentage_base_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage Base Amount"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "rate_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Amount"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
+          },
+          "source_amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Source Amount",
+            "type": "string"
+          },
+          "source_currency": {
+            "title": "Source Currency",
+            "type": "string"
+          },
+          "unallocated_amount": {
+            "default": "0",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unallocated Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "basis",
+          "calculation_method",
+          "quantity",
+          "source_amount",
+          "source_currency",
+          "amount",
+          "currency",
+          "calculation_audit_json",
+          "fx_resolution"
+        ],
+        "title": "ChargeCalculationPreviewResponse",
         "type": "object"
       },
       "ChargeCalculationProfile": {
@@ -1685,6 +2503,18 @@
             ],
             "title": "Effective To"
           },
+          "expected_lock_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Lock Version"
+          },
           "factors": {
             "items": {
               "$ref": "#/components/schemas/ChargeCalculationProfileFactorPayload"
@@ -1793,6 +2623,18 @@
             "title": "Component Name",
             "type": "string"
           },
+          "default_allocation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "readOnly": true,
+            "title": "Default Allocation Profile Id"
+          },
           "default_calculation_profile_id": {
             "anyOf": [
               {
@@ -1811,6 +2653,26 @@
               "BOTH"
             ],
             "title": "Default Party Role",
+            "type": "string"
+          },
+          "default_relationship_role": {
+            "enum": [
+              "PAYER",
+              "PAYEE",
+              "BOTH"
+            ],
+            "readOnly": true,
+            "title": "Default Relationship Role",
+            "type": "string"
+          },
+          "default_side": {
+            "enum": [
+              "PAYER",
+              "PAYEE",
+              "BOTH"
+            ],
+            "readOnly": true,
+            "title": "Default Side",
             "type": "string"
           },
           "id": {
@@ -1835,7 +2697,10 @@
           "category",
           "default_party_role",
           "charge_context",
-          "calculation_basis"
+          "calculation_basis",
+          "default_side",
+          "default_relationship_role",
+          "default_allocation_profile_id"
         ],
         "title": "ChargeComponent",
         "type": "object"
@@ -2532,6 +3397,17 @@
             "title": "Component Name",
             "type": "string"
           },
+          "default_allocation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Allocation Profile Id"
+          },
           "default_calculation_profile_id": {
             "anyOf": [
               {
@@ -2544,14 +3420,52 @@
             "title": "Default Calculation Profile Id"
           },
           "default_party_role": {
-            "default": "BOTH",
-            "enum": [
-              "PAYER",
-              "PAYEE",
-              "BOTH"
+            "anyOf": [
+              {
+                "enum": [
+                  "PAYER",
+                  "PAYEE",
+                  "BOTH"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Default Party Role",
-            "type": "string"
+            "title": "Default Party Role"
+          },
+          "default_relationship_role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PAYER",
+                  "PAYEE",
+                  "BOTH"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Relationship Role"
+          },
+          "default_side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PAYER",
+                  "PAYEE",
+                  "BOTH"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Side"
           },
           "is_active": {
             "default": true,
@@ -3198,9 +4112,15 @@
             "title": "Charge Text Snapshot"
           },
           "currency": {
-            "default": "USD",
-            "title": "Currency",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
           },
           "description": {
             "anyOf": [
@@ -3739,9 +4659,15 @@
             "title": "Charge Text Snapshot"
           },
           "currency": {
-            "default": "USD",
-            "title": "Currency",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
           },
           "description": {
             "anyOf": [
@@ -4322,9 +5248,15 @@
             "type": "integer"
           },
           "currency": {
-            "default": "USD",
-            "title": "Currency",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
           },
           "invoice_date": {
             "anyOf": [
@@ -8212,6 +9144,80 @@
             ],
             "title": "Effective Allocation Snapshot Json"
           },
+          "exchange_rate": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Rate"
+          },
+          "exchange_rate_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Rate Date"
+          },
+          "exchange_rate_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Rate Method"
+          },
+          "exchange_rate_source_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Rate Source Code"
+          },
+          "exchange_rate_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "MID",
+                  "BUY",
+                  "SELL",
+                  "CUSTOM"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange Rate Type"
+          },
+          "fx_rate_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Rate Id"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -8224,6 +9230,11 @@
           "is_margin_line": {
             "default": false,
             "title": "Is Margin Line",
+            "type": "boolean"
+          },
+          "is_statistical": {
+            "default": false,
+            "title": "Is Statistical",
             "type": "boolean"
           },
           "party_role_ref": {
@@ -8312,6 +9323,18 @@
             "title": "Relationship Role",
             "type": "string"
           },
+          "source_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Amount"
+          },
           "source_contract_id": {
             "anyOf": [
               {
@@ -8322,6 +9345,28 @@
               }
             ],
             "title": "Source Contract Id"
+          },
+          "source_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Currency"
+          },
+          "source_rate_book_entry_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Rate Book Entry Id"
           },
           "source_rate_book_id": {
             "anyOf": [
@@ -9520,6 +10565,23 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "lock_version": {
+            "default": 1,
+            "title": "Lock Version",
+            "type": "integer"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
           "rate_book_code": {
             "title": "Rate Book Code",
             "type": "string"
@@ -9532,6 +10594,17 @@
             "default": "DRAFT",
             "title": "Status",
             "type": "string"
+          },
+          "supersedes_rate_book_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Rate Book Id"
           },
           "valid_from": {
             "anyOf": [
@@ -9556,6 +10629,11 @@
               }
             ],
             "title": "Valid To"
+          },
+          "version_number": {
+            "default": 1,
+            "title": "Version Number",
+            "type": "integer"
           }
         },
         "required": [
@@ -10111,6 +11189,18 @@
             "title": "Entries",
             "type": "array"
           },
+          "expected_lock_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Lock Version"
+          },
           "is_active": {
             "default": true,
             "title": "Is Active",
@@ -10172,6 +11262,13 @@
           },
           "rate_book": {
             "$ref": "#/components/schemas/RateBook"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/RateBook"
+            },
+            "title": "Versions",
+            "type": "array"
           }
         },
         "required": [
@@ -13115,6 +14212,102 @@
         ]
       }
     },
+    "/api/v1/charge-management/business-dates/resolve": {
+      "post": {
+        "operationId": "resolve_business_date_api_v1_charge_management_business_dates_resolve_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessDateResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessDateResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve Business Date",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
     "/api/v1/charge-management/calculation-profile-versions/{version_id}": {
       "put": {
         "operationId": "update_calculation_profile_version_api_v1_charge_management_calculation_profile_versions__version_id__put",
@@ -14313,6 +15506,102 @@
           }
         ],
         "summary": "Update Calculation Template Workspace",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/calculations/preview": {
+      "post": {
+        "operationId": "preview_calculation_api_v1_charge_management_calculations_preview_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChargeCalculationPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeCalculationPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Calculation",
         "tags": [
           "Charge Management"
         ]
@@ -20570,6 +21859,303 @@
           }
         ],
         "summary": "Create Rate Book",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/rate-books/{rate_book_id}/publish": {
+      "post": {
+        "operationId": "publish_rate_book_api_v1_charge_management_rate_books__rate_book_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rate_book_id",
+            "required": true,
+            "schema": {
+              "title": "Rate Book Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateBookWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Rate Book",
+        "tags": [
+          "Charge Management"
+        ]
+      }
+    },
+    "/api/v1/charge-management/rate-books/{rate_book_id}/versions": {
+      "get": {
+        "operationId": "list_rate_book_versions_api_v1_charge_management_rate_books__rate_book_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rate_book_id",
+            "required": true,
+            "schema": {
+              "title": "Rate Book Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RateBook"
+                  },
+                  "title": "Response List Rate Book Versions Api V1 Charge Management Rate Books  Rate Book Id  Versions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Rate Book Versions",
+        "tags": [
+          "Charge Management"
+        ]
+      },
+      "post": {
+        "operationId": "create_rate_book_version_api_v1_charge_management_rate_books__rate_book_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rate_book_id",
+            "required": true,
+            "schema": {
+              "title": "Rate Book Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateBookPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateBookWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Rate Book Version",
         "tags": [
           "Charge Management"
         ]

@@ -47,4 +47,4 @@ class DatabaseBackedChargeManagementService:
 
     @staticmethod
     def _is_mutation(name: str) -> bool:
-        return name != "initialization_data" and not name.startswith(("get_", "list_"))
+        return name != "initialization_data" and not name.startswith(("get_", "list_", "preview_", "resolve_"))

@@ -268,6 +268,7 @@ def test_calculation_profile_lifecycle_and_server_side_rating_snapshot() -> None
     )
     assert rate_book.status_code == 201, rate_book.text
     assert rate_book.json()["entries"][0]["calculation_profile_id"] == profile["id"]
+    _publish_rate_book(rate_book.json()["id"])
 
     contract = client.post(
         "/api/v1/charge-management/contracts",
@@ -1085,7 +1086,7 @@ def test_charge_line_date_basis_override_precedence() -> None:
 
 
 def test_rate_book_list_workspace_and_update_contract() -> None:
-    rate_book_id = _create_rate_book()
+    rate_book_id = _create_rate_book(publish=False)
 
     listed = client.get(
         "/api/v1/charge-management/rate-books?q=OCEAN",
@@ -1114,7 +1115,8 @@ def test_rate_book_list_workspace_and_update_contract() -> None:
             "valid_from": "2026-01-01",
             "valid_to": "2026-12-31",
             "calculation_basis": "PER_CONTAINER",
-            "status": "ACTIVE",
+            "status": "DRAFT",
+            "expected_lock_version": 1,
             "entries": [
                 {
                     "charge_component_code": "BASE_FREIGHT",
@@ -1133,8 +1135,9 @@ def test_rate_book_list_workspace_and_update_contract() -> None:
     assert updated.json()["rate_book"]["description"] == "Effective 2026 ocean rates"
     assert updated.json()["rate_book"]["calculation_basis"] == "PER_CONTAINER"
     assert updated.json()["entries"][0]["rate_amount"] == "1750.00"
+    _publish_rate_book(rate_book_id)
     filtered = client.get(
-        "/api/v1/charge-management/rate-books?status=ACTIVE&calculation_basis=PER_CONTAINER",
+        "/api/v1/charge-management/rate-books?status=PUBLISHED&calculation_basis=PER_CONTAINER",
         headers=AUTH,
     )
     assert filtered.status_code == 200, filtered.text
@@ -1379,6 +1382,7 @@ def test_rated_option_and_awarded_document_propagate_allocation_profile_snapshot
     assert rate_book.status_code == 201, rate_book.text
     rate_book_id = rate_book.json()["id"]
     assert rate_book.json()["entries"][0]["allocation_profile_version_id"] == version_id
+    _publish_rate_book(rate_book_id)
 
     contract = client.post(
         "/api/v1/charge-management/contracts",
@@ -1687,6 +1691,18 @@ def test_db_metadata_contains_quote_offer_schema() -> None:
     assert "valid_from" in tables["charge_quote_request"].c
     assert "valid_to" in tables["charge_quote_request"].c
     assert "source_offer_id" in tables["charge_quote_option"].c
+    rate_book_table = tables["charge_rate_book"]
+    assert "version_number" in rate_book_table.c
+    assert "lock_version" in rate_book_table.c
+    assert "supersedes_rate_book_id" in rate_book_table.c
+    assert any(
+        constraint.name == "uq_charge_rate_book_code_version"
+        for constraint in rate_book_table.constraints
+    )
+    assert any(
+        index.name == "ix_charge_rate_book_code_version"
+        for index in rate_book_table.indexes
+    )
     allocation_profile_columns = tables["charge_allocation_profile"].c
     assert "published_version_id" in allocation_profile_columns
     allocation_profile_version_columns = tables["charge_allocation_profile_version"].c
@@ -2779,6 +2795,10 @@ def test_openapi_exposes_core_paths() -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
     paths = response.json()["paths"]
+    assert "/api/v1/charge-management/calculations/preview" in paths
+    assert "post" in paths["/api/v1/charge-management/calculations/preview"]
+    assert "/api/v1/charge-management/business-dates/resolve" in paths
+    assert "post" in paths["/api/v1/charge-management/business-dates/resolve"]
     assert "/api/v1/charge-management/calculation-profiles" in paths
     assert "post" in paths["/api/v1/charge-management/calculation-profiles"]
     assert "/api/v1/charge-management/calculation-profiles/{profile_id}" in paths
@@ -2802,6 +2822,9 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/rate-books" in paths
     assert "get" in paths["/api/v1/charge-management/rate-books"]
     assert "/api/v1/charge-management/rate-books/{rate_book_id}/workspace" in paths
+    assert "/api/v1/charge-management/rate-books/{rate_book_id}/versions" in paths
+    assert "post" in paths["/api/v1/charge-management/rate-books/{rate_book_id}/versions"]
+    assert "/api/v1/charge-management/rate-books/{rate_book_id}/publish" in paths
     assert "/api/v1/charge-management/calculation-templates" in paths
     assert "get" in paths["/api/v1/charge-management/calculation-templates"]
     assert "/api/v1/charge-management/calculation-templates/{calculation_template_id}/workspace" in paths
@@ -2836,12 +2859,16 @@ def test_openapi_exposes_core_paths() -> None:
     )
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     assert contract["info"]["title"] == "Charge Management API"
+    assert "/api/v1/charge-management/calculations/preview" in contract["paths"]
+    assert "/api/v1/charge-management/business-dates/resolve" in contract["paths"]
     assert "/api/v1/charge-management/rate-books" in contract["paths"]
     assert "/api/v1/charge-management/calculation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/allocation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/business-date-profiles" in contract["paths"]
     assert "get" in contract["paths"]["/api/v1/charge-management/rate-books"]
     assert "/api/v1/charge-management/rate-books/{rate_book_id}/workspace" in contract["paths"]
+    assert "/api/v1/charge-management/rate-books/{rate_book_id}/versions" in contract["paths"]
+    assert "/api/v1/charge-management/rate-books/{rate_book_id}/publish" in contract["paths"]
     assert "/api/v1/charge-management/calculation-templates" in contract["paths"]
     assert "get" in contract["paths"]["/api/v1/charge-management/calculation-templates"]
     assert "/api/v1/charge-management/calculation-templates/{calculation_template_id}/workspace" in contract["paths"]
@@ -2900,6 +2927,17 @@ def test_openapi_exposes_core_paths() -> None:
     assert "calculation_config_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "calculation_input_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "pinned_allocation_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+    preview_properties = contract["components"]["schemas"]["ChargeCalculationPreviewResponse"]["properties"]
+    assert "source_amount" in preview_properties
+    assert "amount" in preview_properties
+    assert "allocations" in preview_properties
+    assert "fx_resolution" in preview_properties
+    fx_properties = contract["components"]["schemas"]["FxRateResolution"]["properties"]
+    assert "converted_amount" in fx_properties
+    rate_book_properties = contract["components"]["schemas"]["RateBook"]["properties"]
+    assert "version_number" in rate_book_properties
+    assert "lock_version" in rate_book_properties
+    assert "supersedes_rate_book_id" in rate_book_properties
 
 
 def test_rating_selects_one_active_valid_specific_rate_entry() -> None:
@@ -2910,7 +2948,7 @@ def test_rating_selects_one_active_valid_specific_rate_entry() -> None:
             "rate_book_code": "RB-DETERMINISTIC",
             "rate_book_name": "Deterministic rates",
             "description": "Winner selection regression fixture",
-            "status": "ACTIVE",
+            "status": "DRAFT",
             "valid_from": "2026-01-01",
             "valid_to": "2026-12-31",
             "entries": [
@@ -2964,6 +3002,7 @@ def test_rating_selects_one_active_valid_specific_rate_entry() -> None:
         },
     )
     assert rate_book.status_code == 201, rate_book.text
+    _publish_rate_book(rate_book.json()["id"])
     assert rate_book.json()["description"] == "Winner selection regression fixture"
 
     contract_id = _create_contract("PAYEE-DETERMINISTIC", "PAYEE", rate_book.json()["id"])
@@ -3039,6 +3078,7 @@ def test_percentage_rate_entry_can_be_persisted_and_rated() -> None:
     assert rate_book.status_code == 201, rate_book.text
     assert rate_book.json()["entries"][0]["rate_amount"] is None
     assert rate_book.json()["entries"][0]["rate_percent"] == "12.5"
+    _publish_rate_book(rate_book.json()["id"])
     contract_id = _create_contract("PAYEE-PERCENT", "PAYEE", rate_book.json()["id"])
     assert client.post(
         f"/api/v1/charge-management/contracts/{contract_id}/release",
@@ -3053,6 +3093,7 @@ def test_percentage_rate_entry_can_be_persisted_and_rated() -> None:
             "origin_code": "BRSSZ",
             "destination_code": "USNYC",
             "mode": "OCEAN",
+            "context": {"percentage_base_amount": "200"},
         },
     )
     assert quote.status_code == 201, quote.text
@@ -3062,7 +3103,7 @@ def test_percentage_rate_entry_can_be_persisted_and_rated() -> None:
         headers=AUTH,
     )
     assert rated.status_code == 200, rated.text
-    assert rated.json()["options"][0]["payee_total_amount"] == "12.50"
+    assert rated.json()["options"][0]["payee_total_amount"] == "25.00"
 
 
 def test_invoice_matching_aggregates_repeated_posting_components() -> None:
@@ -3131,7 +3172,7 @@ def _submit_quote(quote_request_id: int) -> dict:
     return payload
 
 
-def _create_rate_book() -> int:
+def _create_rate_book(*, publish: bool = True) -> int:
     response = client.post(
         "/api/v1/charge-management/rate-books",
         headers=AUTH,
@@ -3153,7 +3194,20 @@ def _create_rate_book() -> int:
         },
     )
     assert response.status_code == 201, response.text
-    return int(response.json()["id"])
+    rate_book_id = int(response.json()["id"])
+    if publish:
+        _publish_rate_book(rate_book_id)
+    return rate_book_id
+
+
+def _publish_rate_book(rate_book_id: int) -> dict:
+    response = client.post(
+        f"/api/v1/charge-management/rate-books/{rate_book_id}/publish",
+        headers=AUTH,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["rate_book"]["status"] == "PUBLISHED"
+    return response.json()
 
 
 def _create_contract(contract_number: str, contract_role: str, rate_book_id: int) -> int:

@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
 - Effective-dated rate-book metadata, percentage rates, deterministic rate-entry priority, contract-line context, and quote chargeable weight.
 - Explicit charge-line calculation/allocation execution state and migration `0016_align_charge_runtime`.
 - Regression tests for overlapping rate rows, percentage-only rates, and repeated invoice components.
+- Side-effect-free calculation preview for direct, profile, percentage, FX, and target allocation scenarios.
+- Effective-dated allocation and business-date versions with optimistic concurrency controls.
+- Draft/publish/retire rate-book version lifecycle with exact rate-entry provenance.
+- Database-backed readiness endpoint at `/ready` and complete Flutter list pagination.
 
 ### Fixed
 
@@ -18,6 +22,9 @@ All notable changes to this project are documented here. The format follows
 - Direct runtime and test dependencies are pinned so generated OpenAPI and CI results are reproducible.
 - Contract rating now excludes inactive, expired, out-of-scale, and dimension-mismatched rows and never creates zero-line options.
 - Invoice matching now aggregates repeated components from posting lines on the correct payer/payee side.
+- Percentage rates now require and use an explicit monetary base instead of treating the percentage as an amount.
+- Quote, offer, document, and invoice totals now enforce a single currency and retain FX conversion provenance.
+- Calculation-template steps, named subtotals, preconditions, relationship roles, and statistical rows now execute during contract rating.
 
 ### Documentation
 

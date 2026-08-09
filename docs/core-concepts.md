@@ -60,9 +60,9 @@ You do not need every module for every integration. A direct-charge implementati
 
 ## Current Execution Boundary
 
-The API separates maintained business configuration from executable built-in behavior. Rate-book matching, calculation-profile execution, quote ranking/award, date resolution, FX resolution, allocation-policy snapshots, document lifecycle, and invoice matching are executable today.
+The API separates maintained business configuration from executable built-in behavior. Rate-book matching and versioning, calculation-profile and calculation-template execution, quote ranking/award, date resolution, FX resolution, allocation preview, document lifecycle, and invoice matching are executable today.
 
-Calculation templates currently persist an ordered, reusable calculation definition, but the built-in contract rater does not yet execute template steps, subtotal expressions, statistical behavior, or precondition rules. An integrating calculation engine can consume that metadata; for built-in contract rating, each contract line must resolve to a rate book.
+`POST /calculations/preview` is the reusable, side-effect-free entry point when a host application needs a calculated result without creating a quote or charge document. It supports flat and quantity-based rates, percentages with an explicit base, published calculation-profile versions, minimum/maximum amounts, currency conversion, and allocation over caller-supplied targets. The host application still owns source-object hydration and authorization of those targets.
 
 ## Charge Component
 
@@ -153,14 +153,16 @@ A rate book named `EU_OCEAN_2026` could contain:
 1. Create a rate book and its entries with `POST /rate-books`.
 2. Find books through `GET /rate-books`.
 3. Open the full book with `GET /rate-books/{id}/workspace`.
-4. Replace/update workspace data with `PUT /rate-books/{id}/workspace`.
-5. Reference the rate book from a contract header, contract line, or calculation-template step.
+4. Edit a draft through `PUT /rate-books/{id}/workspace`, passing `expected_lock_version` for optimistic concurrency.
+5. Publish the draft with `POST /rate-books/{id}/publish`; the previously published version is retired.
+6. Create the next draft with `POST /rate-books/{id}/versions` and inspect history with `GET /rate-books/{id}/versions`.
+7. Reference the published rate-book version from a contract header, contract line, or calculation-template step.
 
 The built-in rater selects at most one rate entry for each applicable contract line. It first removes inactive, out-of-date, out-of-scale, and dimension-mismatched rows. It then chooses the most specific row, followed by the lowest numeric priority, the highest matching `scale_from`, and finally the stable row ID. This makes overlapping rate-table rows deterministic. Header `valid_from`/`valid_to` and `is_active` are applied before entry selection; entry date fields retain the API names `validity_from`/`validity_to` for backward compatibility.
 
-Use basis `PERCENT` with `rate_percent`. Use `rate_amount` for fixed and quantity-based rows. `CHARGEABLE_WEIGHT` uses quote `chargeable_weight` for rating.
+Use basis `PERCENT` with `rate_percent`. A percentage always needs an explicit monetary base: a template percentage step uses its named prior subtotal, while a direct quote context uses `percentage_base_amount` or a component-specific entry in `percentage_bases`. The API rejects a percentage with no base rather than calculating against an implicit value. Use `rate_amount` for fixed and quantity-based rows. `CHARGEABLE_WEIGHT` uses quote `chargeable_weight` for rating.
 
-A rate book defines reusable prices. A contract determines the parties and commercial scope under which those prices apply.
+A rate book defines reusable prices. A contract determines the parties and commercial scope under which those prices apply. Draft versions are editable; published and retired versions are immutable so historical quote and charge provenance remains reproducible.
 
 ## Calculation Profile
 
@@ -196,7 +198,7 @@ Calculation and allocation are separate stages: calculation creates one source a
 
 ### What It Is
 
-A calculation template is an ordered, reusable definition of charge calculation steps. It describes **which components an integrating calculation engine should evaluate and in what sequence**.
+A calculation template is an ordered, reusable definition of charge calculation steps. It describes **which components the contract rater evaluates and in what sequence**.
 
 A step can define:
 
@@ -206,11 +208,11 @@ A step can define:
 - Optional rate book.
 - Optional subtotal key.
 - Statistical-only behavior.
-- Optional precondition key for an integrating rule layer.
+- Optional precondition key resolved from boolean-like quote context.
 
 ### When To Use It
 
-- An integrating calculation engine needs a reusable multi-component definition.
+- Contract rating needs a reusable multi-component definition.
 - Different steps should reference different rate books.
 - The intended order of base charges, surcharges, subtotals, or statistical rows must be persisted and audited.
 - You need calculation metadata that can be attached to multiple contracts.
@@ -223,7 +225,7 @@ A step can define:
 4. Open or update it through `/calculation-templates/{id}/workspace`.
 5. Reference it as the default on a contract or as an override on a contract line.
 
-The template stores the intended orchestration and the rate book supplies monetary rates. The current built-in contract rater does not execute template steps: it rates contract lines that resolve directly to a rate book. Treat template execution as an extension point until an execution engine is added.
+The built-in contract rater expands template steps in order, filters them by relationship role and precondition, resolves each step's rate book, and carries named subtotals into later percentage steps. Statistical steps remain visible for provenance but do not contribute to payer/payee totals. Every resulting option line records the source contract, rate-book version, and exact rate-book entry.
 
 ## Rate Contract
 
@@ -294,7 +296,9 @@ Example: allocate a shipment charge to houses by gross weight, then to PO schedu
 
 The effective profile is resolved from the most specific available reference, including transaction/line override before reusable master-data defaults. The selected profile and version are snapshotted onto quote and charge lines for auditability.
 
-The current API resolves and persists allocation policy, target references, ratios, and driver values. It does not hydrate a host application's shipment/house/item hierarchy or independently fan one source amount into target rows. The integrating application supplies target objects and calculated ratios/driver values when it creates posting lines.
+The preview API distributes one calculated amount over caller-supplied target objects and driver values. It calculates ratios, rounds to currency minor units, and applies the deterministic remainder to the final target so allocated totals exactly equal the source amount. A version can use `BLOCK` when every driver is zero or `EQUAL` to permit an equal-share fallback. Effective dates and optimistic lock versions protect profile maintenance.
+
+The API does not hydrate a host application's shipment/house/item hierarchy. The integrating application supplies and authorizes target references and driver values; the API executes and snapshots the reusable allocation policy.
 
 Manual lines may set `target_scope_mode=SELECTED_TARGETS` and provide a homogeneous `selected_target_references_json` list. Those references constrain calculation-profile target counts and remain pinned for audit; the host adapter is responsible for authorizing each target against its business object. One selected target may carry a direct flat amount. Multiple selected targets require a calculation profile because allocation profiles propagate a calculated total but do not define per-target rate multiplication.
 
@@ -331,6 +335,7 @@ The first available date wins.
 4. Optionally assign it by scope, shipment scope, and purpose through `/business-date-profiles/{id}/assignments`.
 5. Set components to `INHERIT_PROFILE` or `PROFILE_OVERRIDE` as required.
 6. Supply `document_date`, `charge_date`, and operational dates in `source_reference_snapshot_json` or target snapshots when creating the charge document.
+7. Use `POST /business-dates/resolve` to test or reuse a profile against a context object without creating a charge document.
 
 Resolution precedence is explicit `exchange_rate_date`, manual line `charge_date`, line date-basis override, component profile/assignment/legacy policy, then document fallback.
 
@@ -360,6 +365,8 @@ Therefore, an `EUR -> USD` rate of `1.15` converts EUR 100 to USD 115.
 Resolution can require an exact date or allow the latest prior date. It can also allow an inverse pair. `conversion_method` defaults to `DIRECT`, which prevents ambiguous selection if multiple methods exist for the same pair/date/source.
 
 The business-date profile chooses the date; the FX resolver chooses the rate for that date.
+
+Quotes, quote offers, and charge documents enforce one presentation currency. Foreign rate rows or manual source amounts are converted into that currency before totals are calculated, and the selected FX rate ID, source, date, type, method, source amount, and source currency are retained as provenance. An invoice must use the linked charge document's currency; cross-currency invoice matching is rejected instead of comparing unlike amounts.
 
 ## Quote Request
 

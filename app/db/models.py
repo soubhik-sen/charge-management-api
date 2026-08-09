@@ -267,11 +267,20 @@ class ChargeAllocationProfileVersionRow(TimestampMixin, Base):
     profile_id: Mapped[int] = mapped_column(ForeignKey("charge_allocation_profile.id", ondelete="CASCADE"), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    effective_from: Mapped[object | None] = mapped_column(Date)
+    effective_to: Mapped[object | None] = mapped_column(Date)
     source_level: Mapped[str] = mapped_column(String(30), nullable=False)
     source_to_house_driver: Mapped[str | None] = mapped_column(String(40))
     house_to_item_driver: Mapped[str | None] = mapped_column(String(40))
     final_posting_level: Mapped[str] = mapped_column(String(30), nullable=False)
     default_quantity_uom: Mapped[str | None] = mapped_column(String(30))
+    missing_driver_policy: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="BLOCK",
+        server_default="BLOCK",
+    )
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     settings_json: Mapped[dict | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
@@ -289,6 +298,14 @@ class ChargeAllocationProfileVersionRow(TimestampMixin, Base):
         CheckConstraint(
             "final_posting_level in ('HOUSE', 'PO_SCHEDULE_LINE')",
             name="ck_charge_allocation_profile_version_final_posting_level",
+        ),
+        CheckConstraint(
+            "missing_driver_policy in ('BLOCK', 'EQUAL')",
+            name="ck_charge_allocation_profile_version_missing_driver_policy",
+        ),
+        CheckConstraint(
+            "effective_from is null or effective_to is null or effective_from <= effective_to",
+            name="ck_charge_allocation_profile_version_effectivity",
         ),
         Index("ix_charge_allocation_profile_version_profile", "profile_id"),
     )
@@ -421,6 +438,9 @@ class ChargeBusinessDateProfileVersionRow(TimestampMixin, Base):
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
     notes: Mapped[str | None] = mapped_column(Text)
+    effective_from: Mapped[object | None] = mapped_column(Date)
+    effective_to: Mapped[object | None] = mapped_column(Date)
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
 
     profile: Mapped[ChargeBusinessDateProfileRow] = relationship(
@@ -435,6 +455,10 @@ class ChargeBusinessDateProfileVersionRow(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("profile_id", "version_number", name="uq_charge_business_date_profile_version_number"),
         CheckConstraint("status in ('DRAFT', 'PUBLISHED', 'RETIRED')", name="ck_charge_business_date_profile_version_status"),
+        CheckConstraint(
+            "effective_from is null or effective_to is null or effective_from <= effective_to",
+            name="ck_charge_business_date_profile_version_effectivity",
+        ),
         Index("ix_charge_business_date_profile_version_profile", "profile_id"),
     )
 
@@ -525,7 +549,7 @@ class ChargeRateBookRow(TimestampMixin, Base):
     __tablename__ = "charge_rate_book"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    rate_book_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    rate_book_code: Mapped[str] = mapped_column(String(80), nullable=False)
     rate_book_name: Mapped[str] = mapped_column(String(180), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
@@ -533,11 +557,26 @@ class ChargeRateBookRow(TimestampMixin, Base):
     valid_to: Mapped[object | None] = mapped_column(Date)
     calculation_basis: Mapped[str] = mapped_column(String(40), nullable=False, default="FLAT", server_default="FLAT")
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="DRAFT", server_default="DRAFT")
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    supersedes_rate_book_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_rate_book.id", ondelete="SET NULL")
+    )
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     entries: Mapped[list["ChargeRateBookEntryRow"]] = relationship(
         back_populates="rate_book",
         cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "rate_book_code",
+            "version_number",
+            name="uq_charge_rate_book_code_version",
+        ),
+        Index("ix_charge_rate_book_code_version", "rate_book_code", "version_number"),
     )
 
 
@@ -604,6 +643,7 @@ class ChargeRateContractRow(TimestampMixin, Base):
     default_calculation_template_id: Mapped[int | None] = mapped_column(
         ForeignKey("charge_calculation_template.id")
     )
+
     margin_type: Mapped[str | None] = mapped_column(String(30))
     margin_value: Mapped[object | None] = mapped_column(Numeric(18, 6))
     minimum_margin_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
@@ -839,6 +879,14 @@ class ChargeQuoteOptionLineRow(Base):
     amount: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     basis: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_currency: Mapped[str | None] = mapped_column(String(3))
+    source_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    exchange_rate: Mapped[object | None] = mapped_column(Numeric(18, 8))
+    exchange_rate_date: Mapped[object | None] = mapped_column(Date)
+    fx_rate_id: Mapped[int | None] = mapped_column(ForeignKey("charge_fx_rate.id"))
+    exchange_rate_source_code: Mapped[str | None] = mapped_column(String(60))
+    exchange_rate_type: Mapped[str | None] = mapped_column(String(20))
+    exchange_rate_method: Mapped[str | None] = mapped_column(String(60))
     rate_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     quantity: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False, default=1, server_default="1")
     quantity_uom: Mapped[str | None] = mapped_column(String(30))
@@ -858,6 +906,8 @@ class ChargeQuoteOptionLineRow(Base):
     effective_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     source_contract_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_contract.id"))
     source_rate_book_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book.id"))
+    source_rate_book_entry_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book_entry.id"))
+    is_statistical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_margin_line: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     quote_option: Mapped[ChargeQuoteOptionRow] = relationship(back_populates="lines")
@@ -865,6 +915,10 @@ class ChargeQuoteOptionLineRow(Base):
 
     __table_args__ = (
         CheckConstraint("relationship_role in ('PAYER', 'PAYEE')", name="ck_charge_quote_option_line_role"),
+        CheckConstraint(
+            "exchange_rate_type is null or exchange_rate_type in ('MID', 'BUY', 'SELL', 'CUSTOM')",
+            name="ck_charge_quote_option_line_exchange_rate_type",
+        ),
     )
 
 

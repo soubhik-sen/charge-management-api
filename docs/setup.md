@@ -73,7 +73,7 @@ Use `alembic downgrade -1` only against a disposable development database after 
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Swagger UI is at `http://127.0.0.1:8000/docs`. All charge-management operations require a bearer token.
+Swagger UI is at `http://127.0.0.1:8000/docs`. `/health` is a liveness probe that does not touch the database. `/ready` verifies runtime database connectivity and returns `503 Service Unavailable` if the check fails. All charge-management operations require a bearer token.
 
 ## Run The Web Application
 
@@ -87,7 +87,7 @@ The application starts in demo mode. Connect it to the local API with `local-dev
 
 ## Render
 
-`render.yaml` defines the API, static Flutter UI, and PostgreSQL resources inside the `LEDGERFLOW` project and `Dev & QA` environment. Render's native database URL is normalized to SQLAlchemy's `postgresql+psycopg://` form at startup so the bundled psycopg 3 driver is used. The API runs `alembic upgrade head` before starting Uvicorn and exposes an unauthenticated `/health` endpoint for platform monitoring. The static-site build script installs a cached stable Flutter SDK and compiles `apps/ledgerflow_web` with the Dev & QA API URL.
+`render.yaml` defines the API, static Flutter UI, and PostgreSQL resources inside the `LEDGERFLOW` project and `Dev & QA` environment. Render's native database URL is normalized to SQLAlchemy's `postgresql+psycopg://` form at startup so the bundled psycopg 3 driver is used. The API runs `alembic upgrade head` before starting Uvicorn and exposes unauthenticated `/health` and `/ready` operational endpoints for liveness and database-backed readiness. The static-site build script installs a cached stable Flutter SDK and compiles `apps/ledgerflow_web` with the Dev & QA API URL.
 
 The Dev & QA Blueprint uses JWT mode with a platform-generated HS256 secret. Use the configured issuer `https://ledgerflow.dev-qa/` and audience `charge-management-api` when minting test tokens. Replace this with your production issuer and JWKS configuration before creating a production environment.
 

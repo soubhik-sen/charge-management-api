@@ -19,7 +19,8 @@ The token is held only in memory. Reloading the page removes it. The browser nev
 2. Create allocation profiles and publish their initial versions.
 3. Create business-date profiles, publish them, and add assignment scopes when inheritance is required.
 4. Create or edit charge components and select the published profiles as defaults.
-5. Maintain rate books and reference the appropriate component/profile defaults.
+5. Maintain FX rates needed by cross-currency pricing.
+6. Create and publish rate books, then reference the appropriate component/profile defaults from contracts.
 
 This order prevents a component from pointing to a draft definition that cannot safely execute.
 
@@ -72,8 +73,9 @@ An allocation profile distributes one calculated source amount to a final postin
 2. Choose the source and final posting levels.
 3. Enter a source-to-house driver when the source is shipment or container.
 4. Enter a house-to-item driver when the final level is `PO_SCHEDULE_LINE`.
-5. Optionally set a quantity UOM, adapter-specific settings JSON, and version notes.
-6. Save the draft and select **Publish** after review.
+5. Set the effective period and choose `BLOCK` or `EQUAL` as the missing-driver policy.
+6. Optionally set a quantity UOM, adapter-specific settings JSON, and version notes.
+7. Save the draft and select **Publish** after review.
 
 The driver fields are allocation bases such as weight, volume, quantity, or value. The profile combines those bases into a reusable two-stage policy. Calculation determines the source amount first; allocation distributes it without recalculating it.
 
@@ -89,8 +91,9 @@ Open **FX & dates**. The workspace opens on **Business dates** and shows profile
 
 1. Select **New** and enter the profile identity.
 2. Add date steps in fallback order. The first available date wins at runtime.
-3. Save the initial draft.
-4. Select **Publish**.
+3. Optionally constrain the version with effective-from and effective-to dates.
+4. Save the initial draft.
+5. Select **Publish**.
 
 Supported date keys are presented as a controlled list, including actual/planned departure, arrival, house bill issue, flight dates, airway-bill execution, manual line date, and document date.
 
@@ -106,6 +109,30 @@ Assignments are available only after a profile has a published version.
 6. Save the assignment.
 
 Use component policy `INHERIT_PROFILE` to select an assignment at runtime. Use `PROFILE_OVERRIDE` when one component must always use a specific profile. Removing an assignment deletes that scope binding; it does not delete the profile or historical provenance.
+
+## FX Rates
+
+Open **FX & dates**, then select **FX rates**.
+
+1. Select **New rate**.
+2. Select a source already represented in the register, or enter the numeric source ID when the register is empty.
+3. Enter different three-letter source and target currencies, an ISO rate date, a positive directional rate, rate type, and conversion method.
+4. Save the rate. Select a row to inspect or edit it.
+5. Use **Deactivate** to make an obsolete rate unavailable to new resolutions while retaining it for audit.
+
+FX sources themselves remain API-maintained. The UI derives source choices from loaded rates; use `/fx-rate-sources` through Swagger or an integration when creating the first non-seeded source.
+
+## Rate Books
+
+Open **Rate books** to manage pricing tables grouped by stable rate-book code.
+
+1. Select **New rate book**, enter the header and draft rate rows, then save it in `DRAFT` status.
+2. Edit the draft while it is under review. The UI sends its `lock_version` to prevent a stale overwrite.
+3. Select **Publish draft** to make that version available to contracts and rating.
+4. Select **New draft** from an existing version for later pricing changes.
+5. Inspect the real version history; published and retired versions are immutable.
+
+Every fixed rate row requires `rate_amount`; percentage rows require `rate_percent` and receive their monetary base from quote context or a calculation-template subtotal. Contracts cannot release against an unpublished rate-book version.
 
 ## Version Lifecycle
 
@@ -134,6 +161,8 @@ Typical UI operations require list/read actions plus:
 | Allocation profiles | `charge.allocation_profiles.create`, `update`, `versions.create`, `versions.update`, `versions.publish` |
 | Business-date profiles | `charge.business_date_profiles.create`, `update`, `versions.create`, `versions.update`, `versions.publish` |
 | Date assignments | `charge.business_date_profiles.assignments.create`, `update`, `delete` |
+| FX rates | `charge.fx_rates.create`, `update`, `deactivate` |
+| Rate books | `charge.rate_books.create`, `workspace.update`, `versions.create`, `publish` |
 
 The UI is not a security boundary. The API policy adapter must enforce the final authorization and tenant scope.
 

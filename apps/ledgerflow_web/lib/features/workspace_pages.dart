@@ -5,6 +5,14 @@ import 'package:flutter/material.dart';
 import '../core/design.dart';
 import '../data/workspace_data.dart';
 
+typedef WorkspaceMutation =
+    Future<bool> Function({
+      required String method,
+      required String path,
+      JsonMap? body,
+      required String successMessage,
+    });
+
 class OperationsDashboard extends StatelessWidget {
   const OperationsDashboard({
     required this.data,
@@ -717,35 +725,232 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
 }
 
 class RateBookWorkspace extends StatefulWidget {
-  const RateBookWorkspace({required this.rateBooks, super.key});
+  const RateBookWorkspace({
+    required this.rateBooks,
+    required this.live,
+    required this.onMutation,
+    super.key,
+  });
 
   final List<JsonMap> rateBooks;
+  final bool live;
+  final WorkspaceMutation onMutation;
 
   @override
   State<RateBookWorkspace> createState() => _RateBookWorkspaceState();
 }
 
 class _RateBookWorkspaceState extends State<RateBookWorkspace> {
-  int _selectedBook = 0;
+  final _search = TextEditingController();
+  String? _selectedCode;
+  int? _selectedBookId;
   int _selectedRate = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _search.addListener(_refresh);
+    _adoptDefaultSelection();
+  }
+
+  @override
+  void didUpdateWidget(covariant RateBookWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _adoptDefaultSelection();
+  }
+
+  @override
+  void dispose() {
+    _search
+      ..removeListener(_refresh)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _refresh() => setState(() {});
+
+  List<_RateBookFamily> get _families {
+    final grouped = <String, List<JsonMap>>{};
+    for (final book in widget.rateBooks) {
+      final code = _text(book, 'rate_book_code', fallback: 'UNSPECIFIED');
+      grouped.putIfAbsent(code, () => <JsonMap>[]).add(book);
+    }
+    final families = grouped.entries
+        .map(
+          (entry) => _RateBookFamily(
+            code: entry.key,
+            versions: _sortRateBooks(entry.value),
+          ),
+        )
+        .toList(growable: false);
+    families.sort(
+      (left, right) => left.primaryName.toLowerCase().compareTo(
+        right.primaryName.toLowerCase(),
+      ),
+    );
+    return families;
+  }
+
+  _RateBookFamily? get _selectedFamily {
+    final families = _families;
+    if (families.isEmpty) return null;
+    return families.cast<_RateBookFamily?>().firstWhere(
+          (family) => family?.code == _selectedCode,
+          orElse: () => families.first,
+        ) ??
+        families.first;
+  }
+
+  JsonMap? get _selectedBook {
+    final family = _selectedFamily;
+    if (family == null || family.versions.isEmpty) return null;
+    return family.versions.cast<JsonMap?>().firstWhere(
+          (book) => _asInt(book?['id']) == _selectedBookId,
+          orElse: () => family.versions.first,
+        ) ??
+        family.versions.first;
+  }
+
+  void _adoptDefaultSelection() {
+    final family = _selectedFamily;
+    if (family == null) {
+      _selectedCode = null;
+      _selectedBookId = null;
+      _selectedRate = 0;
+      return;
+    }
+    _selectedCode ??= family.code;
+    _selectedBookId ??= _asInt(family.versions.first['id']);
+    final selectedExists = family.versions.any(
+      (book) => _asInt(book['id']) == _selectedBookId,
+    );
+    if (!selectedExists) _selectedBookId = _asInt(family.versions.first['id']);
+  }
+
+  List<JsonMap> _filteredEntries(JsonMap book) {
+    final entries = _rows(book, 'entries');
+    final query = _search.text.trim().toLowerCase();
+    if (query.isEmpty) return entries;
+    return entries
+        .where(
+          (entry) => [
+            _text(entry, 'charge_component_code'),
+            _text(entry, 'origin_code'),
+            _text(entry, 'destination_code'),
+            _text(entry, 'equipment_type'),
+            _text(entry, 'basis'),
+            _text(entry, 'currency'),
+          ].any((value) => value.toLowerCase().contains(query)),
+        )
+        .toList(growable: false);
+  }
+
+  bool _isDraft(JsonMap book) => _text(book, 'status').toUpperCase() == 'DRAFT';
+
+  bool _isImmutable(JsonMap book) => !_isDraft(book);
+
+  String _versionLabel(JsonMap book) =>
+      'v${_asInt(book['version_number']) ?? 1}';
+
+  Future<void> _createRateBook() async {
+    final payload = await showDialog<JsonMap>(
+      context: context,
+      builder: (context) =>
+          const _RateBookDialog(mode: _RateBookDialogMode.create),
+    );
+    if (payload == null) return;
+    await widget.onMutation(
+      method: 'POST',
+      path: '/api/v1/charge-management/rate-books',
+      body: payload,
+      successMessage: 'Rate book created.',
+    );
+  }
+
+  Future<void> _createVersion(JsonMap source) async {
+    final payload = await showDialog<JsonMap>(
+      context: context,
+      builder: (context) =>
+          _RateBookDialog(mode: _RateBookDialogMode.newVersion, book: source),
+    );
+    if (payload == null) return;
+    await widget.onMutation(
+      method: 'POST',
+      path: '/api/v1/charge-management/rate-books/${source['id']}/versions',
+      body: payload,
+      successMessage: 'Draft rate-book version created.',
+    );
+  }
+
+  Future<void> _editDraft(JsonMap book) async {
+    final payload = await showDialog<JsonMap>(
+      context: context,
+      builder: (context) =>
+          _RateBookDialog(mode: _RateBookDialogMode.editDraft, book: book),
+    );
+    if (payload == null) return;
+    await widget.onMutation(
+      method: 'PUT',
+      path: '/api/v1/charge-management/rate-books/${book['id']}/workspace',
+      body: payload,
+      successMessage: 'Draft rate book updated.',
+    );
+  }
+
+  Future<void> _publishDraft(JsonMap book) async {
+    final confirmed = await _confirmAction(
+      context,
+      title: 'Publish ${_versionLabel(book)}?',
+      message:
+          'This releases the draft and retires the previously published version for the same rate-book code.',
+      action: 'Publish',
+    );
+    if (!confirmed) return;
+    await widget.onMutation(
+      method: 'POST',
+      path: '/api/v1/charge-management/rate-books/${book['id']}/publish',
+      successMessage: 'Draft rate book published.',
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (widget.rateBooks.isEmpty) {
-      return const PageCanvas(
+    final family = _selectedFamily;
+    final book = _selectedBook;
+    if (widget.rateBooks.isEmpty || family == null || book == null) {
+      return PageCanvas(
         title: 'Rate books',
         subtitle:
             'Maintain versioned, date-effective rate tables and applicability.',
-        children: [EmptyState(message: 'No rate books are available.')],
+        trailing: FilledButton.icon(
+          onPressed: widget.live ? _createRateBook : null,
+          icon: const Icon(Icons.add),
+          label: const Text('New rate book'),
+        ),
+        children: [
+          if (!widget.live) const _RateBookModeNotice(),
+          if (!widget.live) const SizedBox(height: 16),
+          const EmptyState(message: 'No rate books are available.'),
+        ],
       );
     }
-    final bookIndex = math.min(_selectedBook, widget.rateBooks.length - 1);
-    final book = widget.rateBooks[bookIndex];
-    final entries = _rows(book, 'entries');
+    final families = _families;
+    final familyIndex = math.max(
+      0,
+      families.indexWhere((item) => item.code == family.code),
+    );
+    final entries = _filteredEntries(book);
     final rateIndex = entries.isEmpty
         ? 0
         : math.min(_selectedRate, entries.length - 1);
     final selectedRate = entries.isEmpty ? null : entries[rateIndex];
+    final publishedVersion = family.publishedVersion;
+    final subtitleParts = [
+      '${_text(book, 'currency')} ${_versionLabel(book)}',
+      if (book['valid_from'] != null || book['valid_to'] != null)
+        'Valid ${_text(book, 'valid_from')} to ${_text(book, 'valid_to')}',
+      if (publishedVersion != null) 'Published v$publishedVersion',
+    ];
     return PageCanvas(
       title: _text(
         book,
@@ -753,17 +958,66 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
         fallback: 'Rate book #${book['id']}',
       ),
       eyebrow: 'Rate books / ${_text(book, 'rate_book_code')}',
-      subtitle:
-          '${_text(book, 'currency')}  |  Valid ${_text(book, 'valid_from')} to ${_text(book, 'valid_to')}',
-      trailing: StatusPill(_text(book, 'status')),
+      subtitle: subtitleParts.join('  |  '),
+      trailing: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          StatusPill(_text(book, 'status')),
+          FilledButton.icon(
+            onPressed: widget.live ? _createRateBook : null,
+            icon: const Icon(Icons.add),
+            label: const Text('New rate book'),
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.live ? () => _createVersion(book) : null,
+            icon: const Icon(Icons.copy_outlined),
+            label: const Text('New draft'),
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.live && _isDraft(book)
+                ? () => _editDraft(book)
+                : null,
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Edit draft'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: widget.live && _isDraft(book)
+                ? () => _publishDraft(book)
+                : null,
+            icon: const Icon(Icons.publish_outlined),
+            label: const Text('Publish draft'),
+          ),
+        ],
+      ),
       children: [
+        if (!widget.live) const _RateBookModeNotice(),
+        if (!widget.live) const SizedBox(height: 16),
         _RecordPicker(
-          records: widget.rateBooks,
-          selectedIndex: bookIndex,
+          records: families
+              .map(
+                (item) => JsonMap.from({
+                  'rate_book_code': item.code,
+                  'rate_book_name': item.primaryName,
+                  'published_version_number': item.publishedVersion,
+                  'version_count': item.versions.length,
+                }),
+              )
+              .toList(growable: false),
+          selectedIndex: familyIndex,
           label: (item) => _text(item, 'rate_book_name'),
-          detail: (item) => _text(item, 'rate_book_code'),
+          detail: (item) {
+            final published = _asInt(item['published_version_number']);
+            final count = _asInt(item['version_count']) ?? 0;
+            final publishedText = published == null
+                ? 'No release'
+                : 'Published v$published';
+            return '${_text(item, 'rate_book_code')}  |  $count versions  |  $publishedText';
+          },
           onSelected: (value) => setState(() {
-            _selectedBook = value;
+            _selectedCode = families[value].code;
+            _selectedBookId = _asInt(families[value].versions.first['id']);
             _selectedRate = 0;
           }),
         ),
@@ -774,7 +1028,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
           children: [
             MetricCard(
               label: 'Entries',
-              value: '${entries.length}',
+              value: '${_rows(book, 'entries').length}',
               icon: Icons.table_chart_outlined,
               color: LedgerFlowDesign.teal,
             ),
@@ -785,16 +1039,26 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
               color: LedgerFlowDesign.info,
             ),
             MetricCard(
-              label: 'Valid from',
-              value: _text(book, 'valid_from'),
-              icon: Icons.calendar_today_outlined,
+              label: 'Versions',
+              value: '${family.versions.length}',
+              detail: publishedVersion == null
+                  ? 'No version published'
+                  : 'Published v$publishedVersion',
+              icon: Icons.layers_outlined,
               color: LedgerFlowDesign.success,
             ),
             MetricCard(
-              label: 'Valid to',
-              value: _text(book, 'valid_to'),
-              icon: Icons.event_busy_outlined,
-              color: LedgerFlowDesign.warning,
+              label: 'Mutability',
+              value: _isDraft(book) ? 'Editable draft' : 'Immutable',
+              detail: _isDraft(book)
+                  ? 'Changes use the workspace endpoint'
+                  : 'Create a new draft version to change content',
+              icon: _isDraft(book)
+                  ? Icons.edit_note_outlined
+                  : Icons.lock_outline,
+              color: _isDraft(book)
+                  ? LedgerFlowDesign.warning
+                  : LedgerFlowDesign.info,
             ),
           ],
         ),
@@ -821,6 +1085,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
                       SizedBox(
                         width: 220,
                         child: TextField(
+                          controller: _search,
                           decoration: const InputDecoration(
                             hintText: 'Search rates',
                             prefixIcon: Icon(Icons.search),
@@ -864,7 +1129,12 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
                           DetailRow(
                             label: 'Rate',
                             value:
-                                '${_text(selectedRate, 'currency')} ${_text(selectedRate, 'rate_amount')}',
+                                _text(
+                                  selectedRate,
+                                  'basis',
+                                ).toUpperCase().startsWith('PERCENT')
+                                ? '${_text(selectedRate, 'rate_percent')}%'
+                                : '${_text(selectedRate, 'currency')} ${_text(selectedRate, 'rate_amount')}',
                           ),
                           DetailRow(
                             label: 'Basis',
@@ -890,6 +1160,12 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
                               fallback: 'Inherit',
                             ),
                           ),
+                          DetailRow(
+                            label: 'Status',
+                            value: selectedRate['is_active'] == false
+                                ? 'INACTIVE'
+                                : 'ACTIVE',
+                          ),
                         ],
                       ),
               ),
@@ -898,22 +1174,102 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SectionHeading(title: 'Version history'),
+                    SectionHeading(
+                      title: 'Version history',
+                      subtitle:
+                          'Grouped by rate-book code, ordered by version number.',
+                      action: TextButton.icon(
+                        onPressed: widget.live
+                            ? () => _createVersion(book)
+                            : null,
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('New draft'),
+                      ),
+                    ),
                     const SizedBox(height: 14),
-                    const _VersionRow(
-                      version: 'v4',
-                      status: 'PUBLISHED',
-                      date: 'Current',
-                    ),
-                    const _VersionRow(
-                      version: 'v3',
-                      status: 'ARCHIVED',
-                      date: 'Previous',
-                    ),
-                    const _VersionRow(
-                      version: 'v2',
-                      status: 'ARCHIVED',
-                      date: 'Initial',
+                    for (final version in family.versions) ...[
+                      _RateBookVersionRow(
+                        versionLabel: _versionLabel(version),
+                        status: _text(version, 'status'),
+                        isSelected: _asInt(version['id']) == _asInt(book['id']),
+                        note: version['published_at'] == null
+                            ? _text(
+                                version,
+                                'valid_from',
+                                fallback: _isDraft(version)
+                                    ? 'Draft workspace'
+                                    : 'Immutable workspace',
+                              )
+                            : 'Published ${_text(version, 'published_at')}',
+                        immutable: _isImmutable(version),
+                        onSelect: () => setState(() {
+                          _selectedBookId = _asInt(version['id']);
+                          _selectedRate = 0;
+                        }),
+                      ),
+                      if (version != family.versions.last)
+                        const Divider(
+                          height: 22,
+                          color: LedgerFlowDesign.border,
+                        ),
+                    ],
+                    const SizedBox(height: 16),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: _isDraft(book)
+                            ? LedgerFlowDesign.warning.withValues(alpha: 0.09)
+                            : LedgerFlowDesign.info.withValues(alpha: 0.09),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _isDraft(book)
+                              ? LedgerFlowDesign.warning.withValues(alpha: 0.28)
+                              : LedgerFlowDesign.info.withValues(alpha: 0.24),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              _isDraft(book)
+                                  ? Icons.edit_note_outlined
+                                  : Icons.lock_outline,
+                              size: 18,
+                              color: _isDraft(book)
+                                  ? LedgerFlowDesign.warning
+                                  : LedgerFlowDesign.info,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _isDraft(book)
+                                        ? 'Editable draft'
+                                        : 'Immutable version',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _isDraft(book)
+                                        ? 'Use the workspace update path to change this draft before publishing.'
+                                        : 'Published and retired versions are locked. Create a new draft version from the selected record to make changes.',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: LedgerFlowDesign.muted,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -2206,7 +2562,9 @@ class _RateTable extends StatelessWidget {
               DataCell(Text(_text(entry, 'basis'))),
               DataCell(
                 Text(
-                  '${_text(entry, 'currency')} ${_text(entry, 'rate_amount')}',
+                  _text(entry, 'basis').toUpperCase().startsWith('PERCENT')
+                      ? '${_text(entry, 'rate_percent')}%'
+                      : '${_text(entry, 'currency')} ${_text(entry, 'rate_amount')}',
                 ),
               ),
               DataCell(Text(_text(entry, 'validity_from'))),
@@ -2219,50 +2577,834 @@ class _RateTable extends StatelessWidget {
   }
 }
 
-class _VersionRow extends StatelessWidget {
-  const _VersionRow({
-    required this.version,
+enum _RateBookDialogMode { create, editDraft, newVersion }
+
+class _RateBookFamily {
+  const _RateBookFamily({required this.code, required this.versions});
+
+  final String code;
+  final List<JsonMap> versions;
+
+  String get primaryName =>
+      _text(versions.first, 'rate_book_name', fallback: 'Rate book $code');
+
+  int? get publishedVersion {
+    for (final version in versions) {
+      final status = _text(version, 'status').toUpperCase();
+      if (status == 'PUBLISHED' || status == 'ACTIVE') {
+        return _asInt(version['version_number']);
+      }
+    }
+    return null;
+  }
+}
+
+class _RateBookVersionRow extends StatelessWidget {
+  const _RateBookVersionRow({
+    required this.versionLabel,
     required this.status,
-    required this.date,
+    required this.note,
+    required this.isSelected,
+    required this.immutable,
+    required this.onSelect,
   });
 
-  final String version;
+  final String versionLabel;
   final String status;
-  final String date;
+  final String note;
+  final bool isSelected;
+  final bool immutable;
+  final VoidCallback onSelect;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 7),
-    child: Row(
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: const BoxDecoration(
-            color: LedgerFlowDesign.teal,
-            shape: BoxShape.circle,
-          ),
+  Widget build(BuildContext context) {
+    final borderColor = isSelected
+        ? LedgerFlowDesign.teal.withValues(alpha: 0.34)
+        : LedgerFlowDesign.border;
+    return InkWell(
+      onTap: onSelect,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? LedgerFlowDesign.teal.withValues(alpha: 0.07)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
         ),
-        const SizedBox(width: 10),
-        SizedBox(
-          width: 28,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: immutable
+                    ? LedgerFlowDesign.info.withValues(alpha: 0.12)
+                    : LedgerFlowDesign.warning.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                immutable ? Icons.lock_outline : Icons.edit_note_outlined,
+                size: 16,
+                color: immutable
+                    ? LedgerFlowDesign.info
+                    : LedgerFlowDesign.warning,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        versionLabel,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: LedgerFlowDesign.tealDark,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      StatusPill(status),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    note,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: LedgerFlowDesign.muted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            IconButton(
+              tooltip: 'Select version',
+              visualDensity: VisualDensity.compact,
+              onPressed: onSelect,
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RateBookModeNotice extends StatelessWidget {
+  const _RateBookModeNotice();
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        Icon(Icons.lock_outline, size: 18, color: LedgerFlowDesign.muted),
+        SizedBox(width: 10),
+        Expanded(
           child: Text(
-            version,
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              color: LedgerFlowDesign.tealDark,
+            'Demo mode is read-only. Connect a bearer-authenticated API to create rate books, edit draft workspaces, create new draft versions, and publish reviewed releases.',
+            style: TextStyle(
+              fontSize: 12,
+              color: LedgerFlowDesign.muted,
+              height: 1.45,
             ),
           ),
-        ),
-        StatusPill(status),
-        const Spacer(),
-        Text(
-          date,
-          style: const TextStyle(fontSize: 11, color: LedgerFlowDesign.muted),
         ),
       ],
     ),
   );
+}
+
+class _RateEntryDraft {
+  _RateEntryDraft({
+    this.original = const <String, dynamic>{},
+    this.componentCode = '',
+    this.basis = 'FLAT',
+    this.currency = 'USD',
+    this.rateAmount = '',
+    this.ratePercent = '',
+    this.originCode = '',
+    this.destinationCode = '',
+    this.equipmentType = '',
+    this.validityFrom = '',
+    this.validityTo = '',
+    this.calculationProfileId = '',
+    this.allocationProfileId = '',
+    this.isActive = true,
+  });
+
+  factory _RateEntryDraft.fromJson(JsonMap entry) => _RateEntryDraft(
+    original: JsonMap.from(entry),
+    componentCode: _text(entry, 'charge_component_code', fallback: ''),
+    basis: _text(entry, 'basis', fallback: 'FLAT'),
+    currency: _text(entry, 'currency', fallback: 'USD'),
+    rateAmount: _text(entry, 'rate_amount', fallback: ''),
+    ratePercent: _text(entry, 'rate_percent', fallback: ''),
+    originCode: _text(entry, 'origin_code', fallback: ''),
+    destinationCode: _text(entry, 'destination_code', fallback: ''),
+    equipmentType: _text(entry, 'equipment_type', fallback: ''),
+    validityFrom: _text(entry, 'validity_from', fallback: ''),
+    validityTo: _text(entry, 'validity_to', fallback: ''),
+    calculationProfileId: _text(entry, 'calculation_profile_id', fallback: ''),
+    allocationProfileId: _text(entry, 'allocation_profile_id', fallback: ''),
+    isActive: entry['is_active'] != false,
+  );
+
+  final JsonMap original;
+  String componentCode;
+  String basis;
+  String currency;
+  String rateAmount;
+  String ratePercent;
+  String originCode;
+  String destinationCode;
+  String equipmentType;
+  String validityFrom;
+  String validityTo;
+  String calculationProfileId;
+  String allocationProfileId;
+  bool isActive;
+
+  bool get isPercentage => basis.trim().toUpperCase().startsWith('PERCENT');
+
+  JsonMap toJson() {
+    final payload = JsonMap.from(original)
+      ..remove('id')
+      ..remove('rate_book_id')
+      ..['charge_component_code'] = componentCode.trim().toUpperCase()
+      ..['basis'] = basis.trim().toUpperCase()
+      ..['currency'] = currency.trim().toUpperCase()
+      ..['is_active'] = isActive;
+    if (originCode.trim().isNotEmpty) {
+      payload['origin_code'] = originCode.trim().toUpperCase();
+    }
+    if (destinationCode.trim().isNotEmpty) {
+      payload['destination_code'] = destinationCode.trim().toUpperCase();
+    }
+    if (equipmentType.trim().isNotEmpty) {
+      payload['equipment_type'] = equipmentType.trim().toUpperCase();
+    }
+    if (validityFrom.trim().isNotEmpty) {
+      payload['validity_from'] = validityFrom.trim();
+    }
+    if (validityTo.trim().isNotEmpty) {
+      payload['validity_to'] = validityTo.trim();
+    }
+    final calculationProfileIdValue = _asInt(calculationProfileId.trim());
+    if (calculationProfileIdValue != null) {
+      payload['calculation_profile_id'] = calculationProfileIdValue;
+    }
+    final allocationProfileIdValue = _asInt(allocationProfileId.trim());
+    if (allocationProfileIdValue != null) {
+      payload['allocation_profile_id'] = allocationProfileIdValue;
+    }
+    if (isPercentage) {
+      payload.remove('rate_amount');
+      payload['rate_percent'] = ratePercent.trim();
+    } else {
+      payload.remove('rate_percent');
+      payload['rate_amount'] = rateAmount.trim();
+    }
+    return JsonMap.from(payload);
+  }
+}
+
+class _RateBookDialog extends StatefulWidget {
+  const _RateBookDialog({required this.mode, this.book});
+
+  final _RateBookDialogMode mode;
+  final JsonMap? book;
+
+  @override
+  State<_RateBookDialog> createState() => _RateBookDialogState();
+}
+
+class _RateBookDialogState extends State<_RateBookDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _code;
+  late final TextEditingController _name;
+  late final TextEditingController _description;
+  late final TextEditingController _currency;
+  late final TextEditingController _validFrom;
+  late final TextEditingController _validTo;
+  late final TextEditingController _calculationBasis;
+  late bool _isActive;
+  late List<_RateEntryDraft> _entries;
+
+  bool get _codeLocked => widget.mode == _RateBookDialogMode.newVersion;
+
+  bool get _editing => widget.mode == _RateBookDialogMode.editDraft;
+
+  String get _title => switch (widget.mode) {
+    _RateBookDialogMode.create => 'Create rate book',
+    _RateBookDialogMode.editDraft => 'Edit draft rate book',
+    _RateBookDialogMode.newVersion => 'Create draft version',
+  };
+
+  String get _saveLabel => switch (widget.mode) {
+    _RateBookDialogMode.create => 'Create rate book',
+    _RateBookDialogMode.editDraft => 'Save draft',
+    _RateBookDialogMode.newVersion => 'Create draft',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    final book = widget.book;
+    _code = TextEditingController(
+      text: _text(
+        book ?? const <String, dynamic>{},
+        'rate_book_code',
+        fallback: '',
+      ),
+    );
+    _name = TextEditingController(
+      text: _text(
+        book ?? const <String, dynamic>{},
+        'rate_book_name',
+        fallback: '',
+      ),
+    );
+    _description = TextEditingController(
+      text: _text(
+        book ?? const <String, dynamic>{},
+        'description',
+        fallback: '',
+      ),
+    );
+    _currency = TextEditingController(
+      text: _text(
+        book ?? const <String, dynamic>{},
+        'currency',
+        fallback: 'USD',
+      ),
+    );
+    _validFrom = TextEditingController(
+      text: _text(
+        book ?? const <String, dynamic>{},
+        'valid_from',
+        fallback: '',
+      ),
+    );
+    _validTo = TextEditingController(
+      text: _text(book ?? const <String, dynamic>{}, 'valid_to', fallback: ''),
+    );
+    _calculationBasis = TextEditingController(
+      text: _text(
+        book ?? const <String, dynamic>{},
+        'calculation_basis',
+        fallback: 'FLAT',
+      ),
+    );
+    _isActive = book == null || book['is_active'] != false;
+    _entries = _rows(
+      book ?? const <String, dynamic>{},
+      'entries',
+    ).map(_RateEntryDraft.fromJson).toList(growable: true);
+  }
+
+  @override
+  void dispose() {
+    _code.dispose();
+    _name.dispose();
+    _description.dispose();
+    _currency.dispose();
+    _validFrom.dispose();
+    _validTo.dispose();
+    _calculationBasis.dispose();
+    super.dispose();
+  }
+
+  void _addEntry() => setState(() => _entries.add(_RateEntryDraft()));
+
+  void _removeEntry(int index) {
+    setState(() {
+      _entries.removeAt(index);
+    });
+  }
+
+  String? _required(String? value, String label) {
+    if (value == null || value.trim().isEmpty) return '$label is required';
+    return null;
+  }
+
+  String? _isoDate(String? value, {bool required = false}) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return required ? 'Date is required' : null;
+    return DateTime.tryParse(text) == null ? 'Use YYYY-MM-DD' : null;
+  }
+
+  String? _numeric(String? value, {bool required = false}) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return required ? 'Amount is required' : null;
+    return num.tryParse(text) == null ? 'Enter a number' : null;
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final payload = <String, dynamic>{
+      'rate_book_code': _code.text.trim().toUpperCase(),
+      'rate_book_name': _name.text.trim(),
+      'description': _description.text.trim().isEmpty
+          ? null
+          : _description.text.trim(),
+      'currency': _currency.text.trim().toUpperCase(),
+      'valid_from': _validFrom.text.trim().isEmpty
+          ? null
+          : _validFrom.text.trim(),
+      'valid_to': _validTo.text.trim().isEmpty ? null : _validTo.text.trim(),
+      'calculation_basis': _calculationBasis.text.trim().toUpperCase(),
+      'status': 'DRAFT',
+      'is_active': _isActive,
+      'entries': _entries
+          .map((entry) => entry.toJson())
+          .toList(growable: false),
+    };
+    final lockVersion = _asInt(widget.book?['lock_version']);
+    if (_editing && lockVersion != null) {
+      payload['expected_lock_version'] = lockVersion;
+    }
+    Navigator.pop(context, JsonMap.from(payload));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_title),
+      content: SizedBox(
+        width: 900,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.mode == _RateBookDialogMode.newVersion
+                      ? 'The new version keeps the selected rate-book code and starts in DRAFT status.'
+                      : 'Capture the commercial header and any draft rate rows you want in this workspace.',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: LedgerFlowDesign.muted,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    SizedBox(
+                      width: 210,
+                      child: TextFormField(
+                        controller: _code,
+                        readOnly: _codeLocked,
+                        decoration: const InputDecoration(
+                          labelText: 'Rate-book code',
+                          isDense: true,
+                        ),
+                        validator: (value) =>
+                            _required(value, 'Rate-book code'),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 300,
+                      child: TextFormField(
+                        controller: _name,
+                        decoration: const InputDecoration(
+                          labelText: 'Rate-book name',
+                          isDense: true,
+                        ),
+                        validator: (value) =>
+                            _required(value, 'Rate-book name'),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 120,
+                      child: TextFormField(
+                        controller: _currency,
+                        decoration: const InputDecoration(
+                          labelText: 'Currency',
+                          isDense: true,
+                        ),
+                        validator: (value) => _required(value, 'Currency'),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 160,
+                      child: TextFormField(
+                        controller: _calculationBasis,
+                        decoration: const InputDecoration(
+                          labelText: 'Calc basis',
+                          isDense: true,
+                        ),
+                        validator: (value) =>
+                            _required(value, 'Calculation basis'),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 150,
+                      child: TextFormField(
+                        controller: _validFrom,
+                        decoration: const InputDecoration(
+                          labelText: 'Valid from',
+                          hintText: 'YYYY-MM-DD',
+                          isDense: true,
+                        ),
+                        validator: _isoDate,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 150,
+                      child: TextFormField(
+                        controller: _validTo,
+                        decoration: const InputDecoration(
+                          labelText: 'Valid to',
+                          hintText: 'YYYY-MM-DD',
+                          isDense: true,
+                        ),
+                        validator: _isoDate,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _description,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Description',
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile.adaptive(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: _isActive,
+                  onChanged: (value) => setState(() => _isActive = value),
+                  title: const Text('Record is active'),
+                ),
+                const SizedBox(height: 8),
+                SectionHeading(
+                  title: 'Rate rows',
+                  subtitle:
+                      'Entries are optional for a draft, but publishing requires at least one valid rate row.',
+                  action: TextButton.icon(
+                    onPressed: _addEntry,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add row'),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_entries.isEmpty)
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                      border: Border.fromBorderSide(
+                        BorderSide(color: LedgerFlowDesign.border),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        'No draft rate rows yet.',
+                        style: TextStyle(color: LedgerFlowDesign.muted),
+                      ),
+                    ),
+                  )
+                else
+                  Column(
+                    children: List.generate(_entries.length, (index) {
+                      final entry = _entries[index];
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index == _entries.length - 1 ? 0 : 12,
+                        ),
+                        child: _RateEntryEditor(
+                          key: ValueKey('rate-entry-$index'),
+                          index: index,
+                          entry: entry,
+                          onRemove: () => _removeEntry(index),
+                          required: _required,
+                          isoDate: _isoDate,
+                          numeric: _numeric,
+                          onChanged: () => setState(() {}),
+                        ),
+                      );
+                    }),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: Text(_saveLabel)),
+      ],
+    );
+  }
+}
+
+class _RateEntryEditor extends StatelessWidget {
+  const _RateEntryEditor({
+    required super.key,
+    required this.index,
+    required this.entry,
+    required this.onRemove,
+    required this.required,
+    required this.isoDate,
+    required this.numeric,
+    required this.onChanged,
+  });
+
+  final int index;
+  final _RateEntryDraft entry;
+  final VoidCallback onRemove;
+  final String? Function(String? value, String label) required;
+  final String? Function(String? value, {bool required}) isoDate;
+  final String? Function(String? value, {bool required}) numeric;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: LedgerFlowDesign.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Row ${index + 1}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(width: 8),
+                StatusPill(entry.isActive ? 'ACTIVE' : 'INACTIVE'),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text('Remove'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SizedBox(
+                  width: 180,
+                  child: TextFormField(
+                    initialValue: entry.componentCode,
+                    decoration: const InputDecoration(
+                      labelText: 'Component code',
+                      isDense: true,
+                    ),
+                    validator: (value) => required(value, 'Component code'),
+                    onChanged: (value) => entry.componentCode = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 170,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: entry.basis,
+                    isExpanded: true,
+                    isDense: true,
+                    decoration: const InputDecoration(labelText: 'Basis'),
+                    items: const [
+                      DropdownMenuItem(value: 'FLAT', child: Text('FLAT')),
+                      DropdownMenuItem(
+                        value: 'SHIPMENT',
+                        child: Text('SHIPMENT'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'PER_CONTAINER',
+                        child: Text('PER_CONTAINER'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'PER_WEIGHT',
+                        child: Text('PER_WEIGHT'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'PERCENT',
+                        child: Text('PERCENT'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      entry.basis = value;
+                      onChanged();
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: 110,
+                  child: TextFormField(
+                    initialValue: entry.currency,
+                    decoration: const InputDecoration(
+                      labelText: 'Currency',
+                      isDense: true,
+                    ),
+                    validator: (value) => required(value, 'Currency'),
+                    onChanged: (value) => entry.currency = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 140,
+                  child: TextFormField(
+                    key: ValueKey('rate-value-$index-${entry.basis}'),
+                    initialValue: entry.isPercentage
+                        ? entry.ratePercent
+                        : entry.rateAmount,
+                    decoration: InputDecoration(
+                      labelText: entry.isPercentage
+                          ? 'Rate percent'
+                          : 'Rate amount',
+                      isDense: true,
+                    ),
+                    validator: (value) => numeric(value, required: true),
+                    onChanged: (value) {
+                      if (entry.isPercentage) {
+                        entry.ratePercent = value;
+                      } else {
+                        entry.rateAmount = value;
+                      }
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: 130,
+                  child: TextFormField(
+                    initialValue: entry.originCode,
+                    decoration: const InputDecoration(
+                      labelText: 'Origin',
+                      isDense: true,
+                    ),
+                    onChanged: (value) => entry.originCode = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 130,
+                  child: TextFormField(
+                    initialValue: entry.destinationCode,
+                    decoration: const InputDecoration(
+                      labelText: 'Destination',
+                      isDense: true,
+                    ),
+                    onChanged: (value) => entry.destinationCode = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 130,
+                  child: TextFormField(
+                    initialValue: entry.equipmentType,
+                    decoration: const InputDecoration(
+                      labelText: 'Equipment',
+                      isDense: true,
+                    ),
+                    onChanged: (value) => entry.equipmentType = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 150,
+                  child: TextFormField(
+                    initialValue: entry.validityFrom,
+                    decoration: const InputDecoration(
+                      labelText: 'Valid from',
+                      hintText: 'YYYY-MM-DD',
+                      isDense: true,
+                    ),
+                    validator: isoDate,
+                    onChanged: (value) => entry.validityFrom = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 150,
+                  child: TextFormField(
+                    initialValue: entry.validityTo,
+                    decoration: const InputDecoration(
+                      labelText: 'Valid to',
+                      hintText: 'YYYY-MM-DD',
+                      isDense: true,
+                    ),
+                    validator: isoDate,
+                    onChanged: (value) => entry.validityTo = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 170,
+                  child: TextFormField(
+                    initialValue: entry.calculationProfileId,
+                    decoration: const InputDecoration(
+                      labelText: 'Calc profile id',
+                      isDense: true,
+                    ),
+                    validator: (value) {
+                      final text = value?.trim() ?? '';
+                      if (text.isEmpty) return null;
+                      return _asInt(text) == null ? 'Enter an integer' : null;
+                    },
+                    onChanged: (value) => entry.calculationProfileId = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 170,
+                  child: TextFormField(
+                    initialValue: entry.allocationProfileId,
+                    decoration: const InputDecoration(
+                      labelText: 'Allocation profile id',
+                      isDense: true,
+                    ),
+                    validator: (value) {
+                      final text = value?.trim() ?? '';
+                      if (text.isEmpty) return null;
+                      return _asInt(text) == null ? 'Enter an integer' : null;
+                    },
+                    onChanged: (value) => entry.allocationProfileId = value,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SwitchListTile.adaptive(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              value: entry.isActive,
+              onChanged: (value) {
+                entry.isActive = value;
+                onChanged();
+              },
+              title: const Text('Row is active'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ProfileTable extends StatelessWidget {
@@ -2566,6 +3708,24 @@ String _text(JsonMap record, String key, {String fallback = '-'}) {
 
 double _number(dynamic value) => double.tryParse(value?.toString() ?? '') ?? 0;
 
+int? _asInt(dynamic value) => switch (value) {
+  int number => number,
+  String text => int.tryParse(text),
+  _ => null,
+};
+
+List<JsonMap> _sortRateBooks(List<JsonMap> books) {
+  final sorted = List<JsonMap>.from(books);
+  sorted.sort((left, right) {
+    final versionOrder = (_asInt(right['version_number']) ?? 1).compareTo(
+      _asInt(left['version_number']) ?? 1,
+    );
+    if (versionOrder != 0) return versionOrder;
+    return (_asInt(right['id']) ?? 0).compareTo(_asInt(left['id']) ?? 0);
+  });
+  return List.unmodifiable(sorted);
+}
+
 String _money(double value, {String currency = 'USD'}) {
   final sign = value < 0 ? '-' : '';
   final absolute = value.abs();
@@ -2586,3 +3746,29 @@ String _label(String key) => key
           word.isEmpty ? word : '${word[0].toUpperCase()}${word.substring(1)}',
     )
     .join(' ');
+
+Future<bool> _confirmAction(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String action,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(action),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
+}
