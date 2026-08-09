@@ -6,20 +6,11 @@ from collections.abc import Generator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-
-def _normalize_database_url(url: str) -> str:
-    """Use the installed psycopg 3 driver for provider-issued PostgreSQL URLs."""
-    if url.startswith("postgres://"):
-        return "postgresql+psycopg://" + url.removeprefix("postgres://")
-    if url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
-    return url
+from app.db.url import normalize_database_url
 
 
 def database_url() -> str:
-    return _normalize_database_url(
-        os.getenv("DATABASE_URL", "sqlite:///./charge_management.db")
-    )
+    return normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///./charge_management.db"))
 
 
 def _engine_kwargs(url: str) -> dict:
