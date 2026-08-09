@@ -1807,11 +1807,14 @@ class _VersionEditorState extends State<_VersionEditor> {
                       : 'Enter a number';
                 },
               ),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Required input'),
-                value: factor.required,
-                onChanged: (value) => setState(() => factor.required = value),
+              Material(
+                color: Colors.transparent,
+                child: SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Required input'),
+                  value: factor.required,
+                  onChanged: (value) => setState(() => factor.required = value),
+                ),
               ),
             ],
           ),
