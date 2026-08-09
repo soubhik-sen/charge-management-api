@@ -58,3 +58,5 @@ Migrations and repository initialization provide generic settings, common charge
 - Apply migrations before starting a new application version.
 - Back up PostgreSQL and test restore procedures according to the deployment's recovery objectives.
 - Never treat local `.db` files as deployable artifacts; they are ignored by Git.
+
+Migration `0016_align_charge_runtime` adds effective-dated rate-book metadata, percentage rates, entry and contract-line priority/active fields, quote chargeable weight/context, generated request numbers, and explicit calculation/allocation execution state on charge lines. Run `alembic upgrade head` before deploying this application version.

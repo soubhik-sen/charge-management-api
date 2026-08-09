@@ -7,8 +7,19 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 
+def _normalize_database_url(url: str) -> str:
+    """Use the installed psycopg 3 driver for provider-issued PostgreSQL URLs."""
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgres://")
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    return url
+
+
 def database_url() -> str:
-    return os.getenv("DATABASE_URL", "sqlite:///./charge_management.db")
+    return _normalize_database_url(
+        os.getenv("DATABASE_URL", "sqlite:///./charge_management.db")
+    )
 
 
 def _engine_kwargs(url: str) -> dict:

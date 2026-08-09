@@ -6,10 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Effective-dated rate-book metadata, percentage rates, deterministic rate-entry priority, contract-line context, and quote chargeable weight.
+- Explicit charge-line calculation/allocation execution state and migration `0016_align_charge_runtime`.
+- Regression tests for overlapping rate rows, percentage-only rates, and repeated invoice components.
+
 ### Fixed
 
 - PostgreSQL migrations widen Alembic's version column before descriptive revision IDs exceed its default length.
 - Direct runtime and test dependencies are pinned so generated OpenAPI and CI results are reproducible.
+- Contract rating now excludes inactive, expired, out-of-scale, and dimension-mismatched rows and never creates zero-line options.
+- Invoice matching now aggregates repeated components from posting lines on the correct payer/payee side.
 
 ### Documentation
 

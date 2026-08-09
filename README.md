@@ -1,4 +1,7 @@
-# Charge Management API - Built with ❤️ using Codex
+# Charge Management API
+
+[![CI](https://github.com/soubhik-sen/charge-management-api/actions/workflows/ci.yml/badge.svg)](https://github.com/soubhik-sen/charge-management-api/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 An open-source, adapter-neutral API for defining, calculating, allocating, converting, approving, and reconciling charges. It is designed for logistics and other multi-party pricing workflows without requiring a particular ERP, identity provider, or host application.
 
@@ -10,14 +13,15 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 
 ## Capabilities
 
-- Persistent charge components, aliases, rate books, calculation templates, and contracts.
+- Effective-dated charge components, aliases, rate books, calculation templates, and contracts.
+- Deterministic rate-row selection by applicability, specificity, priority, and scale floor.
 - Versioned calculation profiles for flat, single-axis, and compound rate formulas.
 - Versioned allocation profiles with shipment, container, house, and item-level drivers.
 - Versioned business-date profiles with ordered fallback steps and scoped assignments.
 - FX source/rate maintenance plus exact-date, prior-date, direct, and inverse resolution.
 - Quote request, offer, rating, ranking, award, commitment, and consumption lifecycle.
 - Charge documents, calculation audit data, approval, reversal, and export lifecycle.
-- Invoice capture, workspace persistence, and matching.
+- Invoice capture, workspace persistence, and posting-line-aware component matching.
 - PostgreSQL runtime with SQLAlchemy and Alembic migrations.
 - JWT authentication using any standards-compliant issuer through JWKS or a shared secret.
 - Generated OpenAPI contract and PostgreSQL-backed API tests with JUnit/coverage reports.
@@ -65,6 +69,16 @@ uvicorn app.main:app --reload
 ```
 
 On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1` instead. Set `DATABASE_URL` and authentication variables in the process environment before migration or startup. PostgreSQL is the supported runtime database; SQLite is intended only for local smoke tests. See [Setup](docs/setup.md).
+
+## Deploy To Render
+
+The repository includes `render.yaml` for the `LEDGERFLOW` project's `Dev & QA` environment. The Blueprint provisions:
+
+- `ledgerflow-api-devqa`, a Python web service that applies Alembic migrations before startup.
+- `ledgerflow-db-devqa`, a private Render PostgreSQL database.
+- Secure JWT validation with a Render-generated HS256 secret.
+
+Create or update the Blueprint from this repository in Render. The API health endpoint is `/health`, Swagger UI is `/docs`, and all charge-management operations remain protected by bearer authentication. Retrieve the generated JWT secret only through Render's secret controls when minting Dev & QA tokens; never commit it.
 
 ## Documentation
 

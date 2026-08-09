@@ -2992,6 +2992,18 @@
             ],
             "title": "Allocation Basis"
           },
+          "allocation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Config Snapshot Json"
+          },
           "allocation_driver_value": {
             "anyOf": [
               {
@@ -3006,6 +3018,23 @@
               }
             ],
             "title": "Allocation Driver Value"
+          },
+          "allocation_locked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Locked At"
+          },
+          "allocation_mode": {
+            "default": "NONE",
+            "title": "Allocation Mode",
+            "type": "string"
           },
           "allocation_profile_id": {
             "anyOf": [
@@ -3043,6 +3072,11 @@
               }
             ],
             "title": "Allocation Ratio"
+          },
+          "allocation_status": {
+            "default": "NOT_REQUIRED",
+            "title": "Allocation Status",
+            "type": "string"
           },
           "basis": {
             "default": "FLAT",
@@ -3085,6 +3119,23 @@
             ],
             "title": "Calculation Input Snapshot Json"
           },
+          "calculation_locked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Locked At"
+          },
+          "calculation_mode": {
+            "default": "DIRECT",
+            "title": "Calculation Mode",
+            "type": "string"
+          },
           "calculation_profile_version_id": {
             "anyOf": [
               {
@@ -3095,6 +3146,11 @@
               }
             ],
             "title": "Calculation Profile Version Id"
+          },
+          "calculation_status": {
+            "default": "CALCULATED",
+            "title": "Calculation Status",
+            "type": "string"
           },
           "charge_component_code": {
             "title": "Charge Component Code",
@@ -3245,6 +3301,11 @@
               }
             ],
             "title": "Fx Rate Id"
+          },
+          "is_customer_visible": {
+            "default": true,
+            "title": "Is Customer Visible",
+            "type": "boolean"
           },
           "line_number": {
             "anyOf": [
@@ -3472,6 +3533,18 @@
             ],
             "title": "Allocation Basis"
           },
+          "allocation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Config Snapshot Json"
+          },
           "allocation_driver_value": {
             "anyOf": [
               {
@@ -3486,6 +3559,23 @@
               }
             ],
             "title": "Allocation Driver Value"
+          },
+          "allocation_locked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Locked At"
+          },
+          "allocation_mode": {
+            "default": "NONE",
+            "title": "Allocation Mode",
+            "type": "string"
           },
           "allocation_profile_id": {
             "anyOf": [
@@ -3523,6 +3613,11 @@
               }
             ],
             "title": "Allocation Ratio"
+          },
+          "allocation_status": {
+            "default": "NOT_REQUIRED",
+            "title": "Allocation Status",
+            "type": "string"
           },
           "basis": {
             "default": "FLAT",
@@ -3565,6 +3660,23 @@
             ],
             "title": "Calculation Input Snapshot Json"
           },
+          "calculation_locked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Locked At"
+          },
+          "calculation_mode": {
+            "default": "DIRECT",
+            "title": "Calculation Mode",
+            "type": "string"
+          },
           "calculation_profile_version_id": {
             "anyOf": [
               {
@@ -3575,6 +3687,11 @@
               }
             ],
             "title": "Calculation Profile Version Id"
+          },
+          "calculation_status": {
+            "default": "CALCULATED",
+            "title": "Calculation Status",
+            "type": "string"
           },
           "charge_component_code": {
             "title": "Charge Component Code",
@@ -3736,6 +3853,11 @@
               }
             ],
             "title": "Id"
+          },
+          "is_customer_visible": {
+            "default": true,
+            "title": "Is Customer Visible",
+            "type": "boolean"
           },
           "line_number": {
             "anyOf": [
@@ -4394,6 +4516,18 @@
             ],
             "title": "Allocation Basis"
           },
+          "allocation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Config Snapshot Json"
+          },
           "allocation_driver_value": {
             "anyOf": [
               {
@@ -4405,6 +4539,23 @@
               }
             ],
             "title": "Allocation Driver Value"
+          },
+          "allocation_locked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Locked At"
+          },
+          "allocation_mode": {
+            "default": "NONE",
+            "title": "Allocation Mode",
+            "type": "string"
           },
           "allocation_profile_id": {
             "anyOf": [
@@ -4439,6 +4590,11 @@
               }
             ],
             "title": "Allocation Ratio"
+          },
+          "allocation_status": {
+            "default": "NOT_REQUIRED",
+            "title": "Allocation Status",
+            "type": "string"
           },
           "approved_amount": {
             "anyOf": [
@@ -4492,6 +4648,23 @@
             ],
             "title": "Calculation Input Snapshot Json"
           },
+          "calculation_locked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Locked At"
+          },
+          "calculation_mode": {
+            "default": "DIRECT",
+            "title": "Calculation Mode",
+            "type": "string"
+          },
           "calculation_profile_version_id": {
             "anyOf": [
               {
@@ -4502,6 +4675,11 @@
               }
             ],
             "title": "Calculation Profile Version Id"
+          },
+          "calculation_status": {
+            "default": "CALCULATED",
+            "title": "Calculation Status",
+            "type": "string"
           },
           "charge_component_code": {
             "title": "Charge Component Code",
@@ -4654,6 +4832,11 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "is_customer_visible": {
+            "default": true,
+            "title": "Is Customer Visible",
+            "type": "boolean"
           },
           "line_number": {
             "anyOf": [
@@ -5535,6 +5718,17 @@
             "title": "Charge Component Code",
             "type": "string"
           },
+          "charge_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Context"
+          },
           "commodity_code": {
             "anyOf": [
               {
@@ -5576,6 +5770,23 @@
             "title": "Id",
             "type": "integer"
           },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "line_number": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Number"
+          },
           "mode": {
             "anyOf": [
               {
@@ -5597,6 +5808,11 @@
               }
             ],
             "title": "Origin Code"
+          },
+          "priority": {
+            "default": 100,
+            "title": "Priority",
+            "type": "integer"
           },
           "rate_book_id": {
             "anyOf": [
@@ -5703,6 +5919,17 @@
             "title": "Charge Component Code",
             "type": "string"
           },
+          "charge_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Context"
+          },
           "commodity_code": {
             "anyOf": [
               {
@@ -5736,6 +5963,23 @@
             ],
             "title": "Equipment Type"
           },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "line_number": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Number"
+          },
           "mode": {
             "anyOf": [
               {
@@ -5757,6 +6001,11 @@
               }
             ],
             "title": "Origin Code"
+          },
+          "priority": {
+            "default": 100,
+            "title": "Priority",
+            "type": "integer"
           },
           "rate_book_id": {
             "anyOf": [
@@ -7841,6 +8090,23 @@
             ],
             "title": "Allocation Basis"
           },
+          "allocation_config_snapshot_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Config Snapshot Json"
+          },
+          "allocation_mode": {
+            "default": "NONE",
+            "title": "Allocation Mode",
+            "type": "string"
+          },
           "allocation_profile_id": {
             "anyOf": [
               {
@@ -7862,6 +8128,11 @@
               }
             ],
             "title": "Allocation Profile Version Id"
+          },
+          "allocation_status": {
+            "default": "NOT_REQUIRED",
+            "title": "Allocation Status",
+            "type": "string"
           },
           "amount": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
@@ -7896,6 +8167,11 @@
             ],
             "title": "Calculation Input Snapshot Json"
           },
+          "calculation_mode": {
+            "default": "DIRECT",
+            "title": "Calculation Mode",
+            "type": "string"
+          },
           "calculation_profile_version_id": {
             "anyOf": [
               {
@@ -7906,6 +8182,11 @@
               }
             ],
             "title": "Calculation Profile Version Id"
+          },
+          "calculation_status": {
+            "default": "CALCULATED",
+            "title": "Calculation Status",
+            "type": "string"
           },
           "charge_component_code": {
             "title": "Charge Component Code",
@@ -7934,6 +8215,11 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "is_customer_visible": {
+            "default": true,
+            "title": "Is Customer Visible",
+            "type": "boolean"
           },
           "is_margin_line": {
             "default": false,
@@ -8085,6 +8371,29 @@
               }
             ],
             "title": "Carrier Id"
+          },
+          "charge_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Context"
+          },
+          "chargeable_weight": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chargeable Weight"
           },
           "commodity_code": {
             "anyOf": [
@@ -8285,6 +8594,17 @@
             "title": "Quotation Policy Snapshot",
             "type": "string"
           },
+          "request_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Number"
+          },
           "requested_service_date": {
             "anyOf": [
               {
@@ -8388,6 +8708,32 @@
               }
             ],
             "title": "Carrier Id"
+          },
+          "charge_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Context"
+          },
+          "chargeable_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chargeable Weight"
           },
           "commodity_code": {
             "anyOf": [
@@ -8588,6 +8934,17 @@
             "default": "1",
             "title": "Quantity"
           },
+          "request_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Number"
+          },
           "requested_service_date": {
             "anyOf": [
               {
@@ -8749,6 +9106,32 @@
               }
             ],
             "title": "Carrier Id"
+          },
+          "charge_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Context"
+          },
+          "chargeable_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chargeable Weight"
           },
           "commodity_code": {
             "anyOf": [
@@ -8971,6 +9354,17 @@
             ],
             "title": "Quantity"
           },
+          "request_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Number"
+          },
           "requested_service_date": {
             "anyOf": [
               {
@@ -9089,10 +9483,26 @@
       },
       "RateBook": {
         "properties": {
+          "calculation_basis": {
+            "default": "FLAT",
+            "title": "Calculation Basis",
+            "type": "string"
+          },
           "currency": {
             "default": "USD",
             "title": "Currency",
             "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "entries": {
             "items": {
@@ -9117,6 +9527,35 @@
           "rate_book_name": {
             "title": "Rate Book Name",
             "type": "string"
+          },
+          "status": {
+            "default": "DRAFT",
+            "title": "Status",
+            "type": "string"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
           }
         },
         "required": [
@@ -9213,6 +9652,11 @@
             "title": "Id",
             "type": "integer"
           },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
           "maximum_amount": {
             "anyOf": [
               {
@@ -9259,14 +9703,38 @@
             ],
             "title": "Origin Code"
           },
+          "priority": {
+            "default": 100,
+            "title": "Priority",
+            "type": "integer"
+          },
           "rate_amount": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-            "title": "Rate Amount",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Amount"
           },
           "rate_book_id": {
             "title": "Rate Book Id",
             "type": "integer"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
           },
           "scale_from": {
             "anyOf": [
@@ -9330,7 +9798,6 @@
         },
         "required": [
           "charge_component_code",
-          "rate_amount",
           "id",
           "rate_book_id"
         ],
@@ -9419,6 +9886,11 @@
             ],
             "title": "Equipment Type"
           },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
           "maximum_amount": {
             "anyOf": [
               {
@@ -9471,6 +9943,11 @@
             ],
             "title": "Origin Code"
           },
+          "priority": {
+            "default": 100,
+            "title": "Priority",
+            "type": "integer"
+          },
           "rate_amount": {
             "anyOf": [
               {
@@ -9479,9 +9956,27 @@
               {
                 "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
+              },
+              {
+                "type": "null"
               }
             ],
             "title": "Rate Amount"
+          },
+          "rate_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Percent"
           },
           "scale_from": {
             "anyOf": [
@@ -9550,8 +10045,7 @@
           }
         },
         "required": [
-          "charge_component_code",
-          "rate_amount"
+          "charge_component_code"
         ],
         "title": "RateBookEntryPayload",
         "type": "object"
@@ -9589,10 +10083,26 @@
       },
       "RateBookPayload": {
         "properties": {
+          "calculation_basis": {
+            "default": "FLAT",
+            "title": "Calculation Basis",
+            "type": "string"
+          },
           "currency": {
             "default": "USD",
             "title": "Currency",
             "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "entries": {
             "items": {
@@ -9601,6 +10111,11 @@
             "title": "Entries",
             "type": "array"
           },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
           "rate_book_code": {
             "title": "Rate Book Code",
             "type": "string"
@@ -9608,6 +10123,35 @@
           "rate_book_name": {
             "title": "Rate Book Name",
             "type": "string"
+          },
+          "status": {
+            "default": "DRAFT",
+            "title": "Status",
+            "type": "string"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
           }
         },
         "required": [
@@ -9719,6 +10263,28 @@
             ],
             "title": "Default Rate Book Id"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "external_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Reference"
+          },
           "forwarder_id": {
             "anyOf": [
               {
@@ -9740,6 +10306,53 @@
             },
             "title": "Lines",
             "type": "array"
+          },
+          "margin_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Type"
+          },
+          "margin_value": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Value"
+          },
+          "minimum_margin_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Margin Amount"
+          },
+          "minimum_margin_percent": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Margin Percent"
           },
           "partner_id": {
             "anyOf": [
@@ -9949,6 +10562,28 @@
             ],
             "title": "Default Rate Book Id"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "external_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Reference"
+          },
           "forwarder_id": {
             "anyOf": [
               {
@@ -9966,6 +10601,62 @@
             },
             "title": "Lines",
             "type": "array"
+          },
+          "margin_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Type"
+          },
+          "margin_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Value"
+          },
+          "minimum_margin_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Margin Amount"
+          },
+          "minimum_margin_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Margin Percent"
           },
           "partner_id": {
             "anyOf": [
@@ -10057,6 +10748,28 @@
       },
       "RateContractUpdate": {
         "properties": {
+          "carrier_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Id"
+          },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
           "contract_name": {
             "anyOf": [
               {
@@ -10068,6 +10781,32 @@
             ],
             "title": "Contract Name"
           },
+          "contract_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Number"
+          },
+          "contract_role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PAYER",
+                  "PAYEE"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Role"
+          },
           "currency": {
             "anyOf": [
               {
@@ -10078,6 +10817,17 @@
               }
             ],
             "title": "Currency"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
           },
           "default_calculation_template_id": {
             "anyOf": [
@@ -10101,6 +10851,39 @@
             ],
             "title": "Default Rate Book Id"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "external_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Reference"
+          },
+          "forwarder_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forwarder Id"
+          },
           "lines": {
             "anyOf": [
               {
@@ -10115,6 +10898,106 @@
             ],
             "title": "Lines"
           },
+          "margin_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Type"
+          },
+          "margin_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin Value"
+          },
+          "minimum_margin_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Margin Amount"
+          },
+          "minimum_margin_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Margin Percent"
+          },
+          "partner_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partner Id"
+          },
+          "party_role_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Party Role Ref"
+          },
+          "payee_party_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payee Party Ref"
+          },
+          "payer_party_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payer Party Ref"
+          },
           "status": {
             "anyOf": [
               {
@@ -10125,6 +11008,41 @@
               }
             ],
             "title": "Status"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          },
+          "vendor_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor Id"
           }
         },
         "title": "RateContractUpdate",
@@ -19424,6 +20342,38 @@
                 }
               ],
               "title": "Active Only"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "calculation_basis",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Calculation Basis"
             }
           },
           {

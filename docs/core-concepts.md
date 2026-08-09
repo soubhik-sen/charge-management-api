@@ -129,12 +129,13 @@ The API term is **rate book**. A rate book is a named collection of **rate book 
 
 Each entry connects a charge component to an amount and optional applicability conditions:
 
-- Currency and calculation basis.
+- Fixed `rate_amount` or percentage `rate_percent`, currency, and calculation basis.
 - Origin and destination.
 - Transport mode and equipment type.
 - Commodity and service level.
 - Scale range, minimum, and maximum.
 - Validity dates.
+- Priority and active state.
 - Optional allocation profile/version.
 - Optional calculation profile, which overrides the component default for that rate row.
 
@@ -154,6 +155,10 @@ A rate book named `EU_OCEAN_2026` could contain:
 3. Open the full book with `GET /rate-books/{id}/workspace`.
 4. Replace/update workspace data with `PUT /rate-books/{id}/workspace`.
 5. Reference the rate book from a contract header, contract line, or calculation-template step.
+
+The built-in rater selects at most one rate entry for each applicable contract line. It first removes inactive, out-of-date, out-of-scale, and dimension-mismatched rows. It then chooses the most specific row, followed by the lowest numeric priority, the highest matching `scale_from`, and finally the stable row ID. This makes overlapping rate-table rows deterministic. Header `valid_from`/`valid_to` and `is_active` are applied before entry selection; entry date fields retain the API names `validity_from`/`validity_to` for backward compatibility.
+
+Use basis `PERCENT` with `rate_percent`. Use `rate_amount` for fixed and quantity-based rows. `CHARGEABLE_WEIGHT` uses quote `chargeable_weight` for rating.
 
 A rate book defines reusable prices. A contract determines the parties and commercial scope under which those prices apply.
 
@@ -239,6 +244,7 @@ The names describe the line relationship in the charge model, not hardcoded acco
 - Contract lines that narrow applicability by lane, mode, equipment, commodity, service level, or dates.
 - Optional line-level overrides for rate book, template, and allocation profile.
 - Optional line-level calculation-profile override.
+- Line number, active state, priority, charge context, and an independent validity window.
 
 ### Lifecycle And Use
 
@@ -249,6 +255,8 @@ The names describe the line relationship in the charge model, not hardcoded acco
 5. Ensure a header or line references a rate book or calculation template.
 6. Release with `POST /contracts/{id}/release`.
 7. Released matching contracts become candidates during quote contract determination and rating.
+
+Contract header validity and line validity use the quote pricing date: `requested_service_date`, then quote `valid_from`, then the current date. A scoped contract value must equal the quote value; a missing quote value does not act as a wildcard. Empty contracts and contracts whose lines produce no applicable rate row do not create zero-value quote options.
 
 Use contracts for negotiated applicability and party context. Do not place customer-specific scope directly in a shared rate book unless that rate book is intentionally customer-specific.
 
@@ -357,7 +365,7 @@ The business-date profile chooses the date; the FX resolver chooses the rate for
 
 ### What It Is
 
-A quote request is the demand or RFQ context to price. It can carry lane, transport mode, equipment, service level, commercial scope, quantity, containers, packages, weight, volume, requested date, validity, expiry, and host-application context.
+A quote request is the demand or RFQ context to price. It can carry a caller-supplied or generated request number, lane, transport mode, equipment, service level, commercial scope, quantity, containers, packages, gross weight, chargeable weight, volume, requested date, validity, expiry, typed charge context, and general host-application context.
 
 ### Lifecycle And Use
 
@@ -430,6 +438,7 @@ A charge line records one component amount and its audit context:
 - Line provenance such as `MANUAL`, legacy `DIRECT`, or `QUOTE`.
 - Calculation audit JSON.
 - Pinned calculation profile/version plus configuration and factor-input snapshots.
+- Explicit calculation/allocation mode, status, configuration snapshot, lock timestamp, and customer-visibility state.
 
 `POSTING` lines count toward totals. `CALCULATION` lines can retain intermediate/audit rows without changing commercial totals.
 
@@ -450,13 +459,14 @@ Quote-controlled lines remain tied to the awarded outcome. Direct-document lines
 
 ### What It Is
 
-An invoice records actual supplier or customer charges against a charge document. Matching compares invoice lines to expected charge lines by `charge_component_code`.
+An invoice records actual supplier or customer charges against a charge document. Matching aggregates repeated invoice and expected lines by `charge_component_code`. Supplier invoices compare against `PAYER` lines; customer invoices compare against `PAYEE` lines. Only `POSTING` document lines contribute to the expected amount.
 
 ### Match Results
 
 - `MATCHED`: invoice and expected amount differ by no more than `0.01`.
 - `VARIANCE`: the component exists but the amount differs.
 - `UNEXPECTED`: the invoice component does not exist on the charge document.
+- `MISSING`: an expected posting component is absent from the invoice.
 
 ### How To Use It
 

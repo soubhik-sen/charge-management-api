@@ -1456,6 +1456,11 @@ class ChargeManagementService:
         return alias
 
     def create_rate_book(self, payload: RateBookPayload) -> RateBook:
+        if any(
+            row.rate_book_code.upper() == payload.rate_book_code.upper()
+            for row in self.repository.rate_books.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rate book code already exists")
         rate_book_id = self.repository.next_id("rate_book")
         entries: list[RateBookEntry] = []
         for entry in payload.entries:
@@ -1484,10 +1489,11 @@ class ChargeManagementService:
                 )
             )
         row = RateBook(
+            **payload.model_dump(exclude={"entries", "rate_book_code", "currency", "status"}),
             id=rate_book_id,
-            rate_book_code=payload.rate_book_code,
-            rate_book_name=payload.rate_book_name,
-            currency=payload.currency,
+            rate_book_code=payload.rate_book_code.strip().upper(),
+            currency=payload.currency.strip().upper(),
+            status=payload.status.strip().upper(),
             entries=entries,
         )
         self.repository.rate_books[row.id] = row
@@ -1498,12 +1504,22 @@ class ChargeManagementService:
         *,
         search: str | None = None,
         active_only: bool | None = None,
+        status_filter: str | None = None,
+        calculation_basis: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> RateBookListResponse:
         rows = list(self.repository.rate_books.values())
         if active_only is not None:
             rows = [row for row in rows if row.is_active == bool(active_only)]
+        if status_filter:
+            rows = [row for row in rows if row.status.upper() == status_filter.upper()]
+        if calculation_basis:
+            rows = [
+                row
+                for row in rows
+                if (row.calculation_basis or "").upper() == calculation_basis.upper()
+            ]
         if search:
             normalized = search.strip().upper()
             rows = [
@@ -1533,6 +1549,11 @@ class ChargeManagementService:
         payload: RateBookPayload,
     ) -> RateBookWorkspace:
         row = self._require_rate_book(rate_book_id)
+        if any(
+            other.id != row.id and other.rate_book_code.upper() == payload.rate_book_code.upper()
+            for other in self.repository.rate_books.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rate book code already exists")
         entries: list[RateBookEntry] = []
         for entry in payload.entries:
             self._require_component(entry.charge_component_code)
@@ -1559,9 +1580,15 @@ class ChargeManagementService:
                     allocation_profile_version_id=allocation_profile_version_id,
                 )
             )
-        row.rate_book_code = payload.rate_book_code
+        row.rate_book_code = payload.rate_book_code.strip().upper()
         row.rate_book_name = payload.rate_book_name
-        row.currency = payload.currency
+        row.description = payload.description
+        row.currency = payload.currency.strip().upper()
+        row.valid_from = payload.valid_from
+        row.valid_to = payload.valid_to
+        row.calculation_basis = payload.calculation_basis
+        row.status = payload.status.strip().upper()
+        row.is_active = payload.is_active
         row.entries = entries
         return self.get_rate_book_workspace(rate_book_id)
 
@@ -1657,15 +1684,25 @@ class ChargeManagementService:
         return self.get_calculation_template_workspace(calculation_template_id)
 
     def create_contract(self, payload: RateContractPayload) -> RateContract:
+        if any(
+            row.contract_number.upper() == payload.contract_number.upper()
+            for row in self.repository.contracts.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contract number already exists")
         contract_id = self.repository.next_id("contract")
         if payload.default_rate_book_id is not None:
             self._require_rate_book(payload.default_rate_book_id)
         if payload.default_calculation_template_id is not None:
             self._require_calculation_template(payload.default_calculation_template_id)
         lines = [
-            self._contract_line_from_payload(contract_id=contract_id, line_payload=line)
-            for line in payload.lines
+            self._contract_line_from_payload(
+                contract_id=contract_id,
+                line_payload=line,
+                default_line_number=index,
+            )
+            for index, line in enumerate(payload.lines, start=1)
         ]
+        self._validate_contract_line_numbers(lines)
         for line in lines:
             self._require_component(line.charge_component_code)
             if line.rate_book_id is not None:
@@ -1737,18 +1774,30 @@ class ChargeManagementService:
     ) -> ContractWorkspace:
         contract = self._require_contract(contract_id)
         updates = payload.model_dump(exclude_unset=True)
+        if payload.contract_number is not None and any(
+            other.id != contract.id and other.contract_number.upper() == payload.contract_number.upper()
+            for other in self.repository.contracts.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contract number already exists")
         if payload.default_rate_book_id is not None:
             self._require_rate_book(payload.default_rate_book_id)
         if payload.default_calculation_template_id is not None:
             self._require_calculation_template(payload.default_calculation_template_id)
         line_payloads = updates.pop("lines", None)
         for key, value in updates.items():
+            if key in {"contract_number", "currency", "status"} and value is not None:
+                value = str(value).strip().upper()
             setattr(contract, key, value)
         if line_payloads is not None:
             next_lines = [
-                self._contract_line_from_payload(contract_id=contract.id, line_payload=line)
-                for line in payload.lines or []
+                self._contract_line_from_payload(
+                    contract_id=contract.id,
+                    line_payload=line,
+                    default_line_number=index,
+                )
+                for index, line in enumerate(payload.lines or [], start=1)
             ]
+            self._validate_contract_line_numbers(next_lines)
             for line in next_lines:
                 self._require_component(line.charge_component_code)
                 if line.rate_book_id is not None:
@@ -1756,6 +1805,11 @@ class ChargeManagementService:
                 if line.calculation_template_id is not None:
                     self._require_calculation_template(line.calculation_template_id)
             contract.lines = next_lines
+        if contract.valid_from is not None and contract.valid_to is not None and contract.valid_from > contract.valid_to:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="valid_from must be less than or equal to valid_to",
+            )
         contract.updated_at = utcnow()
         return self.get_contract_workspace(contract_id)
 
@@ -1788,9 +1842,17 @@ class ChargeManagementService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Quotation is disabled by charge management setup; create a direct charge document instead.",
             )
+        if payload.request_number and any(
+            row.request_number
+            and row.request_number.upper() == payload.request_number.upper()
+            for row in self.repository.quote_requests.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote request number already exists")
+        quote_request_id = self.repository.next_id("quote_request")
         row = QuoteRequest(
-            **payload.model_dump(),
-            id=self.repository.next_id("quote_request"),
+            **payload.model_dump(exclude={"request_number"}),
+            id=quote_request_id,
+            request_number=(payload.request_number.strip().upper() if payload.request_number else f"Q-{quote_request_id:08d}"),
             quotation_policy_snapshot=self.repository.quotation_policy,  # type: ignore[arg-type]
         )
         self.repository.quote_requests[row.id] = row
@@ -1956,6 +2018,18 @@ class ChargeManagementService:
                     )
             if field == "currency" and value is not None:
                 value = str(value).upper()
+            if field == "request_number" and value is not None:
+                value = str(value).strip().upper()
+                if any(
+                    other.id != quote.id
+                    and other.request_number
+                    and other.request_number.upper() == value
+                    for other in self.repository.quote_requests.values()
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Quote request number already exists",
+                    )
             setattr(quote, field, value)
         quote.updated_at = utcnow()
         return self.get_quote_request_workspace(quote.id)
@@ -1994,11 +2068,15 @@ class ChargeManagementService:
             self._delete_contract_options_for_quote(quote.id)
             for payee_contract in payee_contracts:
                 payee_lines = self._rate_contract(quote, payee_contract, relationship_role="PAYEE")
+                if not payee_lines:
+                    continue
                 self._create_customer_pricing_option(
                     quote=quote,
                     payee_contract=payee_contract,
                     payee_lines=payee_lines,
                 )
+            if not self._quote_options_for_request(quote.id):
+                raise HTTPException(status_code=422, detail="No active rate entry matched the quote request.")
             quote.status = "RATED"
             quote.updated_at = utcnow()
             return RateResponse(quote_request=quote, options=self._quote_options_for_request(quote.id))
@@ -2019,6 +2097,8 @@ class ChargeManagementService:
         for payer_contract in payer_contracts:
             payee_contract = payee_contracts[0] if payee_contracts else None
             payer_lines = self._rate_contract(quote, payer_contract, relationship_role="PAYER")
+            if not payer_lines:
+                continue
             payee_lines = (
                 self._rate_contract(quote, payee_contract, relationship_role="PAYEE")
                 if payee_contract is not None
@@ -2032,6 +2112,8 @@ class ChargeManagementService:
                 payee_lines=payee_lines,
             )
             options.append(option)
+        if not options:
+            raise HTTPException(status_code=422, detail="No active rate entry matched the quote request.")
         quote.status = "RATED"
         quote.updated_at = utcnow()
         return RateResponse(quote_request=quote, options=self._quote_options_for_request(quote.id))
@@ -2106,10 +2188,16 @@ class ChargeManagementService:
                     currency=line.currency,
                     quantity_uom=line.quantity_uom,
                     calculation_profile_version_id=line.calculation_profile_version_id,
+                    calculation_mode=line.calculation_mode,
+                    calculation_status=line.calculation_status,
                     calculation_config_snapshot_json=line.calculation_config_snapshot_json,
                     calculation_input_snapshot_json=line.calculation_input_snapshot_json,
                     allocation_profile_id=line.allocation_profile_id,
                     allocation_profile_version_id=line.allocation_profile_version_id,
+                    allocation_mode=line.allocation_mode,
+                    allocation_status=line.allocation_status,
+                    allocation_config_snapshot_json=line.allocation_config_snapshot_json,
+                    is_customer_visible=line.is_customer_visible,
                     pinned_allocation_snapshot_json=line.pinned_allocation_snapshot_json,
                     effective_allocation_snapshot_json=line.effective_allocation_snapshot_json,
                     allocation_basis=line.allocation_basis
@@ -2365,6 +2453,8 @@ class ChargeManagementService:
                     or effective_quantity_uom
                 ),
                 calculation_profile_version_id=calculation_profile_version_id,
+                calculation_mode="PROFILE" if calculation_profile_version_id is not None else "DIRECT",
+                calculation_status="CALCULATED",
                 calculation_config_snapshot_json=calculation_config_snapshot_json,
                 calculation_input_snapshot_json=calculation_input_snapshot_json,
                 source_currency=line_payload.source_currency.upper() if line_payload.source_currency else None,
@@ -2389,6 +2479,9 @@ class ChargeManagementService:
                 ),
                 allocation_profile_id=allocation_profile_id,
                 allocation_profile_version_id=allocation_profile_version_id,
+                allocation_mode="PROFILE" if allocation_profile_version_id is not None else "NONE",
+                allocation_status="CONFIGURED" if allocation_profile_version_id is not None else "NOT_REQUIRED",
+                allocation_config_snapshot_json=effective_allocation_snapshot_json,
                 pinned_allocation_snapshot_json=pinned_allocation_snapshot_json,
                 effective_allocation_snapshot_json=effective_allocation_snapshot_json,
                 charge_text_snapshot=_clean_optional(line_payload.charge_text_snapshot),
@@ -2564,6 +2657,12 @@ class ChargeManagementService:
 
     def create_invoice(self, payload: ChargeInvoiceCreate) -> ChargeInvoice:
         document = self._require_document(payload.charge_document_id)
+        if any(
+            row.charge_document_id == payload.charge_document_id
+            and row.invoice_number.upper() == payload.invoice_number.upper()
+            for row in self.repository.invoices.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice already exists")
         total = money(sum((Decimal(str(line.get("amount", "0"))) for line in payload.lines), Decimal("0")))
         invoice = ChargeInvoice(
             **payload.model_dump(),
@@ -2641,6 +2740,14 @@ class ChargeManagementService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Invoice cannot be updated after its charge document is approved, exported, or reversed.",
             )
+        next_number = payload.invoice_number or invoice.invoice_number
+        if any(
+            row.id != invoice.id
+            and row.charge_document_id == invoice.charge_document_id
+            and row.invoice_number.upper() == next_number.upper()
+            for row in self.repository.invoices.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice already exists")
         if payload.invoice_number is not None:
             invoice.invoice_number = payload.invoice_number
         if payload.invoice_type is not None:
@@ -2669,13 +2776,22 @@ class ChargeManagementService:
             if result.invoice_id == invoice.id:
                 del self.repository.match_results[result_id]
 
-        expected_by_component = {line.charge_component_code: line for line in document.lines}
-        results: list[ChargeMatchResult] = []
+        expected_role = "PAYER" if invoice.invoice_type == "SUPPLIER" else "PAYEE"
+        expected_by_component: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        expected_line_id_by_component: dict[str, int] = {}
+        for line in document.lines:
+            if line.line_role != "POSTING" or line.relationship_role != expected_role:
+                continue
+            expected_by_component[line.charge_component_code] += line.expected_amount
+            expected_line_id_by_component.setdefault(line.charge_component_code, line.id)
+        invoice_by_component: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         for raw_line in invoice.lines:
             component_code = str(raw_line.get("charge_component_code") or "").strip()
-            invoice_amount = money(raw_line.get("amount"))
-            expected_line = expected_by_component.get(component_code)
-            expected_amount = money(expected_line.expected_amount if expected_line else 0)
+            invoice_by_component[component_code] += money(raw_line.get("amount"))
+        results: list[ChargeMatchResult] = []
+        for component_code in sorted(set(expected_by_component) | set(invoice_by_component)):
+            invoice_amount = money(invoice_by_component.get(component_code, Decimal("0")))
+            expected_amount = money(expected_by_component.get(component_code, Decimal("0")))
             variance = money(invoice_amount - expected_amount)
             variance_percent = (
                 money((variance / expected_amount) * Decimal("100"))
@@ -2684,14 +2800,18 @@ class ChargeManagementService:
             )
             match_status_value = (
                 "UNEXPECTED"
-                if expected_line is None
-                else ("MATCHED" if abs(variance) <= Decimal("0.01") else "VARIANCE")
+                if component_code not in expected_by_component
+                else (
+                    "MISSING"
+                    if component_code not in invoice_by_component
+                    else ("MATCHED" if abs(variance) <= Decimal("0.01") else "VARIANCE")
+                )
             )
             result = ChargeMatchResult(
                 id=self.repository.next_id("match_result"),
                 invoice_id=invoice.id,
                 charge_document_id=document.id,
-                charge_line_id=expected_line.id if expected_line else None,
+                charge_line_id=expected_line_id_by_component.get(component_code),
                 charge_component_code=component_code,
                 expected_amount=expected_amount,
                 invoice_amount=invoice_amount,
@@ -3182,78 +3302,92 @@ class ChargeManagementService:
         relationship_role: str,
     ) -> list[QuoteOptionLine]:
         lines: list[QuoteOptionLine] = []
-        for contract_line in contract.lines:
+        pricing_date = self._quote_pricing_date(quote)
+        for contract_line in sorted(
+            contract.lines,
+            key=lambda item: (item.line_number if item.line_number is not None else 999999, item.priority, item.id),
+        ):
+            if not contract_line.is_active or not self._date_is_valid(
+                contract_line.valid_from,
+                contract_line.valid_to,
+                pricing_date,
+            ):
+                continue
+            if not self._entry_matches_quote(contract_line.model_dump(), quote):
+                continue
             rate_book = self.repository.rate_books.get(
                 contract_line.rate_book_id or contract.default_rate_book_id or 0
             )
-            if rate_book is None:
+            if (
+                rate_book is None
+                or not rate_book.is_active
+                or rate_book.status.upper() in {"INACTIVE", "RETIRED"}
+                or not self._date_is_valid(rate_book.valid_from, rate_book.valid_to, pricing_date)
+            ):
                 continue
-            for entry in rate_book.entries:
-                if entry.charge_component_code != contract_line.charge_component_code:
-                    continue
-                if not self._entry_matches_quote(entry.model_dump(), quote):
-                    continue
-                component = self._require_component(entry.charge_component_code)
-                (
-                    allocation_profile_id,
-                    allocation_profile_version_id,
-                    pinned_allocation_snapshot_json,
-                    effective_allocation_snapshot_json,
-                ) = self._resolve_effective_allocation(
-                    component=component,
-                    allocation_profile_id=contract_line.allocation_profile_id
-                    or entry.allocation_profile_id,
-                    allocation_profile_version_id=contract_line.allocation_profile_version_id
-                    or entry.allocation_profile_version_id,
+            entry = self._best_rate_entry(rate_book, contract_line, quote)
+            if entry is None:
+                continue
+            component = self._require_component(entry.charge_component_code)
+            (
+                allocation_profile_id,
+                allocation_profile_version_id,
+                pinned_allocation_snapshot_json,
+                effective_allocation_snapshot_json,
+            ) = self._resolve_effective_allocation(
+                component=component,
+                allocation_profile_id=contract_line.allocation_profile_id or entry.allocation_profile_id,
+                allocation_profile_version_id=contract_line.allocation_profile_version_id
+                or entry.allocation_profile_version_id,
+            )
+            (
+                calculation_profile_version_id,
+                calculation_config_snapshot_json,
+                calculation_input_snapshot_json,
+                rate_amount,
+                quantity,
+                calculation_quantity_uom,
+                amount,
+            ) = self._resolve_effective_quote_calculation(
+                component=component,
+                quote=quote,
+                entry=entry,
+                contract_line=contract_line,
+            )
+            lines.append(
+                QuoteOptionLine(
+                    id=self.repository.next_id("quote_option_line"),
+                    quote_option_id=0,
+                    relationship_role=relationship_role,  # type: ignore[arg-type]
+                    payer_party_ref=contract.payer_party_ref,
+                    payee_party_ref=contract.payee_party_ref,
+                    party_role_ref=contract.party_role_ref,
+                    charge_component_code=entry.charge_component_code,
+                    description=component.component_name,
+                    amount=amount,
+                    currency=entry.currency or quote.currency,
+                    basis=entry.basis,
+                    rate_amount=rate_amount,
+                    quantity=quantity,
+                    quantity_uom=calculation_quantity_uom
+                    or self._effective_allocation_value(effective_allocation_snapshot_json, "default_quantity_uom"),
+                    calculation_profile_version_id=calculation_profile_version_id,
+                    calculation_mode="PROFILE" if calculation_profile_version_id is not None else "DIRECT",
+                    calculation_status="CALCULATED",
+                    calculation_config_snapshot_json=calculation_config_snapshot_json,
+                    calculation_input_snapshot_json=calculation_input_snapshot_json,
+                    allocation_basis=self._effective_allocation_basis(effective_allocation_snapshot_json),
+                    allocation_profile_id=allocation_profile_id,
+                    allocation_profile_version_id=allocation_profile_version_id,
+                    allocation_mode="PROFILE" if allocation_profile_version_id is not None else "NONE",
+                    allocation_status="CONFIGURED" if allocation_profile_version_id is not None else "NOT_REQUIRED",
+                    allocation_config_snapshot_json=effective_allocation_snapshot_json,
+                    pinned_allocation_snapshot_json=pinned_allocation_snapshot_json,
+                    effective_allocation_snapshot_json=effective_allocation_snapshot_json,
+                    source_contract_id=contract.id,
+                    source_rate_book_id=rate_book.id,
                 )
-                (
-                    calculation_profile_version_id,
-                    calculation_config_snapshot_json,
-                    calculation_input_snapshot_json,
-                    rate_amount,
-                    quantity,
-                    calculation_quantity_uom,
-                    amount,
-                ) = self._resolve_effective_quote_calculation(
-                    component=component,
-                    quote=quote,
-                    entry=entry,
-                    contract_line=contract_line,
-                )
-                lines.append(
-                    QuoteOptionLine(
-                        id=self.repository.next_id("quote_option_line"),
-                        quote_option_id=0,
-                        relationship_role=relationship_role,  # type: ignore[arg-type]
-                        payer_party_ref=contract.payer_party_ref,
-                        payee_party_ref=contract.payee_party_ref,
-                        party_role_ref=contract.party_role_ref,
-                        charge_component_code=entry.charge_component_code,
-                        description=component.component_name,
-                        amount=amount,
-                        currency=entry.currency or quote.currency,
-                        basis=entry.basis,
-                        rate_amount=rate_amount,
-                        quantity=quantity,
-                        quantity_uom=calculation_quantity_uom
-                        or self._effective_allocation_value(
-                            effective_allocation_snapshot_json,
-                            "default_quantity_uom",
-                        ),
-                        calculation_profile_version_id=calculation_profile_version_id,
-                        calculation_config_snapshot_json=calculation_config_snapshot_json,
-                        calculation_input_snapshot_json=calculation_input_snapshot_json,
-                        allocation_basis=self._effective_allocation_basis(
-                            effective_allocation_snapshot_json
-                        ),
-                        allocation_profile_id=allocation_profile_id,
-                        allocation_profile_version_id=allocation_profile_version_id,
-                        pinned_allocation_snapshot_json=pinned_allocation_snapshot_json,
-                        effective_allocation_snapshot_json=effective_allocation_snapshot_json,
-                        source_contract_id=contract.id,
-                        source_rate_book_id=rate_book.id,
-                    )
-                )
+            )
         return lines
 
     def _derive_payee_lines_from_margin(
@@ -3299,18 +3433,22 @@ class ChargeManagementService:
 
     def _calculate_amount(self, entry: RateBookEntry, quote: QuoteRequest) -> Decimal:
         basis = entry.basis.upper()
-        if basis == "WEIGHT":
-            amount = entry.rate_amount * (quote.gross_weight or Decimal("0"))
+        rate_amount = dec(entry.rate_amount)
+        if basis in {"PERCENT", "PERCENTAGE"}:
+            amount = dec(entry.rate_percent)
+        elif basis in {"WEIGHT", "CHARGEABLE_WEIGHT"}:
+            quantity = quote.chargeable_weight if basis == "CHARGEABLE_WEIGHT" else quote.gross_weight
+            amount = rate_amount * max(dec(quantity), Decimal("1"))
         elif basis == "VOLUME":
-            amount = entry.rate_amount * (quote.gross_volume_cbm or Decimal("0"))
-        elif basis == "CONTAINER":
-            amount = entry.rate_amount * (quote.container_count or Decimal("0"))
-        elif basis == "PACKAGE":
-            amount = entry.rate_amount * (quote.package_count or Decimal("0"))
-        elif basis == "PERCENTAGE":
-            amount = entry.rate_amount
+            amount = rate_amount * max(dec(quote.gross_volume_cbm), Decimal("1"))
+        elif basis in {"CONTAINER", "PER_CONTAINER"}:
+            amount = rate_amount * max(dec(quote.container_count or quote.quantity), Decimal("1"))
+        elif basis in {"PACKAGE", "QUANTITY"}:
+            amount = rate_amount * max(dec(quote.package_count or quote.quantity), Decimal("1"))
+        elif basis == "PER_DAY":
+            amount = rate_amount * max(dec(quote.quantity), Decimal("1"))
         else:
-            amount = entry.rate_amount
+            amount = rate_amount
         if entry.minimum_amount is not None:
             amount = max(amount, entry.minimum_amount)
         if entry.maximum_amount is not None:
@@ -3332,17 +3470,17 @@ class ChargeManagementService:
             None,
         )
         if profile is None or version is None:
-            return None, None, None, dec(entry.rate_amount), Decimal("1"), None, self._calculate_amount(entry, quote)
+            return None, None, None, entry.rate_amount, Decimal("1"), None, self._calculate_amount(entry, quote)
         result = self._evaluate_calculation_profile(
             version,
-            rate_amount=entry.rate_amount,
+            rate_amount=entry.rate_amount if entry.rate_amount is not None else entry.rate_percent,
             context=self._calculation_context_for_quote(quote, version.application_level),
         )
         return (
             version_id,
             self._calculation_snapshot(profile, version),
             result["input_snapshot"],
-            dec(entry.rate_amount),
+            entry.rate_amount,
             result["quantity"],
             result["quantity_uom"],
             result["amount"],
@@ -3398,7 +3536,7 @@ class ChargeManagementService:
             "quantity": dec(quote.quantity),
             "weight": dec(quote.gross_weight),
             "volume": dec(quote.gross_volume_cbm),
-            "chargeable_weight": dec(quote.gross_weight),
+            "chargeable_weight": dec(quote.chargeable_weight or quote.gross_weight),
             "duration_hours": Decimal("0"),
             "duration_days": dec(quote.quantity),
             "target_count": dec(
@@ -3651,11 +3789,13 @@ class ChargeManagementService:
         }
 
     def _matching_contracts(self, quote: QuoteRequest, *, contract_role: str) -> list[RateContract]:
+        pricing_date = self._quote_pricing_date(quote)
         return [
             contract
             for contract in self.repository.contracts.values()
             if contract.contract_role == contract_role
             and contract.status == "RELEASED"
+            and self._date_is_valid(contract.valid_from, contract.valid_to, pricing_date)
             and self._contract_matches_quote(contract, quote)
         ]
 
@@ -3663,17 +3803,89 @@ class ChargeManagementService:
         for field in ("company_id", "customer_id", "vendor_id", "forwarder_id", "carrier_id"):
             expected = getattr(contract, field)
             actual = getattr(quote, field)
-            if expected is not None and actual is not None and expected != actual:
+            if expected is not None and expected != actual:
                 return False
-        return any(self._entry_matches_quote(line.model_dump(), quote) for line in contract.lines)
+        pricing_date = self._quote_pricing_date(quote)
+        return any(
+            line.is_active
+            and self._date_is_valid(line.valid_from, line.valid_to, pricing_date)
+            and self._entry_matches_quote(line.model_dump(), quote)
+            for line in contract.lines
+        )
 
     def _entry_matches_quote(self, row: dict[str, Any], quote: QuoteRequest) -> bool:
         for field in ("origin_code", "destination_code", "mode", "equipment_type", "commodity_code", "service_level"):
             expected = row.get(field)
             actual = getattr(quote, field)
-            if expected and actual and str(expected).upper() != str(actual).upper():
+            if expected and (actual is None or str(expected).upper() != str(actual).upper()):
                 return False
+        expected_context = row.get("charge_context")
+        if expected_context and (
+            quote.charge_context is None
+            or str(expected_context).upper() != quote.charge_context.upper()
+        ):
+            return False
         return True
+
+    @staticmethod
+    def _quote_pricing_date(quote: QuoteRequest) -> date:
+        return quote.requested_service_date or quote.valid_from or date.today()
+
+    @staticmethod
+    def _date_is_valid(valid_from: date | None, valid_to: date | None, value: date) -> bool:
+        return (valid_from is None or valid_from <= value) and (valid_to is None or value <= valid_to)
+
+    def _best_rate_entry(
+        self,
+        rate_book: RateBook,
+        contract_line: ContractLine,
+        quote: QuoteRequest,
+    ) -> RateBookEntry | None:
+        pricing_date = self._quote_pricing_date(quote)
+        scale_value = (
+            dec(quote.chargeable_weight)
+            or dec(quote.gross_weight)
+            or dec(quote.container_count)
+            or dec(quote.package_count)
+            or dec(quote.quantity)
+        )
+        candidates = [
+            entry
+            for entry in rate_book.entries
+            if entry.is_active
+            and entry.charge_component_code == contract_line.charge_component_code
+            and self._date_is_valid(entry.validity_from, entry.validity_to, pricing_date)
+            and (entry.scale_from is None or scale_value >= entry.scale_from)
+            and (entry.scale_to is None or scale_value <= entry.scale_to)
+            and self._entry_matches_quote(entry.model_dump(), quote)
+        ]
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda entry: (
+                -self._rate_entry_specificity(entry),
+                entry.priority,
+                -dec(entry.scale_from),
+                entry.id,
+            ),
+        )
+
+    @staticmethod
+    def _rate_entry_specificity(entry: RateBookEntry) -> int:
+        return sum(
+            value is not None
+            for value in (
+                entry.origin_code,
+                entry.destination_code,
+                entry.mode,
+                entry.equipment_type,
+                entry.commodity_code,
+                entry.service_level,
+                entry.scale_from,
+                entry.scale_to,
+            )
+        )
 
     def _ranking_key(self, option: QuoteOption) -> tuple[int, Decimal, Decimal, int]:
         return (
@@ -3883,7 +4095,13 @@ class ChargeManagementService:
             ],
         )
 
-    def _contract_line_from_payload(self, *, contract_id: int, line_payload: Any) -> ContractLine:
+    def _contract_line_from_payload(
+        self,
+        *,
+        contract_id: int,
+        line_payload: Any,
+        default_line_number: int,
+    ) -> ContractLine:
         allocation_profile_id, allocation_profile_version_id, _, _ = self._resolve_allocation_profile_reference(
             getattr(line_payload, "allocation_profile_id", None),
             getattr(line_payload, "allocation_profile_version_id", None),
@@ -3897,14 +4115,25 @@ class ChargeManagementService:
                     "allocation_profile_id",
                     "allocation_profile_version_id",
                     "calculation_profile_id",
+                    "line_number",
                 }
             ),
             id=self.repository.next_id("contract_line"),
             contract_id=contract_id,
+            line_number=line_payload.line_number or default_line_number,
             calculation_profile_id=calculation_profile_id,
             allocation_profile_id=allocation_profile_id,
             allocation_profile_version_id=allocation_profile_version_id,
         )
+
+    @staticmethod
+    def _validate_contract_line_numbers(lines: list[ContractLine]) -> None:
+        line_numbers = [line.line_number for line in lines]
+        if len(line_numbers) != len(set(line_numbers)):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Contract line numbers must be unique within a contract",
+            )
 
     def _resolve_effective_allocation(
         self,
@@ -4813,6 +5042,15 @@ class ChargeManagementService:
         return None
 
     def _line_processing_blocker(self, line: ChargeLine) -> str | None:
+        for state_value, label in (
+            (line.calculation_status, "calculation"),
+            (line.allocation_status, "allocation"),
+        ):
+            normalized = str(state_value or "").strip().upper()
+            if normalized in {"PENDING", "PENDING_CONTEXT"}:
+                return f"Line {line.line_number or line.id} still has pending {label}."
+            if normalized == "FAILED":
+                return f"Line {line.line_number or line.id} has failed {label}."
         snapshot_specs = (
             (line.calculation_audit_json, "calculation"),
             (line.effective_allocation_snapshot_json, "allocation"),

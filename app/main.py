@@ -20,6 +20,11 @@ def create_app() -> FastAPI:
         prefix="/api/v1/charge-management",
         tags=["Charge Management"],
     )
+
+    @app.get("/health", tags=["Operations"], include_in_schema=False)
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     return app
 
 

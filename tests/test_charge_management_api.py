@@ -1109,7 +1109,12 @@ def test_rate_book_list_workspace_and_update_contract() -> None:
         json={
             "rate_book_code": "RB-OCEAN-001",
             "rate_book_name": "Updated ocean rates",
+            "description": "Effective 2026 ocean rates",
             "currency": "USD",
+            "valid_from": "2026-01-01",
+            "valid_to": "2026-12-31",
+            "calculation_basis": "PER_CONTAINER",
+            "status": "ACTIVE",
             "entries": [
                 {
                     "charge_component_code": "BASE_FREIGHT",
@@ -1125,7 +1130,15 @@ def test_rate_book_list_workspace_and_update_contract() -> None:
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["rate_book"]["rate_book_name"] == "Updated ocean rates"
+    assert updated.json()["rate_book"]["description"] == "Effective 2026 ocean rates"
+    assert updated.json()["rate_book"]["calculation_basis"] == "PER_CONTAINER"
     assert updated.json()["entries"][0]["rate_amount"] == "1750.00"
+    filtered = client.get(
+        "/api/v1/charge-management/rate-books?status=ACTIVE&calculation_basis=PER_CONTAINER",
+        headers=AUTH,
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 1
 
 
 def test_charge_document_line_calculation_audit_roundtrip() -> None:
@@ -1289,10 +1302,24 @@ def test_contract_release_requires_rate_source_line() -> None:
     updated = client.put(
         f"/api/v1/charge-management/contracts/{contract_id}/workspace",
         headers=AUTH,
-        json={"default_rate_book_id": rate_book_id},
+        json={
+            "description": "Reusable payer agreement",
+            "valid_from": "2026-01-01",
+            "valid_to": "2026-12-31",
+            "default_rate_book_id": rate_book_id,
+            "margin_type": "PERCENT",
+            "margin_value": "5",
+            "minimum_margin_amount": "25",
+            "minimum_margin_percent": "2",
+            "external_reference": "ERP-CONTRACT-42",
+        },
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["contract"]["default_rate_book_id"] == rate_book_id
+    assert updated.json()["contract"]["description"] == "Reusable payer agreement"
+    assert updated.json()["contract"]["margin_value"] == "5"
+    assert updated.json()["contract"]["external_reference"] == "ERP-CONTRACT-42"
+    assert updated.json()["contract"]["lines"][0]["line_number"] == 1
     assert updated.json()["contract"]["lines"][0]["rate_book_id"] is None
 
     released = client.post(
@@ -2873,6 +2900,223 @@ def test_openapi_exposes_core_paths() -> None:
     assert "calculation_config_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "calculation_input_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
     assert "pinned_allocation_snapshot_json" in contract["components"]["schemas"]["ChargeLine"]["properties"]
+
+
+def test_rating_selects_one_active_valid_specific_rate_entry() -> None:
+    rate_book = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RB-DETERMINISTIC",
+            "rate_book_name": "Deterministic rates",
+            "description": "Winner selection regression fixture",
+            "status": "ACTIVE",
+            "valid_from": "2026-01-01",
+            "valid_to": "2026-12-31",
+            "entries": [
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_amount": "900",
+                    "basis": "SHIPMENT",
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "is_active": False,
+                },
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_amount": "800",
+                    "basis": "SHIPMENT",
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "validity_to": "2025-12-31",
+                },
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_amount": "100",
+                    "basis": "SHIPMENT",
+                    "priority": 1,
+                },
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_amount": "200",
+                    "basis": "SHIPMENT",
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "scale_from": "0",
+                    "scale_to": "1000",
+                    "priority": 200,
+                },
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_amount": "300",
+                    "basis": "SHIPMENT",
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "scale_from": "500",
+                    "scale_to": "1000",
+                    "priority": 200,
+                },
+            ],
+        },
+    )
+    assert rate_book.status_code == 201, rate_book.text
+    assert rate_book.json()["description"] == "Winner selection regression fixture"
+
+    contract_id = _create_contract("PAYEE-DETERMINISTIC", "PAYEE", rate_book.json()["id"])
+    released = client.post(
+        f"/api/v1/charge-management/contracts/{contract_id}/release",
+        headers=AUTH,
+    )
+    assert released.status_code == 200, released.text
+
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BRSSZ",
+            "destination_code": "USNYC",
+            "mode": "OCEAN",
+            "requested_service_date": "2026-06-01",
+            "gross_weight": "650",
+            "chargeable_weight": "700",
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    assert quote.json()["request_number"].startswith("Q-")
+    _submit_quote(quote.json()["id"])
+
+    rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote.json()['id']}/rate",
+        headers=AUTH,
+    )
+    assert rated.status_code == 200, rated.text
+    assert len(rated.json()["options"]) == 1
+    assert len(rated.json()["options"][0]["lines"]) == 1
+    assert rated.json()["options"][0]["lines"][0]["amount"] == "300.00"
+    assert rated.json()["options"][0]["lines"][0]["calculation_status"] == "CALCULATED"
+    assert rated.json()["options"][0]["lines"][0]["allocation_status"] == "NOT_REQUIRED"
+
+
+def test_percentage_rate_entry_can_be_persisted_and_rated() -> None:
+    invalid = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RB-PERCENT-INVALID",
+            "rate_book_name": "Invalid percentage rates",
+            "entries": [
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_amount": "12.5",
+                    "basis": "PERCENT",
+                }
+            ],
+        },
+    )
+    assert invalid.status_code == 422
+
+    rate_book = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RB-PERCENT",
+            "rate_book_name": "Percentage rates",
+            "entries": [
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_percent": "12.5",
+                    "basis": "PERCENT",
+                }
+            ],
+        },
+    )
+    assert rate_book.status_code == 201, rate_book.text
+    assert rate_book.json()["entries"][0]["rate_amount"] is None
+    assert rate_book.json()["entries"][0]["rate_percent"] == "12.5"
+    contract_id = _create_contract("PAYEE-PERCENT", "PAYEE", rate_book.json()["id"])
+    assert client.post(
+        f"/api/v1/charge-management/contracts/{contract_id}/release",
+        headers=AUTH,
+    ).status_code == 200
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BRSSZ",
+            "destination_code": "USNYC",
+            "mode": "OCEAN",
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    _submit_quote(quote.json()["id"])
+    rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote.json()['id']}/rate",
+        headers=AUTH,
+    )
+    assert rated.status_code == 200, rated.text
+    assert rated.json()["options"][0]["payee_total_amount"] == "12.50"
+
+
+def test_invoice_matching_aggregates_repeated_posting_components() -> None:
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYER",
+                    "line_role": "POSTING",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "100",
+                },
+                {
+                    "relationship_role": "PAYER",
+                    "line_role": "POSTING",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "200",
+                },
+                {
+                    "relationship_role": "PAYER",
+                    "line_role": "CALCULATION",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "500",
+                },
+            ],
+        },
+    )
+    assert document.status_code == 201, document.text
+    invoice = client.post(
+        "/api/v1/charge-management/invoices",
+        headers=AUTH,
+        json={
+            "charge_document_id": document.json()["id"],
+            "invoice_number": "INV-REPEATED-COMPONENT",
+            "invoice_type": "SUPPLIER",
+            "lines": [
+                {"charge_component_code": "BASE_FREIGHT", "amount": "100"},
+                {"charge_component_code": "BASE_FREIGHT", "amount": "200"},
+            ],
+        },
+    )
+    assert invoice.status_code == 201, invoice.text
+    matched = client.post(
+        f"/api/v1/charge-management/invoices/{invoice.json()['id']}/match",
+        headers=AUTH,
+    )
+    assert matched.status_code == 200, matched.text
+    assert len(matched.json()["results"]) == 1
+    assert matched.json()["results"][0]["expected_amount"] == "300.00"
+    assert matched.json()["results"][0]["invoice_amount"] == "300.00"
+    assert matched.json()["results"][0]["match_status"] == "MATCHED"
 
 
 def _submit_quote(quote_request_id: int) -> dict:

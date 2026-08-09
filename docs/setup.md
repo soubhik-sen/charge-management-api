@@ -74,6 +74,12 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 Swagger UI is at `http://127.0.0.1:8000/docs`. All charge-management operations require a bearer token.
 
+## Render
+
+`render.yaml` defines the API and PostgreSQL resources inside the `LEDGERFLOW` project and `Dev & QA` environment. Render's native database URL is normalized to SQLAlchemy's `postgresql+psycopg://` form at startup so the bundled psycopg 3 driver is used. The web service runs `alembic upgrade head` before starting Uvicorn and exposes an unauthenticated `/health` endpoint for platform monitoring.
+
+The Dev & QA Blueprint uses JWT mode with a platform-generated HS256 secret. Use the configured issuer `https://ledgerflow.dev-qa/` and audience `charge-management-api` when minting test tokens. Replace this with your production issuer and JWKS configuration before creating a production environment.
+
 ## Generate The Contract
 
 ```bash

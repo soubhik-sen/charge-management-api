@@ -49,6 +49,12 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "source",
         "target_scope_mode",
         "selected_target_references_json",
+        "calculation_mode",
+        "calculation_status",
+        "allocation_mode",
+        "allocation_status",
+        "allocation_config_snapshot_json",
+        "is_customer_visible",
     } <= line_columns
     assert line_column_metadata["status"]["nullable"] is False
     assert line_column_metadata["source"]["nullable"] is False
@@ -60,13 +66,23 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "calculation_profile_version_id",
         "calculation_config_snapshot_json",
         "calculation_input_snapshot_json",
+        "calculation_mode",
+        "calculation_status",
+        "allocation_mode",
+        "allocation_status",
+        "allocation_config_snapshot_json",
+        "is_customer_visible",
     } <= quote_line_columns
     component_columns = {column["name"] for column in inspector.get_columns("charge_component")}
     assert "default_calculation_profile_id" in component_columns
     contract_line_columns = {column["name"] for column in inspector.get_columns("charge_contract_line")}
-    assert "calculation_profile_id" in contract_line_columns
+    assert {"calculation_profile_id", "line_number", "priority", "is_active", "charge_context"} <= contract_line_columns
     rate_entry_columns = {column["name"] for column in inspector.get_columns("charge_rate_book_entry")}
-    assert "calculation_profile_id" in rate_entry_columns
+    assert {"calculation_profile_id", "rate_percent", "priority", "is_active"} <= rate_entry_columns
+    rate_book_columns = {column["name"] for column in inspector.get_columns("charge_rate_book")}
+    assert {"description", "valid_from", "valid_to", "calculation_basis", "status"} <= rate_book_columns
+    quote_request_columns = {column["name"] for column in inspector.get_columns("charge_quote_request")}
+    assert {"request_number", "chargeable_weight", "charge_context"} <= quote_request_columns
     with engine.connect() as connection:
         version = connection.execute(text("select version_num from alembic_version")).scalar_one()
         source_code = connection.execute(
@@ -75,7 +91,7 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         flat_count = connection.execute(
             text("select count(*) from charge_calculation_profile where profile_code = 'FLAT_AMOUNT'")
         ).scalar_one()
-    assert version == "0015_charge_line_target_scope_subset"
+    assert version == "0016_align_charge_runtime"
     assert source_code == "MANUAL"
     assert flat_count == 1
 

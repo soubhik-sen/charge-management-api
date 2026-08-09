@@ -31,6 +31,10 @@ The HTTP runtime is database-backed. SQLAlchemy sessions provide transaction bou
 
 FX rates are queried directly from relational tables. Other lifecycle aggregates use the SQLAlchemy repository while preserving stable API IDs and restart-safe state. Repository reset is a test/administration operation and reseeds generic reference data, including the `MANUAL` FX source.
 
+### Current Scaling Boundary
+
+The compatibility aggregate repository hydrates persisted charge-management aggregates before domain list methods filter and paginate them. This keeps mutation semantics and the in-memory domain implementation consistent, but it is not the final read architecture for very large installations. High-volume deployments should introduce SQL-native query adapters that count and page parent IDs in the database, then hydrate only the returned aggregate page. FX maintenance/resolution already uses direct relational queries. This read-path refactor is intentionally separate from the reusable business-capability parity work.
+
 Schema sources:
 
 - `app/db/models.py`

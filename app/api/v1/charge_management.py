@@ -665,6 +665,8 @@ def create_rate_book(
 def list_rate_books(
     q: str | None = Query(default=None),
     active_only: bool | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    calculation_basis: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(require_bearer_principal),
@@ -673,6 +675,8 @@ def list_rate_books(
     return service.list_rate_books(
         search=q,
         active_only=active_only,
+        status_filter=status_filter,
+        calculation_basis=calculation_basis,
         limit=limit,
         offset=offset,
     )

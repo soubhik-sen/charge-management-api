@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def utcnow() -> datetime:
@@ -526,7 +526,8 @@ class ChargeInitializationData(ApiModel):
 
 class RateBookEntryPayload(ApiModel):
     charge_component_code: str
-    rate_amount: Decimal
+    rate_amount: Decimal | None = None
+    rate_percent: Decimal | None = None
     basis: str = "SHIPMENT"
     currency: str = "USD"
     calculation_profile_id: int | None = None
@@ -544,13 +545,40 @@ class RateBookEntryPayload(ApiModel):
     maximum_amount: Decimal | None = None
     validity_from: date | None = None
     validity_to: date | None = None
+    priority: int = 100
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_rate_entry(self) -> "RateBookEntryPayload":
+        if self.basis.strip().upper() in {"PERCENT", "PERCENTAGE"}:
+            if self.rate_percent is None:
+                raise ValueError("rate_percent is required for percentage basis")
+        elif self.rate_amount is None:
+            raise ValueError("rate_amount is required for non-percentage basis")
+        if self.scale_from is not None and self.scale_to is not None and self.scale_from > self.scale_to:
+            raise ValueError("scale_from must be less than or equal to scale_to")
+        if self.validity_from is not None and self.validity_to is not None and self.validity_from > self.validity_to:
+            raise ValueError("validity_from must be less than or equal to validity_to")
+        return self
 
 
 class RateBookPayload(ApiModel):
     rate_book_code: str
     rate_book_name: str
+    description: str | None = None
     currency: str = "USD"
+    valid_from: date | None = None
+    valid_to: date | None = None
+    calculation_basis: str = "FLAT"
+    status: str = "DRAFT"
+    is_active: bool = True
     entries: list[RateBookEntryPayload] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_validity(self) -> "RateBookPayload":
+        if self.valid_from is not None and self.valid_to is not None and self.valid_from > self.valid_to:
+            raise ValueError("valid_from must be less than or equal to valid_to")
+        return self
 
 
 class RateBookEntry(RateBookEntryPayload):
@@ -562,7 +590,12 @@ class RateBook(ApiModel):
     id: int
     rate_book_code: str
     rate_book_name: str
+    description: str | None = None
     currency: str = "USD"
+    valid_from: date | None = None
+    valid_to: date | None = None
+    calculation_basis: str = "FLAT"
+    status: str = "DRAFT"
     entries: list[RateBookEntry] = Field(default_factory=list)
     is_active: bool = True
 
@@ -626,6 +659,7 @@ class CalculationTemplateWorkspace(ApiModel):
 
 class ContractLinePayload(ApiModel):
     charge_component_code: str
+    line_number: int | None = Field(default=None, ge=1)
     rate_book_id: int | None = None
     calculation_template_id: int | None = None
     calculation_profile_id: int | None = None
@@ -637,14 +671,24 @@ class ContractLinePayload(ApiModel):
     equipment_type: str | None = None
     commodity_code: str | None = None
     service_level: str | None = None
+    charge_context: str | None = None
+    priority: int = 100
+    is_active: bool = True
     valid_from: date | None = None
     valid_to: date | None = None
+
+    @model_validator(mode="after")
+    def validate_validity(self) -> "ContractLinePayload":
+        if self.valid_from is not None and self.valid_to is not None and self.valid_from > self.valid_to:
+            raise ValueError("valid_from must be less than or equal to valid_to")
+        return self
 
 
 class RateContractPayload(ApiModel):
     contract_number: str
     contract_name: str
     contract_role: Literal["PAYER", "PAYEE"]
+    description: str | None = None
     payer_party_ref: str | None = None
     payee_party_ref: str | None = None
     party_role_ref: str | None = None
@@ -659,7 +703,18 @@ class RateContractPayload(ApiModel):
     valid_to: date | None = None
     default_rate_book_id: int | None = None
     default_calculation_template_id: int | None = None
+    margin_type: str | None = None
+    margin_value: Decimal | None = None
+    minimum_margin_amount: Decimal | None = None
+    minimum_margin_percent: Decimal | None = None
+    external_reference: str | None = None
     lines: list[ContractLinePayload] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_validity(self) -> "RateContractPayload":
+        if self.valid_from is not None and self.valid_to is not None and self.valid_from > self.valid_to:
+            raise ValueError("valid_from must be less than or equal to valid_to")
+        return self
 
 
 class ContractLine(ContractLinePayload):
@@ -688,15 +743,35 @@ class ContractWorkspace(ApiModel):
 
 
 class RateContractUpdate(ApiModel):
+    contract_number: str | None = None
     contract_name: str | None = None
+    contract_role: Literal["PAYER", "PAYEE"] | None = None
+    description: str | None = None
+    payer_party_ref: str | None = None
+    payee_party_ref: str | None = None
+    party_role_ref: str | None = None
     status: str | None = None
+    partner_id: int | None = None
+    customer_id: int | None = None
+    vendor_id: int | None = None
+    forwarder_id: int | None = None
+    carrier_id: int | None = None
+    company_id: int | None = None
     currency: str | None = None
+    valid_from: date | None = None
+    valid_to: date | None = None
     default_rate_book_id: int | None = None
     default_calculation_template_id: int | None = None
+    margin_type: str | None = None
+    margin_value: Decimal | None = None
+    minimum_margin_amount: Decimal | None = None
+    minimum_margin_percent: Decimal | None = None
+    external_reference: str | None = None
     lines: list[ContractLinePayload] | None = None
 
 
 class QuoteRequestCreate(ApiModel):
+    request_number: str | None = None
     source_object_type: str = "MANUAL"
     source_object_id: str | None = None
     company_id: int | None = None
@@ -713,6 +788,7 @@ class QuoteRequestCreate(ApiModel):
     currency: str = "USD"
     quantity: Decimal = Decimal("1")
     gross_weight: Decimal | None = None
+    chargeable_weight: Decimal | None = None
     gross_volume_cbm: Decimal | None = None
     container_count: Decimal | None = None
     package_count: Decimal | None = None
@@ -722,10 +798,12 @@ class QuoteRequestCreate(ApiModel):
     valid_to: date | None = None
     expires_at: datetime | None = None
     margin_rules: dict[str, Any] = Field(default_factory=dict)
+    charge_context: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
 
 
 class QuoteRequestWorkspaceUpdate(ApiModel):
+    request_number: str | None = None
     status: str | None = None
     source_object_type: str | None = None
     source_object_id: str | None = None
@@ -743,6 +821,7 @@ class QuoteRequestWorkspaceUpdate(ApiModel):
     currency: str | None = None
     quantity: Decimal | None = None
     gross_weight: Decimal | None = None
+    chargeable_weight: Decimal | None = None
     gross_volume_cbm: Decimal | None = None
     container_count: Decimal | None = None
     package_count: Decimal | None = None
@@ -752,6 +831,7 @@ class QuoteRequestWorkspaceUpdate(ApiModel):
     valid_to: date | None = None
     expires_at: datetime | None = None
     margin_rules: dict[str, Any] | None = None
+    charge_context: str | None = None
     context: dict[str, Any] | None = None
 
 
@@ -820,11 +900,17 @@ class QuoteOptionLine(ApiModel):
     rate_amount: Decimal | None = None
     quantity: Decimal = Decimal("1")
     calculation_profile_version_id: int | None = None
+    calculation_mode: str = "DIRECT"
+    calculation_status: str = "CALCULATED"
     calculation_config_snapshot_json: dict[str, Any] | None = None
     calculation_input_snapshot_json: dict[str, Any] | None = None
     allocation_basis: str | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
+    allocation_mode: str = "NONE"
+    allocation_status: str = "NOT_REQUIRED"
+    allocation_config_snapshot_json: dict[str, Any] | None = None
+    is_customer_visible: bool = True
     pinned_allocation_snapshot_json: dict[str, Any] | None = None
     effective_allocation_snapshot_json: dict[str, Any] | None = None
     source_contract_id: int | None = None
@@ -914,6 +1000,9 @@ class ChargeDocumentLineCreate(ApiModel):
     currency: str = "USD"
     quantity_uom: str | None = None
     calculation_profile_version_id: int | None = None
+    calculation_mode: str = "DIRECT"
+    calculation_status: str = "CALCULATED"
+    calculation_locked_at: datetime | None = None
     calculation_config_snapshot_json: dict[str, Any] | None = None
     calculation_input_snapshot_json: dict[str, Any] | None = None
     source_currency: str | None = None
@@ -926,6 +1015,11 @@ class ChargeDocumentLineCreate(ApiModel):
     exchange_rate_method: str | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
+    allocation_mode: str = "NONE"
+    allocation_status: str = "NOT_REQUIRED"
+    allocation_config_snapshot_json: dict[str, Any] | None = None
+    allocation_locked_at: datetime | None = None
+    is_customer_visible: bool = True
     charge_text_snapshot: str | None = None
     allocation_basis: str | None = None
     allocation_ratio: Decimal | None = None
@@ -991,6 +1085,9 @@ class ChargeLine(ApiModel):
     currency: str
     quantity_uom: str | None = None
     calculation_profile_version_id: int | None = None
+    calculation_mode: str = "DIRECT"
+    calculation_status: str = "CALCULATED"
+    calculation_locked_at: datetime | None = None
     calculation_config_snapshot_json: dict[str, Any] | None = None
     calculation_input_snapshot_json: dict[str, Any] | None = None
     source_currency: str | None = None
@@ -1003,6 +1100,11 @@ class ChargeLine(ApiModel):
     exchange_rate_method: str | None = None
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
+    allocation_mode: str = "NONE"
+    allocation_status: str = "NOT_REQUIRED"
+    allocation_config_snapshot_json: dict[str, Any] | None = None
+    allocation_locked_at: datetime | None = None
+    is_customer_visible: bool = True
     pinned_allocation_snapshot_json: dict[str, Any] | None = None
     effective_allocation_snapshot_json: dict[str, Any] | None = None
     charge_text_snapshot: str | None = None

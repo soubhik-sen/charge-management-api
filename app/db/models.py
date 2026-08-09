@@ -527,7 +527,12 @@ class ChargeRateBookRow(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rate_book_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
     rate_book_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
+    valid_from: Mapped[object | None] = mapped_column(Date)
+    valid_to: Mapped[object | None] = mapped_column(Date)
+    calculation_basis: Mapped[str] = mapped_column(String(40), nullable=False, default="FLAT", server_default="FLAT")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="DRAFT", server_default="DRAFT")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     entries: Mapped[list["ChargeRateBookEntryRow"]] = relationship(
@@ -542,7 +547,8 @@ class ChargeRateBookEntryRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rate_book_id: Mapped[int] = mapped_column(ForeignKey("charge_rate_book.id", ondelete="CASCADE"), nullable=False)
     charge_component_id: Mapped[int] = mapped_column(ForeignKey("charge_component.id"), nullable=False)
-    rate_amount: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False)
+    rate_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    rate_percent: Mapped[object | None] = mapped_column(Numeric(18, 6))
     basis: Mapped[str] = mapped_column(String(40), nullable=False, default="SHIPMENT")
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     calculation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile.id"))
@@ -560,6 +566,8 @@ class ChargeRateBookEntryRow(Base):
     maximum_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     validity_from: Mapped[object | None] = mapped_column(Date)
     validity_to: Mapped[object | None] = mapped_column(Date)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     attributes_json: Mapped[dict | None] = mapped_column(JSON)
 
     rate_book: Mapped[ChargeRateBookRow] = relationship(back_populates="entries")
@@ -577,6 +585,7 @@ class ChargeRateContractRow(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     contract_number: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
     contract_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     contract_role: Mapped[str] = mapped_column(String(20), nullable=False)
     payer_party_ref: Mapped[str | None] = mapped_column(String(120))
     payee_party_ref: Mapped[str | None] = mapped_column(String(120))
@@ -595,6 +604,11 @@ class ChargeRateContractRow(TimestampMixin, Base):
     default_calculation_template_id: Mapped[int | None] = mapped_column(
         ForeignKey("charge_calculation_template.id")
     )
+    margin_type: Mapped[str | None] = mapped_column(String(30))
+    margin_value: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    minimum_margin_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    minimum_margin_percent: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    external_reference: Mapped[str | None] = mapped_column(String(160))
 
     lines: Mapped[list["ChargeContractLineRow"]] = relationship(
         back_populates="contract",
@@ -613,6 +627,7 @@ class ChargeContractLineRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     contract_id: Mapped[int] = mapped_column(ForeignKey("charge_rate_contract.id", ondelete="CASCADE"), nullable=False)
     charge_component_id: Mapped[int] = mapped_column(ForeignKey("charge_component.id"), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
     rate_book_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book.id"))
     calculation_template_id: Mapped[int | None] = mapped_column(Integer)
     calculation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile.id"))
@@ -624,6 +639,9 @@ class ChargeContractLineRow(Base):
     equipment_type: Mapped[str | None] = mapped_column(String(60))
     commodity_code: Mapped[str | None] = mapped_column(String(80))
     service_level: Mapped[str | None] = mapped_column(String(80))
+    charge_context: Mapped[str | None] = mapped_column(String(80))
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     valid_from: Mapped[object | None] = mapped_column(Date)
     valid_to: Mapped[object | None] = mapped_column(Date)
     attributes_json: Mapped[dict | None] = mapped_column(JSON)
@@ -633,6 +651,7 @@ class ChargeContractLineRow(Base):
     rate_book: Mapped[ChargeRateBookRow | None] = relationship()
 
     __table_args__ = (
+        UniqueConstraint("contract_id", "line_number", name="uq_charge_contract_line_number"),
         Index("ix_charge_contract_line_contract_component", "contract_id", "charge_component_id"),
         Index("ix_charge_contract_line_lane", "origin_code", "destination_code", "mode"),
     )
@@ -684,6 +703,7 @@ class ChargeQuoteRequestRow(TimestampMixin, Base):
     __tablename__ = "charge_quote_request"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_number: Mapped[str | None] = mapped_column(String(80), unique=True)
     source_object_type: Mapped[str] = mapped_column(String(60), nullable=False, default="MANUAL", server_default="MANUAL")
     source_object_id: Mapped[str | None] = mapped_column(String(120))
     company_id: Mapped[int | None] = mapped_column(Integer)
@@ -700,6 +720,7 @@ class ChargeQuoteRequestRow(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
     quantity: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False, default=1)
     gross_weight: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    chargeable_weight: Mapped[object | None] = mapped_column(Numeric(18, 6))
     gross_volume_cbm: Mapped[object | None] = mapped_column(Numeric(18, 6))
     container_count: Mapped[object | None] = mapped_column(Numeric(18, 6))
     package_count: Mapped[object | None] = mapped_column(Numeric(18, 6))
@@ -712,6 +733,7 @@ class ChargeQuoteRequestRow(TimestampMixin, Base):
     quotation_policy_snapshot: Mapped[str] = mapped_column(String(30), nullable=False, default="OPTIONAL", server_default="OPTIONAL")
     awarded_option_id: Mapped[int | None] = mapped_column(Integer)
     margin_rules_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    charge_context: Mapped[str | None] = mapped_column(String(80))
     context_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     options: Mapped[list["ChargeQuoteOptionRow"]] = relationship(
@@ -821,11 +843,17 @@ class ChargeQuoteOptionLineRow(Base):
     quantity: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False, default=1, server_default="1")
     quantity_uom: Mapped[str | None] = mapped_column(String(30))
     calculation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile_version.id"))
+    calculation_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="DIRECT", server_default="DIRECT")
+    calculation_status: Mapped[str] = mapped_column(String(30), nullable=False, default="CALCULATED", server_default="CALCULATED")
     calculation_config_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     calculation_input_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     allocation_basis: Mapped[str | None] = mapped_column(String(40))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
+    allocation_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="NONE", server_default="NONE")
+    allocation_status: Mapped[str] = mapped_column(String(30), nullable=False, default="NOT_REQUIRED", server_default="NOT_REQUIRED")
+    allocation_config_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
+    is_customer_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     pinned_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     effective_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     source_contract_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_contract.id"))
@@ -987,6 +1015,9 @@ class ChargeLineRow(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     quantity_uom: Mapped[str | None] = mapped_column(String(30))
     calculation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile_version.id"))
+    calculation_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="DIRECT", server_default="DIRECT")
+    calculation_status: Mapped[str] = mapped_column(String(30), nullable=False, default="CALCULATED", server_default="CALCULATED")
+    calculation_locked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     calculation_config_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     calculation_input_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     source_currency: Mapped[str | None] = mapped_column(String(3))
@@ -999,6 +1030,11 @@ class ChargeLineRow(Base):
     exchange_rate_method: Mapped[str | None] = mapped_column(String(60))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
+    allocation_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="NONE", server_default="NONE")
+    allocation_status: Mapped[str] = mapped_column(String(30), nullable=False, default="NOT_REQUIRED", server_default="NOT_REQUIRED")
+    allocation_config_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
+    allocation_locked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    is_customer_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     pinned_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     effective_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     charge_text_snapshot: Mapped[str | None] = mapped_column(String(255))
