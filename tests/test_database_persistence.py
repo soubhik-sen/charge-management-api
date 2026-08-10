@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 
 from app.api.v1.charge_management import repository
+from app.db.models import ChargeIdSequenceRow
 from app.db.session import SessionLocal
 from app.domain.fx_service import FxRateService
 from app.domain.service import ChargeManagementService
@@ -16,6 +18,25 @@ AUTH = {"Authorization": "Bearer test-token", "X-Subject": "tester@example.com"}
 
 def setup_function() -> None:
     repository.reset()
+
+
+def test_next_id_recovers_when_persisted_sequence_trails_seeded_rows() -> None:
+    with SessionLocal() as db:
+        db.execute(
+            update(ChargeIdSequenceRow)
+            .where(ChargeIdSequenceRow.bucket == "calculation_profile")
+            .values(last_value=0)
+        )
+        db.commit()
+
+    with SessionLocal() as db:
+        fresh_repository = SqlAlchemyChargeRepository(db)
+        existing_ids = set(fresh_repository.calculation_profiles)
+
+        next_profile_id = fresh_repository.next_id("calculation_profile")
+
+    assert next_profile_id == max(existing_ids) + 1
+    assert next_profile_id not in existing_ids
 
 
 def test_master_data_survives_fresh_repository_and_service_instances() -> None:
@@ -136,6 +157,54 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
     )
     assert component.status_code == 201, component.text
 
+    rate_book = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RESTART_RATE_BOOK",
+            "rate_book_name": "Restart Rate Book",
+            "entries": [
+                {
+                    "charge_component_code": "RESTART_COMPONENT",
+                    "basis_override": "WEIGHT",
+                    "charge_context_override": "DESTINATION",
+                    "rate_amount": "2.50",
+                }
+            ],
+        },
+    )
+    assert rate_book.status_code == 201, rate_book.text
+    rate_book_id = rate_book.json()["id"]
+    published_rate_book = client.post(
+        f"/api/v1/charge-management/rate-books/{rate_book_id}/publish",
+        headers=AUTH,
+    )
+    assert published_rate_book.status_code == 200, published_rate_book.text
+
+    template = client.post(
+        "/api/v1/charge-management/calculation-templates",
+        headers=AUTH,
+        json={
+            "template_code": "RESTART_TEMPLATE",
+            "template_name": "Restart Template",
+            "status": "DRAFT",
+            "steps": [
+                {
+                    "step_number": 10,
+                    "charge_component_code": "RESTART_COMPONENT",
+                    "relationship_role": "BOTH",
+                    "rate_book_id": rate_book_id,
+                }
+            ],
+        },
+    )
+    assert template.status_code == 201, template.text
+    published_template = client.post(
+        f"/api/v1/charge-management/calculation-templates/{template.json()['id']}/publish",
+        headers=AUTH,
+    )
+    assert published_template.status_code == 200, published_template.text
+
     # A fresh session and fresh services simulate process reconstruction: no
     # in-memory state from the API calls is available to these instances.
     with SessionLocal() as db:
@@ -146,6 +215,10 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
         reloaded_component = next(
             item for item in domain_service.list_components(limit=200, offset=0).items if item.id == component.json()["id"]
         )
+        reloaded_rate_book = domain_service.repository.rate_books[rate_book.json()["id"]]
+        reloaded_template = domain_service.repository.calculation_templates[
+            template.json()["id"]
+        ]
         reloaded_rate = FxRateService(db).get_rate(rate.json()["id"])
 
     assert reloaded_allocation.profile_name == "Restart Weight Allocation Updated"
@@ -159,5 +232,19 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
         "DOCUMENT_DATE",
     ]
     assert reloaded_component.default_calculation_profile_id == calculation_profile["id"]
+    assert reloaded_rate_book.charge_component_code == "RESTART_COMPONENT"
+    assert reloaded_rate_book.row_attribute_keys == [
+        "basis_override",
+        "charge_context_override",
+    ]
+    assert reloaded_rate_book.status == "PUBLISHED"
+    assert reloaded_rate_book.entries[0].basis == "WEIGHT"
+    assert reloaded_rate_book.entries[0].basis_override == "WEIGHT"
+    assert reloaded_rate_book.entries[0].charge_context == "DESTINATION"
+    assert reloaded_rate_book.entries[0].charge_context_override == "DESTINATION"
+    assert reloaded_template.status == "PUBLISHED"
+    assert reloaded_template.version_number == 1
+    assert reloaded_template.lock_version == 2
+    assert reloaded_template.steps[0].rate_book_id == rate_book_id
     assert reloaded_rate.source_code == "RESTART_BANK"
     assert str(reloaded_rate.rate) == "0.8600000000"

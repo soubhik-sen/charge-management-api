@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../core/design.dart';
+import '../core/reference_values.dart';
 import '../data/workspace_data.dart';
 
 typedef WorkspaceMutation =
@@ -727,12 +728,18 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
 class RateBookWorkspace extends StatefulWidget {
   const RateBookWorkspace({
     required this.rateBooks,
+    required this.components,
+    this.calculationProfiles = const [],
+    this.allocationProfiles = const [],
     required this.live,
     required this.onMutation,
     super.key,
   });
 
   final List<JsonMap> rateBooks;
+  final List<JsonMap> components;
+  final List<JsonMap> calculationProfiles;
+  final List<JsonMap> allocationProfiles;
   final bool live;
   final WorkspaceMutation onMutation;
 
@@ -855,8 +862,12 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
   Future<void> _createRateBook() async {
     final payload = await showDialog<JsonMap>(
       context: context,
-      builder: (context) =>
-          const _RateBookDialog(mode: _RateBookDialogMode.create),
+      builder: (context) => _RateBookDialog(
+        mode: _RateBookDialogMode.create,
+        components: widget.components,
+        calculationProfiles: widget.calculationProfiles,
+        allocationProfiles: widget.allocationProfiles,
+      ),
     );
     if (payload == null) return;
     await widget.onMutation(
@@ -870,8 +881,13 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
   Future<void> _createVersion(JsonMap source) async {
     final payload = await showDialog<JsonMap>(
       context: context,
-      builder: (context) =>
-          _RateBookDialog(mode: _RateBookDialogMode.newVersion, book: source),
+      builder: (context) => _RateBookDialog(
+        mode: _RateBookDialogMode.newVersion,
+        book: source,
+        components: widget.components,
+        calculationProfiles: widget.calculationProfiles,
+        allocationProfiles: widget.allocationProfiles,
+      ),
     );
     if (payload == null) return;
     await widget.onMutation(
@@ -885,8 +901,13 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
   Future<void> _editDraft(JsonMap book) async {
     final payload = await showDialog<JsonMap>(
       context: context,
-      builder: (context) =>
-          _RateBookDialog(mode: _RateBookDialogMode.editDraft, book: book),
+      builder: (context) => _RateBookDialog(
+        mode: _RateBookDialogMode.editDraft,
+        book: book,
+        components: widget.components,
+        calculationProfiles: widget.calculationProfiles,
+        allocationProfiles: widget.allocationProfiles,
+      ),
     );
     if (payload == null) return;
     await widget.onMutation(
@@ -944,9 +965,12 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
         ? 0
         : math.min(_selectedRate, entries.length - 1);
     final selectedRate = entries.isEmpty ? null : entries[rateIndex];
+    final rowAttributeKeys = _rateBookAttributeKeys(book);
     final publishedVersion = family.publishedVersion;
     final subtitleParts = [
       '${_text(book, 'currency')} ${_versionLabel(book)}',
+      if (_text(book, 'charge_component_code', fallback: '').isNotEmpty)
+        _text(book, 'charge_component_code'),
       if (book['valid_from'] != null || book['valid_to'] != null)
         'Valid ${_text(book, 'valid_from')} to ${_text(book, 'valid_to')}',
       if (publishedVersion != null) 'Published v$publishedVersion',
@@ -1098,6 +1122,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
                 ),
                 _RateTable(
                   entries: entries,
+                  attributeKeys: rowAttributeKeys,
                   selectedIndex: rateIndex,
                   onSelected: (value) => setState(() => _selectedRate = value),
                 ),
@@ -1278,6 +1303,839 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class CalculationTemplateWorkspacePage extends StatefulWidget {
+  const CalculationTemplateWorkspacePage({
+    required this.templates,
+    required this.components,
+    required this.rateBooks,
+    required this.live,
+    required this.onMutation,
+    super.key,
+  });
+
+  final List<JsonMap> templates;
+  final List<JsonMap> components;
+  final List<JsonMap> rateBooks;
+  final bool live;
+  final WorkspaceMutation onMutation;
+
+  @override
+  State<CalculationTemplateWorkspacePage> createState() =>
+      _CalculationTemplateWorkspacePageState();
+}
+
+class _CalculationTemplateWorkspacePageState
+    extends State<CalculationTemplateWorkspacePage> {
+  String? _selectedCode;
+  int? _selectedId;
+
+  List<_CalculationTemplateFamily> get _families {
+    final grouped = <String, List<JsonMap>>{};
+    for (final template in widget.templates) {
+      final code = _text(template, 'template_code', fallback: 'UNSPECIFIED');
+      grouped.putIfAbsent(code, () => []).add(template);
+    }
+    final families =
+        grouped.entries
+            .map(
+              (entry) => _CalculationTemplateFamily(
+                code: entry.key,
+                versions: [...entry.value]
+                  ..sort(
+                    (left, right) => (_asInt(right['version_number']) ?? 1)
+                        .compareTo(_asInt(left['version_number']) ?? 1),
+                  ),
+              ),
+            )
+            .toList(growable: false)
+          ..sort(
+            (left, right) =>
+                left.name.toLowerCase().compareTo(right.name.toLowerCase()),
+          );
+    return families;
+  }
+
+  _CalculationTemplateFamily? get _family {
+    final families = _families;
+    if (families.isEmpty) return null;
+    return families.firstWhere(
+      (family) => family.code == _selectedCode,
+      orElse: () => families.first,
+    );
+  }
+
+  JsonMap? get _template {
+    final family = _family;
+    if (family == null) return null;
+    return family.versions.firstWhere(
+      (template) => _asInt(template['id']) == _selectedId,
+      orElse: () => family.versions.first,
+    );
+  }
+
+  bool _draft(JsonMap template) =>
+      _text(template, 'status').toUpperCase() == 'DRAFT';
+
+  Future<void> _openDialog(
+    _CalculationTemplateDialogMode mode, {
+    JsonMap? template,
+  }) async {
+    final payload = await showDialog<JsonMap>(
+      context: context,
+      builder: (context) => _CalculationTemplateDialog(
+        mode: mode,
+        template: template,
+        components: widget.components,
+        rateBooks: widget.rateBooks,
+      ),
+    );
+    if (payload == null) return;
+    final id = template?['id'];
+    final (method, path, message) = switch (mode) {
+      _CalculationTemplateDialogMode.create => (
+        'POST',
+        '/api/v1/charge-management/calculation-templates',
+        'Calculation template created.',
+      ),
+      _CalculationTemplateDialogMode.edit => (
+        'PUT',
+        '/api/v1/charge-management/calculation-templates/$id/workspace',
+        'Calculation template draft updated.',
+      ),
+      _CalculationTemplateDialogMode.version => (
+        'POST',
+        '/api/v1/charge-management/calculation-templates/$id/versions',
+        'Calculation template draft version created.',
+      ),
+    };
+    await widget.onMutation(
+      method: method,
+      path: path,
+      body: payload,
+      successMessage: message,
+    );
+  }
+
+  Future<void> _publish(JsonMap template) async {
+    final confirmed = await _confirmAction(
+      context,
+      title: 'Publish calculation template?',
+      message:
+          'The draft becomes immutable and the previous published version in this family is retired.',
+      action: 'Publish',
+    );
+    if (!confirmed) return;
+    await widget.onMutation(
+      method: 'POST',
+      path:
+          '/api/v1/charge-management/calculation-templates/${template['id']}/publish',
+      successMessage: 'Calculation template published.',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final family = _family;
+    final template = _template;
+    if (family == null || template == null) {
+      return PageCanvas(
+        title: 'Calculation templates',
+        subtitle:
+            'Sequence component-specific rate books into a governed charge calculation.',
+        trailing: FilledButton.icon(
+          onPressed: widget.live
+              ? () => _openDialog(_CalculationTemplateDialogMode.create)
+              : null,
+          icon: const Icon(Icons.add),
+          label: const Text('New template'),
+        ),
+        children: const [
+          EmptyState(message: 'No calculation templates are available.'),
+        ],
+      );
+    }
+    final families = _families;
+    final familyIndex = math.max(0, families.indexOf(family));
+    final steps = _rows(template, 'steps');
+    return PageCanvas(
+      title: _text(template, 'template_name'),
+      eyebrow: 'Calculation templates / ${family.code}',
+      subtitle:
+          'v${_asInt(template['version_number']) ?? 1} | ${steps.length} ordered steps',
+      trailing: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          StatusPill(_text(template, 'status')),
+          FilledButton.icon(
+            onPressed: widget.live
+                ? () => _openDialog(_CalculationTemplateDialogMode.create)
+                : null,
+            icon: const Icon(Icons.add),
+            label: const Text('New template'),
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.live
+                ? () => _openDialog(
+                    _CalculationTemplateDialogMode.version,
+                    template: template,
+                  )
+                : null,
+            icon: const Icon(Icons.copy_outlined),
+            label: const Text('New draft'),
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.live && _draft(template)
+                ? () => _openDialog(
+                    _CalculationTemplateDialogMode.edit,
+                    template: template,
+                  )
+                : null,
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Edit draft'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: widget.live && _draft(template)
+                ? () => _publish(template)
+                : null,
+            icon: const Icon(Icons.publish_outlined),
+            label: const Text('Publish'),
+          ),
+        ],
+      ),
+      children: [
+        SurfaceCard(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Icon(Icons.info_outline, color: LedgerFlowDesign.info, size: 19),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'A rate book prices one charge component. A calculation template orders multiple components, chooses the rate book for each step, and controls payer/payee inclusion, subtotals, conditions, and statistical output.',
+                  style: TextStyle(
+                    color: LedgerFlowDesign.muted,
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _RecordPicker(
+          records: families
+              .map(
+                (item) => <String, dynamic>{
+                  'template_name': item.name,
+                  'template_code': item.code,
+                  'version_count': item.versions.length,
+                  'published_version_number': item.publishedVersion,
+                },
+              )
+              .toList(growable: false),
+          selectedIndex: familyIndex,
+          label: (item) => _text(item, 'template_name'),
+          detail: (item) =>
+              '${_text(item, 'template_code')} | ${item['version_count']} versions | Published ${item['published_version_number'] ?? 'none'}',
+          onSelected: (index) => setState(() {
+            _selectedCode = families[index].code;
+            _selectedId = _asInt(families[index].versions.first['id']);
+          }),
+        ),
+        const SizedBox(height: 14),
+        SurfaceCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(18),
+                child: SectionHeading(
+                  title: 'Calculation steps',
+                  subtitle:
+                      'Executed in ascending sequence; percentage steps may consume a subtotal accumulated by earlier steps.',
+                ),
+              ),
+              if (steps.isEmpty)
+                const EmptyState(message: 'This template has no steps.')
+              else
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columns: const [
+                      DataColumn(label: Text('Sequence')),
+                      DataColumn(label: Text('Component')),
+                      DataColumn(label: Text('Role')),
+                      DataColumn(label: Text('Rate book')),
+                      DataColumn(label: Text('Subtotal')),
+                      DataColumn(label: Text('Condition')),
+                      DataColumn(label: Text('Output')),
+                    ],
+                    rows: steps
+                        .map(
+                          (step) => DataRow(
+                            cells: [
+                              DataCell(Text(_text(step, 'step_number'))),
+                              DataCell(
+                                Text(
+                                  _text(step, 'charge_component_code'),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              DataCell(Text(_text(step, 'relationship_role'))),
+                              DataCell(
+                                Text(
+                                  _text(
+                                    step,
+                                    'rate_book_code',
+                                    fallback: step['rate_book_id'] == null
+                                        ? 'Contract default'
+                                        : '#${step['rate_book_id']}',
+                                  ),
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  _text(step, 'subtotal_key', fallback: '-'),
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  _text(
+                                    step,
+                                    'precondition_key',
+                                    fallback: 'Always',
+                                  ),
+                                ),
+                              ),
+                              DataCell(
+                                StatusPill(
+                                  step['is_statistical'] == true
+                                      ? 'STATISTICAL'
+                                      : 'CHARGE',
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        SurfaceCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SectionHeading(
+                title: 'Version history',
+                subtitle:
+                    'Published and retired versions are immutable; changes start in a new draft.',
+              ),
+              const SizedBox(height: 12),
+              for (final version in family.versions)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  selected: _asInt(version['id']) == _asInt(template['id']),
+                  leading: Icon(
+                    _draft(version)
+                        ? Icons.edit_note_outlined
+                        : Icons.lock_outline,
+                    color: _draft(version)
+                        ? LedgerFlowDesign.warning
+                        : LedgerFlowDesign.info,
+                  ),
+                  title: Text(
+                    'Version ${_asInt(version['version_number']) ?? 1}',
+                  ),
+                  subtitle: Text(_text(version, 'status')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      setState(() => _selectedId = _asInt(version['id'])),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CalculationTemplateFamily {
+  const _CalculationTemplateFamily({
+    required this.code,
+    required this.versions,
+  });
+
+  final String code;
+  final List<JsonMap> versions;
+
+  String get name => _text(versions.first, 'template_name', fallback: code);
+
+  int? get publishedVersion {
+    for (final version in versions) {
+      if (_text(version, 'status').toUpperCase() == 'PUBLISHED') {
+        return _asInt(version['version_number']) ?? 1;
+      }
+    }
+    return null;
+  }
+}
+
+enum _CalculationTemplateDialogMode { create, edit, version }
+
+class _CalculationTemplateStepDraft {
+  _CalculationTemplateStepDraft({
+    this.stepNumber = '10',
+    this.componentCode = '',
+    this.relationshipRole = 'BOTH',
+    this.rateBookId,
+    this.subtotalKey = '',
+    this.preconditionKey = '',
+    this.isStatistical = false,
+  });
+
+  factory _CalculationTemplateStepDraft.fromJson(JsonMap step) =>
+      _CalculationTemplateStepDraft(
+        stepNumber: _text(step, 'step_number', fallback: '10'),
+        componentCode: _text(step, 'charge_component_code'),
+        relationshipRole: _text(step, 'relationship_role', fallback: 'BOTH'),
+        rateBookId: _asInt(step['rate_book_id']),
+        subtotalKey: _text(step, 'subtotal_key', fallback: ''),
+        preconditionKey: _text(step, 'precondition_key', fallback: ''),
+        isStatistical: step['is_statistical'] == true,
+      );
+
+  String stepNumber;
+  String componentCode;
+  String relationshipRole;
+  int? rateBookId;
+  String subtotalKey;
+  String preconditionKey;
+  bool isStatistical;
+
+  JsonMap toJson() => {
+    'step_number': _asInt(stepNumber) ?? 10,
+    'charge_component_code': componentCode.trim().toUpperCase(),
+    'relationship_role': relationshipRole,
+    'rate_book_id': rateBookId,
+    'subtotal_key': subtotalKey.trim().isEmpty
+        ? null
+        : subtotalKey.trim().toUpperCase(),
+    'precondition_key': preconditionKey.trim().isEmpty
+        ? null
+        : preconditionKey.trim(),
+    'is_statistical': isStatistical,
+  };
+}
+
+class _CalculationTemplateDialog extends StatefulWidget {
+  const _CalculationTemplateDialog({
+    required this.mode,
+    required this.components,
+    required this.rateBooks,
+    this.template,
+  });
+
+  final _CalculationTemplateDialogMode mode;
+  final List<JsonMap> components;
+  final List<JsonMap> rateBooks;
+  final JsonMap? template;
+
+  @override
+  State<_CalculationTemplateDialog> createState() =>
+      _CalculationTemplateDialogState();
+}
+
+class _CalculationTemplateDialogState
+    extends State<_CalculationTemplateDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _code;
+  late final TextEditingController _name;
+  late final TextEditingController _description;
+  late bool _active;
+  late List<_CalculationTemplateStepDraft> _steps;
+
+  @override
+  void initState() {
+    super.initState();
+    final template = widget.template ?? const <String, dynamic>{};
+    _code = TextEditingController(text: _text(template, 'template_code'));
+    _name = TextEditingController(text: _text(template, 'template_name'));
+    _description = TextEditingController(text: _text(template, 'description'));
+    _active = widget.template == null || template['is_active'] != false;
+    _steps = _rows(
+      template,
+      'steps',
+    ).map(_CalculationTemplateStepDraft.fromJson).toList(growable: true);
+  }
+
+  @override
+  void dispose() {
+    _code.dispose();
+    _name.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  String? _required(String? value) =>
+      value == null || value.trim().isEmpty ? 'Required' : null;
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final payload = <String, dynamic>{
+      'template_code': _code.text.trim().toUpperCase(),
+      'template_name': _name.text.trim(),
+      'description': _description.text.trim().isEmpty
+          ? null
+          : _description.text.trim(),
+      'status': 'DRAFT',
+      'is_active': _active,
+      'steps': _steps.map((step) => step.toJson()).toList(growable: false),
+    };
+    if (widget.mode == _CalculationTemplateDialogMode.edit) {
+      final lockVersion = _asInt(widget.template?['lock_version']);
+      if (lockVersion != null) payload['expected_lock_version'] = lockVersion;
+    }
+    Navigator.pop(context, JsonMap.from(payload));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(switch (widget.mode) {
+      _CalculationTemplateDialogMode.create => 'Create calculation template',
+      _CalculationTemplateDialogMode.edit => 'Edit template draft',
+      _CalculationTemplateDialogMode.version => 'Create template draft',
+    }),
+    content: SizedBox(
+      width: 1050,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Steps run in sequence. Each step selects a charge component and an optional component-specific rate book.',
+                style: TextStyle(color: LedgerFlowDesign.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SizedBox(
+                    width: 230,
+                    child: TextFormField(
+                      controller: _code,
+                      readOnly:
+                          widget.mode == _CalculationTemplateDialogMode.version,
+                      decoration: const InputDecoration(
+                        labelText: 'Template code',
+                        helperText: 'Stable identifier across versions.',
+                      ),
+                      validator: _required,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 330,
+                    child: TextFormField(
+                      controller: _name,
+                      decoration: const InputDecoration(
+                        labelText: 'Template name',
+                      ),
+                      validator: _required,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _description,
+                maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Description'),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: _active,
+                onChanged: (value) => setState(() => _active = value),
+                title: const Text('Template is active'),
+              ),
+              SectionHeading(
+                title: 'Ordered steps',
+                subtitle:
+                    'A subtotal key both accumulates non-statistical output and can provide the percentage base for a later percentage step.',
+                action: TextButton.icon(
+                  onPressed: () => setState(
+                    () => _steps.add(
+                      _CalculationTemplateStepDraft(
+                        stepNumber: '${(_steps.length + 1) * 10}',
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Add step'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_steps.isEmpty)
+                const EmptyState(message: 'Add at least one step to publish.')
+              else
+                for (var index = 0; index < _steps.length; index++) ...[
+                  _CalculationTemplateStepEditor(
+                    key: ValueKey('template-step-$index'),
+                    index: index,
+                    step: _steps[index],
+                    components: widget.components,
+                    rateBooks: widget.rateBooks,
+                    required: _required,
+                    onChanged: () => setState(() {}),
+                    onRemove: () => setState(() => _steps.removeAt(index)),
+                  ),
+                  if (index != _steps.length - 1) const SizedBox(height: 10),
+                ],
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('Save draft')),
+    ],
+  );
+}
+
+String? _rateBookHeaderComponent(JsonMap rateBook) {
+  final header = _text(rateBook, 'charge_component_code', fallback: '');
+  if (header.isNotEmpty) return header.toUpperCase();
+  final entries = _rows(rateBook, 'entries');
+  final codes = entries
+      .map((entry) => _text(entry, 'charge_component_code').toUpperCase())
+      .where((code) => code.isNotEmpty)
+      .toSet();
+  return codes.length == 1 ? codes.first : null;
+}
+
+class _CalculationTemplateStepEditor extends StatelessWidget {
+  const _CalculationTemplateStepEditor({
+    required super.key,
+    required this.index,
+    required this.step,
+    required this.components,
+    required this.rateBooks,
+    required this.required,
+    required this.onChanged,
+    required this.onRemove,
+  });
+
+  final int index;
+  final _CalculationTemplateStepDraft step;
+  final List<JsonMap> components;
+  final List<JsonMap> rateBooks;
+  final String? Function(String?) required;
+  final VoidCallback onChanged;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final books = rateBooks
+        .where((book) {
+          final component = _rateBookHeaderComponent(book);
+          return component == null ||
+              component == step.componentCode.toUpperCase();
+        })
+        .toList(growable: false);
+    if (step.rateBookId != null &&
+        !books.any((book) => _asInt(book['id']) == step.rateBookId)) {
+      step.rateBookId = null;
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        border: Border.all(color: LedgerFlowDesign.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Step ${index + 1}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text('Remove'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SizedBox(
+                  width: 110,
+                  child: TextFormField(
+                    initialValue: step.stepNumber,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Sequence',
+                      helperText: 'Execution order.',
+                    ),
+                    validator: (value) {
+                      final number = _asInt(value);
+                      return number == null || number < 1
+                          ? 'Positive integer'
+                          : null;
+                    },
+                    onChanged: (value) => step.stepNumber = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 330,
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('template-step-component-$index'),
+                    initialValue: step.componentCode.isEmpty
+                        ? null
+                        : step.componentCode,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Charge component',
+                      helperText: 'The charge produced by this step.',
+                    ),
+                    items: _rateComponentOptions(components, step.componentCode)
+                        .map(
+                          (component) => DropdownMenuItem(
+                            value: _text(
+                              component,
+                              'component_code',
+                            ).toUpperCase(),
+                            child: Text(
+                              _rateComponentLabel(component),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                    validator: required,
+                    onChanged: (value) {
+                      step.componentCode = value ?? '';
+                      step.rateBookId = null;
+                      onChanged();
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: 160,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: step.relationshipRole,
+                    decoration: const InputDecoration(
+                      labelText: 'Relationship role',
+                      helperText: 'Payer, payee, or both.',
+                    ),
+                    items: const ['BOTH', 'PAYER', 'PAYEE']
+                        .map(
+                          (value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(value),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (value) =>
+                        step.relationshipRole = value ?? 'BOTH',
+                  ),
+                ),
+                SizedBox(
+                  width: 330,
+                  child: DropdownButtonFormField<int?>(
+                    key: ValueKey('template-step-rate-book-$index'),
+                    initialValue: step.rateBookId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Rate book',
+                      helperText:
+                          'Only books for the selected component are listed.',
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('Use contract default'),
+                      ),
+                      ...books.map(
+                        (book) => DropdownMenuItem<int?>(
+                          value: _asInt(book['id']),
+                          child: Text(
+                            '${_text(book, 'rate_book_name')} v${_asInt(book['version_number']) ?? 1} (${_text(book, 'status')})',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => step.rateBookId = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 190,
+                  child: TextFormField(
+                    initialValue: step.subtotalKey,
+                    decoration: const InputDecoration(
+                      labelText: 'Subtotal key',
+                      helperText: 'Example: BASE_TRANSPORT.',
+                    ),
+                    onChanged: (value) => step.subtotalKey = value,
+                  ),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: TextFormField(
+                    initialValue: step.preconditionKey,
+                    decoration: const InputDecoration(
+                      labelText: 'Precondition context key',
+                      helperText: 'Blank means this step always runs.',
+                    ),
+                    onChanged: (value) => step.preconditionKey = value,
+                  ),
+                ),
+              ],
+            ),
+            SwitchListTile.adaptive(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              value: step.isStatistical,
+              onChanged: (value) {
+                step.isStatistical = value;
+                onChanged();
+              },
+              title: const Text('Statistical output only'),
+              subtitle: const Text(
+                'Calculate and expose the line, but exclude it from commercial totals.',
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1670,7 +2528,7 @@ class ResponsiveColumns extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 920) {
+        if (constraints.maxWidth < 1080) {
           return Column(children: [left, const SizedBox(height: 16), right]);
         }
         return Row(
@@ -2517,11 +3375,13 @@ class _MatchHealth extends StatelessWidget {
 class _RateTable extends StatelessWidget {
   const _RateTable({
     required this.entries,
+    required this.attributeKeys,
     required this.selectedIndex,
     required this.onSelected,
   });
 
   final List<JsonMap> entries;
+  final Set<String> attributeKeys;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
@@ -2530,19 +3390,25 @@ class _RateTable extends StatelessWidget {
     if (entries.isEmpty) {
       return const EmptyState(message: 'This rate book has no entries.');
     }
+    final definitions = _rateAttributeDefinitions
+        .where((definition) => attributeKeys.contains(definition.key))
+        .toList(growable: false);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
         showCheckboxColumn: false,
-        columns: const [
-          DataColumn(label: Text('Component')),
-          DataColumn(label: Text('Origin')),
-          DataColumn(label: Text('Destination')),
-          DataColumn(label: Text('Equipment')),
-          DataColumn(label: Text('Basis')),
-          DataColumn(label: Text('Rate')),
-          DataColumn(label: Text('Valid from')),
-          DataColumn(label: Text('Valid to')),
+        columns: [
+          const DataColumn(label: Text('Rate')),
+          const DataColumn(label: Text('Currency')),
+          ...definitions.map(
+            (definition) => DataColumn(
+              label: Tooltip(
+                message: definition.help,
+                child: Text(definition.label),
+              ),
+            ),
+          ),
+          const DataColumn(label: Text('Status')),
         ],
         rows: List.generate(entries.length, (index) {
           final entry = entries[index];
@@ -2552,23 +3418,27 @@ class _RateTable extends StatelessWidget {
             cells: [
               DataCell(
                 Text(
-                  _text(entry, 'charge_component_code'),
+                  _text(entry, 'basis').toUpperCase().startsWith('PERCENT')
+                      ? '${_text(entry, 'rate_percent')}%'
+                      : _text(entry, 'rate_amount'),
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
-              DataCell(Text(_text(entry, 'origin_code'))),
-              DataCell(Text(_text(entry, 'destination_code'))),
-              DataCell(Text(_text(entry, 'equipment_type'))),
-              DataCell(Text(_text(entry, 'basis'))),
-              DataCell(
-                Text(
-                  _text(entry, 'basis').toUpperCase().startsWith('PERCENT')
-                      ? '${_text(entry, 'rate_percent')}%'
-                      : '${_text(entry, 'currency')} ${_text(entry, 'rate_amount')}',
+              DataCell(Text(_text(entry, 'currency'))),
+              ...definitions.map(
+                (definition) => DataCell(
+                  Text(
+                    _text(
+                      entry,
+                      definition.key,
+                      fallback: definition.key == 'priority' ? '100' : 'Any',
+                    ),
+                  ),
                 ),
               ),
-              DataCell(Text(_text(entry, 'validity_from'))),
-              DataCell(Text(_text(entry, 'validity_to'))),
+              DataCell(
+                StatusPill(entry['is_active'] == false ? 'INACTIVE' : 'ACTIVE'),
+              ),
             ],
           );
         }),
@@ -2725,88 +3595,286 @@ class _RateBookModeNotice extends StatelessWidget {
   );
 }
 
+class _RateAttributeDefinition {
+  const _RateAttributeDefinition(this.key, this.label, this.help);
+
+  final String key;
+  final String label;
+  final String help;
+}
+
+const _rateAttributeDefinitions = <_RateAttributeDefinition>[
+  _RateAttributeDefinition(
+    'origin_code',
+    'Origin',
+    'Matches the origin location code supplied by the caller.',
+  ),
+  _RateAttributeDefinition(
+    'destination_code',
+    'Destination',
+    'Matches the destination location code supplied by the caller.',
+  ),
+  _RateAttributeDefinition(
+    'mode',
+    'Transport mode',
+    'Restricts the row to AIR, OCEAN, RAIL, or ROAD requests.',
+  ),
+  _RateAttributeDefinition(
+    'equipment_type',
+    'Equipment',
+    'Restricts the row to the caller-supplied equipment type.',
+  ),
+  _RateAttributeDefinition(
+    'commodity_code',
+    'Commodity',
+    'Restricts the row to a commodity or goods classification.',
+  ),
+  _RateAttributeDefinition(
+    'service_level',
+    'Service level',
+    'Restricts the row to the requested service level.',
+  ),
+  _RateAttributeDefinition(
+    'scale_from',
+    'Scale from',
+    'Lower inclusive break for the calculation quantity.',
+  ),
+  _RateAttributeDefinition(
+    'scale_to',
+    'Scale to',
+    'Upper inclusive break for the calculation quantity.',
+  ),
+  _RateAttributeDefinition(
+    'minimum_amount',
+    'Minimum charge',
+    'Minimum amount applied after rate calculation.',
+  ),
+  _RateAttributeDefinition(
+    'maximum_amount',
+    'Maximum charge',
+    'Maximum amount applied after rate calculation.',
+  ),
+  _RateAttributeDefinition(
+    'validity_from',
+    'Valid from',
+    'First date on which the row may be selected.',
+  ),
+  _RateAttributeDefinition(
+    'validity_to',
+    'Valid to',
+    'Last date on which the row may be selected.',
+  ),
+  _RateAttributeDefinition(
+    'basis_override',
+    'Calculation basis override',
+    'Overrides the charge component default only for this row.',
+  ),
+  _RateAttributeDefinition(
+    'charge_context_override',
+    'Charge context override',
+    'Overrides the charge component context only for this row.',
+  ),
+  _RateAttributeDefinition(
+    'calculation_profile_id',
+    'Calculation profile',
+    'Overrides the component calculation profile for this row.',
+  ),
+  _RateAttributeDefinition(
+    'allocation_profile_id',
+    'Allocation profile',
+    'Overrides the component allocation profile for this row.',
+  ),
+  _RateAttributeDefinition(
+    'priority',
+    'Priority',
+    'Lower values win when otherwise equally specific rows match.',
+  ),
+];
+
+Set<String> _rateBookAttributeKeys(JsonMap? book) {
+  final configured = (book?['row_attribute_keys'] as List?)
+      ?.map((value) => value.toString())
+      .where((value) => value.isNotEmpty)
+      .toSet();
+  if (configured != null) return configured;
+  final inferred = <String>{};
+  for (final entry in _rows(book ?? const <String, dynamic>{}, 'entries')) {
+    for (final definition in _rateAttributeDefinitions) {
+      final value = entry[definition.key];
+      if (value != null && value.toString().trim().isNotEmpty) {
+        inferred.add(definition.key);
+      }
+    }
+  }
+  return inferred;
+}
+
 class _RateEntryDraft {
   _RateEntryDraft({
     this.original = const <String, dynamic>{},
     this.componentCode = '',
-    this.basis = 'FLAT',
+    this.basis = '',
+    this.chargeContext = '',
     this.currency = 'USD',
     this.rateAmount = '',
     this.ratePercent = '',
     this.originCode = '',
     this.destinationCode = '',
+    this.mode = '',
     this.equipmentType = '',
+    this.commodityCode = '',
+    this.serviceLevel = '',
+    this.scaleFrom = '',
+    this.scaleTo = '',
+    this.minimumAmount = '',
+    this.maximumAmount = '',
     this.validityFrom = '',
     this.validityTo = '',
     this.calculationProfileId = '',
     this.allocationProfileId = '',
+    this.priority = '100',
     this.isActive = true,
   });
 
   factory _RateEntryDraft.fromJson(JsonMap entry) => _RateEntryDraft(
     original: JsonMap.from(entry),
     componentCode: _text(entry, 'charge_component_code', fallback: ''),
-    basis: _text(entry, 'basis', fallback: 'FLAT'),
+    basis: entry.containsKey('basis_override')
+        ? _text(entry, 'basis_override', fallback: '')
+        : _text(entry, 'basis', fallback: ''),
+    chargeContext: entry.containsKey('charge_context_override')
+        ? _text(entry, 'charge_context_override', fallback: '')
+        : _text(entry, 'charge_context', fallback: ''),
     currency: _text(entry, 'currency', fallback: 'USD'),
     rateAmount: _text(entry, 'rate_amount', fallback: ''),
     ratePercent: _text(entry, 'rate_percent', fallback: ''),
     originCode: _text(entry, 'origin_code', fallback: ''),
     destinationCode: _text(entry, 'destination_code', fallback: ''),
+    mode: _text(entry, 'mode', fallback: ''),
     equipmentType: _text(entry, 'equipment_type', fallback: ''),
+    commodityCode: _text(entry, 'commodity_code', fallback: ''),
+    serviceLevel: _text(entry, 'service_level', fallback: ''),
+    scaleFrom: _text(entry, 'scale_from', fallback: ''),
+    scaleTo: _text(entry, 'scale_to', fallback: ''),
+    minimumAmount: _text(entry, 'minimum_amount', fallback: ''),
+    maximumAmount: _text(entry, 'maximum_amount', fallback: ''),
     validityFrom: _text(entry, 'validity_from', fallback: ''),
     validityTo: _text(entry, 'validity_to', fallback: ''),
     calculationProfileId: _text(entry, 'calculation_profile_id', fallback: ''),
     allocationProfileId: _text(entry, 'allocation_profile_id', fallback: ''),
+    priority: _text(entry, 'priority', fallback: '100'),
     isActive: entry['is_active'] != false,
   );
 
   final JsonMap original;
   String componentCode;
   String basis;
+  String chargeContext;
   String currency;
   String rateAmount;
   String ratePercent;
   String originCode;
   String destinationCode;
+  String mode;
   String equipmentType;
+  String commodityCode;
+  String serviceLevel;
+  String scaleFrom;
+  String scaleTo;
+  String minimumAmount;
+  String maximumAmount;
   String validityFrom;
   String validityTo;
   String calculationProfileId;
   String allocationProfileId;
+  String priority;
   bool isActive;
 
-  bool get isPercentage => basis.trim().toUpperCase().startsWith('PERCENT');
-
-  JsonMap toJson() {
-    final payload = JsonMap.from(original)
-      ..remove('id')
-      ..remove('rate_book_id')
-      ..['charge_component_code'] = componentCode.trim().toUpperCase()
-      ..['basis'] = basis.trim().toUpperCase()
-      ..['currency'] = currency.trim().toUpperCase()
-      ..['is_active'] = isActive;
-    if (originCode.trim().isNotEmpty) {
+  JsonMap toJson(
+    List<JsonMap> components, {
+    required String componentCode,
+    required String bookCurrency,
+    required Set<String> attributeKeys,
+  }) {
+    final component = _rateComponent(components, componentCode);
+    final effectiveBasis = basis.trim().isNotEmpty
+        ? basis.trim().toUpperCase()
+        : _text(
+            component ?? const <String, dynamic>{},
+            'calculation_basis',
+            fallback: 'FLAT',
+          ).toUpperCase();
+    final isPercentage = effectiveBasis.startsWith('PERCENT');
+    final payload = <String, dynamic>{
+      'charge_component_code': componentCode.trim().toUpperCase(),
+      'currency': currency.trim().isEmpty
+          ? bookCurrency.trim().toUpperCase()
+          : currency.trim().toUpperCase(),
+      'is_active': isActive,
+    };
+    if (attributeKeys.contains('basis_override') && basis.trim().isNotEmpty) {
+      payload['basis_override'] = basis.trim().toUpperCase();
+    }
+    if (attributeKeys.contains('charge_context_override') &&
+        chargeContext.trim().isNotEmpty) {
+      payload['charge_context_override'] = chargeContext.trim().toUpperCase();
+    }
+    if (attributeKeys.contains('origin_code') && originCode.trim().isNotEmpty) {
       payload['origin_code'] = originCode.trim().toUpperCase();
     }
-    if (destinationCode.trim().isNotEmpty) {
+    if (attributeKeys.contains('destination_code') &&
+        destinationCode.trim().isNotEmpty) {
       payload['destination_code'] = destinationCode.trim().toUpperCase();
     }
-    if (equipmentType.trim().isNotEmpty) {
+    if (attributeKeys.contains('mode') && mode.trim().isNotEmpty) {
+      payload['mode'] = mode.trim().toUpperCase();
+    }
+    if (attributeKeys.contains('equipment_type') &&
+        equipmentType.trim().isNotEmpty) {
       payload['equipment_type'] = equipmentType.trim().toUpperCase();
     }
-    if (validityFrom.trim().isNotEmpty) {
+    if (attributeKeys.contains('commodity_code') &&
+        commodityCode.trim().isNotEmpty) {
+      payload['commodity_code'] = commodityCode.trim().toUpperCase();
+    }
+    if (attributeKeys.contains('service_level') &&
+        serviceLevel.trim().isNotEmpty) {
+      payload['service_level'] = serviceLevel.trim().toUpperCase();
+    }
+    if (attributeKeys.contains('scale_from') && scaleFrom.trim().isNotEmpty) {
+      payload['scale_from'] = scaleFrom.trim();
+    }
+    if (attributeKeys.contains('scale_to') && scaleTo.trim().isNotEmpty) {
+      payload['scale_to'] = scaleTo.trim();
+    }
+    if (attributeKeys.contains('minimum_amount') &&
+        minimumAmount.trim().isNotEmpty) {
+      payload['minimum_amount'] = minimumAmount.trim();
+    }
+    if (attributeKeys.contains('maximum_amount') &&
+        maximumAmount.trim().isNotEmpty) {
+      payload['maximum_amount'] = maximumAmount.trim();
+    }
+    if (attributeKeys.contains('validity_from') &&
+        validityFrom.trim().isNotEmpty) {
       payload['validity_from'] = validityFrom.trim();
     }
-    if (validityTo.trim().isNotEmpty) {
+    if (attributeKeys.contains('validity_to') && validityTo.trim().isNotEmpty) {
       payload['validity_to'] = validityTo.trim();
     }
     final calculationProfileIdValue = _asInt(calculationProfileId.trim());
-    if (calculationProfileIdValue != null) {
+    if (attributeKeys.contains('calculation_profile_id') &&
+        calculationProfileIdValue != null) {
       payload['calculation_profile_id'] = calculationProfileIdValue;
     }
     final allocationProfileIdValue = _asInt(allocationProfileId.trim());
-    if (allocationProfileIdValue != null) {
+    if (attributeKeys.contains('allocation_profile_id') &&
+        allocationProfileIdValue != null) {
       payload['allocation_profile_id'] = allocationProfileIdValue;
+    }
+    final priorityValue = _asInt(priority.trim());
+    if (attributeKeys.contains('priority') && priorityValue != null) {
+      payload['priority'] = priorityValue;
     }
     if (isPercentage) {
       payload.remove('rate_amount');
@@ -2820,9 +3888,18 @@ class _RateEntryDraft {
 }
 
 class _RateBookDialog extends StatefulWidget {
-  const _RateBookDialog({required this.mode, this.book});
+  const _RateBookDialog({
+    required this.mode,
+    required this.components,
+    required this.calculationProfiles,
+    required this.allocationProfiles,
+    this.book,
+  });
 
   final _RateBookDialogMode mode;
+  final List<JsonMap> components;
+  final List<JsonMap> calculationProfiles;
+  final List<JsonMap> allocationProfiles;
   final JsonMap? book;
 
   @override
@@ -2838,10 +3915,14 @@ class _RateBookDialogState extends State<_RateBookDialog> {
   late final TextEditingController _validFrom;
   late final TextEditingController _validTo;
   late final TextEditingController _calculationBasis;
+  late String _componentCode;
+  late Set<String> _attributeKeys;
   late bool _isActive;
   late List<_RateEntryDraft> _entries;
 
   bool get _codeLocked => widget.mode == _RateBookDialogMode.newVersion;
+
+  bool get _componentLocked => widget.book != null;
 
   bool get _editing => widget.mode == _RateBookDialogMode.editDraft;
 
@@ -2906,6 +3987,26 @@ class _RateBookDialogState extends State<_RateBookDialog> {
         fallback: 'FLAT',
       ),
     );
+    final existingEntries = _rows(book ?? const <String, dynamic>{}, 'entries');
+    _componentCode = _text(
+      book ?? const <String, dynamic>{},
+      'charge_component_code',
+      fallback: existingEntries.isEmpty
+          ? ''
+          : _text(existingEntries.first, 'charge_component_code', fallback: ''),
+    ).toUpperCase();
+    _attributeKeys = _rateBookAttributeKeys(book);
+    if (book == null && _attributeKeys.isEmpty) {
+      _attributeKeys = {
+        'origin_code',
+        'destination_code',
+        'mode',
+        'equipment_type',
+        'service_level',
+        'validity_from',
+        'validity_to',
+      };
+    }
     _isActive = book == null || book['is_active'] != false;
     _entries = _rows(
       book ?? const <String, dynamic>{},
@@ -2925,7 +4026,14 @@ class _RateBookDialogState extends State<_RateBookDialog> {
     super.dispose();
   }
 
-  void _addEntry() => setState(() => _entries.add(_RateEntryDraft()));
+  void _addEntry() => setState(
+    () => _entries.add(
+      _RateEntryDraft(
+        componentCode: _componentCode,
+        currency: _currency.text.trim().toUpperCase(),
+      ),
+    ),
+  );
 
   void _removeEntry(int index) {
     setState(() {
@@ -2952,9 +4060,17 @@ class _RateBookDialogState extends State<_RateBookDialog> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    final component = _rateComponent(widget.components, _componentCode);
+    final calculationBasis = _text(
+      component ?? const <String, dynamic>{},
+      'calculation_basis',
+      fallback: _calculationBasis.text,
+    );
     final payload = <String, dynamic>{
       'rate_book_code': _code.text.trim().toUpperCase(),
       'rate_book_name': _name.text.trim(),
+      'charge_component_code': _componentCode,
+      'row_attribute_keys': _attributeKeys.toList(growable: false)..sort(),
       'description': _description.text.trim().isEmpty
           ? null
           : _description.text.trim(),
@@ -2963,11 +4079,18 @@ class _RateBookDialogState extends State<_RateBookDialog> {
           ? null
           : _validFrom.text.trim(),
       'valid_to': _validTo.text.trim().isEmpty ? null : _validTo.text.trim(),
-      'calculation_basis': _calculationBasis.text.trim().toUpperCase(),
+      'calculation_basis': calculationBasis.trim().toUpperCase(),
       'status': 'DRAFT',
       'is_active': _isActive,
       'entries': _entries
-          .map((entry) => entry.toJson())
+          .map(
+            (entry) => entry.toJson(
+              widget.components,
+              componentCode: _componentCode,
+              bookCurrency: _currency.text,
+              attributeKeys: _attributeKeys,
+            ),
+          )
           .toList(growable: false),
     };
     final lockVersion = _asInt(widget.book?['lock_version']);
@@ -2982,7 +4105,7 @@ class _RateBookDialogState extends State<_RateBookDialog> {
     return AlertDialog(
       title: Text(_title),
       content: SizedBox(
-        width: 900,
+        width: 1120,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -3019,7 +4142,7 @@ class _RateBookDialogState extends State<_RateBookDialog> {
                       ),
                     ),
                     SizedBox(
-                      width: 300,
+                      width: 260,
                       child: TextFormField(
                         controller: _name,
                         decoration: const InputDecoration(
@@ -3031,49 +4154,90 @@ class _RateBookDialogState extends State<_RateBookDialog> {
                       ),
                     ),
                     SizedBox(
-                      width: 120,
-                      child: TextFormField(
-                        controller: _currency,
+                      width: 360,
+                      child: DropdownButtonFormField<String>(
+                        key: const ValueKey('rate-book-component'),
+                        initialValue: _componentCode.isEmpty
+                            ? null
+                            : _componentCode,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Charge component',
+                          helperText:
+                              'Fixed for this rate-book family and inherited by every row.',
+                        ),
+                        items:
+                            _rateComponentOptions(
+                                  widget.components,
+                                  _componentCode,
+                                )
+                                .map(
+                                  (component) => DropdownMenuItem(
+                                    value: _text(
+                                      component,
+                                      'component_code',
+                                    ).toUpperCase(),
+                                    child: Text(_rateComponentLabel(component)),
+                                  ),
+                                )
+                                .toList(growable: false),
+                        validator: (value) =>
+                            _required(value, 'Charge component'),
+                        onChanged: _componentLocked
+                            ? null
+                            : (value) => setState(() {
+                                _componentCode = value ?? '';
+                                for (final entry in _entries) {
+                                  entry.componentCode = _componentCode;
+                                }
+                              }),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 130,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _currency.text.toUpperCase(),
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Currency',
-                          isDense: true,
+                          helperText: 'Default row currency.',
                         ),
+                        items:
+                            referenceValuesWithCurrent(
+                                  currencyValues,
+                                  _currency.text,
+                                )
+                                .map(
+                                  (value) => DropdownMenuItem(
+                                    value: value,
+                                    child: Text(value),
+                                  ),
+                                )
+                                .toList(growable: false),
                         validator: (value) => _required(value, 'Currency'),
+                        onChanged: (value) => setState(() {
+                          _currency.text = value ?? 'USD';
+                          for (final entry in _entries) {
+                            entry.currency = _currency.text;
+                          }
+                        }),
                       ),
                     ),
                     SizedBox(
-                      width: 160,
-                      child: TextFormField(
-                        controller: _calculationBasis,
-                        decoration: const InputDecoration(
-                          labelText: 'Calc basis',
-                          isDense: true,
-                        ),
-                        validator: (value) =>
-                            _required(value, 'Calculation basis'),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 150,
-                      child: TextFormField(
+                      width: 170,
+                      child: _DatePickerField(
                         controller: _validFrom,
-                        decoration: const InputDecoration(
-                          labelText: 'Valid from',
-                          hintText: 'YYYY-MM-DD',
-                          isDense: true,
-                        ),
+                        label: 'Book valid from',
+                        help: 'Optional effective start for all rows.',
                         validator: _isoDate,
                       ),
                     ),
                     SizedBox(
-                      width: 150,
-                      child: TextFormField(
+                      width: 170,
+                      child: _DatePickerField(
                         controller: _validTo,
-                        decoration: const InputDecoration(
-                          labelText: 'Valid to',
-                          hintText: 'YYYY-MM-DD',
-                          isDense: true,
-                        ),
+                        label: 'Book valid to',
+                        help: 'Optional effective end for all rows.',
                         validator: _isoDate,
                       ),
                     ),
@@ -3087,6 +4251,35 @@ class _RateBookDialogState extends State<_RateBookDialog> {
                     labelText: 'Description',
                     isDense: true,
                   ),
+                ),
+                const SizedBox(height: 12),
+                SectionHeading(
+                  title: 'Row columns',
+                  subtitle:
+                      'Choose the applicability and override columns used by every row. Rate value, currency, and active status are always present.',
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _rateAttributeDefinitions
+                      .map(
+                        (definition) => Tooltip(
+                          message: definition.help,
+                          child: FilterChip(
+                            label: Text(definition.label),
+                            selected: _attributeKeys.contains(definition.key),
+                            onSelected: (selected) => setState(() {
+                              if (selected) {
+                                _attributeKeys.add(definition.key);
+                              } else {
+                                _attributeKeys.remove(definition.key);
+                              }
+                            }),
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
                 ),
                 const SizedBox(height: 12),
                 SwitchListTile.adaptive(
@@ -3137,6 +4330,12 @@ class _RateBookDialogState extends State<_RateBookDialog> {
                           key: ValueKey('rate-entry-$index'),
                           index: index,
                           entry: entry,
+                          components: widget.components,
+                          componentCode: _componentCode,
+                          bookCurrency: _currency.text,
+                          attributeKeys: _attributeKeys,
+                          calculationProfiles: widget.calculationProfiles,
+                          allocationProfiles: widget.allocationProfiles,
                           onRemove: () => _removeEntry(index),
                           required: _required,
                           isoDate: _isoDate,
@@ -3162,11 +4361,121 @@ class _RateBookDialogState extends State<_RateBookDialog> {
   }
 }
 
+Future<DateTime?> _pickLedgerFlowDate(BuildContext context, String current) =>
+    showDatePicker(
+      context: context,
+      initialDate: DateTime.tryParse(current) ?? DateTime.now(),
+      firstDate: DateTime(1990),
+      lastDate: DateTime(2100),
+    );
+
+String _formatIsoDate(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+
+class _DatePickerField extends StatelessWidget {
+  const _DatePickerField({
+    required this.controller,
+    required this.label,
+    required this.validator,
+    this.help,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String? help;
+  final String? Function(String?) validator;
+
+  @override
+  Widget build(BuildContext context) => TextFormField(
+    controller: controller,
+    readOnly: true,
+    decoration: InputDecoration(
+      labelText: label,
+      helperText: help,
+      suffixIcon: const Icon(Icons.calendar_today_outlined, size: 17),
+    ),
+    validator: validator,
+    onTap: () async {
+      final selected = await _pickLedgerFlowDate(context, controller.text);
+      if (selected != null) controller.text = _formatIsoDate(selected);
+    },
+  );
+}
+
+class _DatePickerValueField extends StatefulWidget {
+  const _DatePickerValueField({
+    required this.initialValue,
+    required this.label,
+    required this.validator,
+    required this.onChanged,
+    this.help,
+  });
+
+  final String initialValue;
+  final String label;
+  final String? help;
+  final String? Function(String?) validator;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_DatePickerValueField> createState() => _DatePickerValueFieldState();
+}
+
+class _DatePickerValueFieldState extends State<_DatePickerValueField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DatePickerValueField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialValue != oldWidget.initialValue &&
+        widget.initialValue != _controller.text) {
+      _controller.text = widget.initialValue;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => TextFormField(
+    controller: _controller,
+    readOnly: true,
+    decoration: InputDecoration(
+      labelText: widget.label,
+      helperText: widget.help,
+      suffixIcon: const Icon(Icons.calendar_today_outlined, size: 17),
+    ),
+    validator: widget.validator,
+    onTap: () async {
+      final selected = await _pickLedgerFlowDate(context, _controller.text);
+      if (selected == null) return;
+      final value = _formatIsoDate(selected);
+      _controller.text = value;
+      widget.onChanged(value);
+    },
+  );
+}
+
 class _RateEntryEditor extends StatelessWidget {
   const _RateEntryEditor({
     required super.key,
     required this.index,
     required this.entry,
+    required this.components,
+    required this.componentCode,
+    required this.bookCurrency,
+    required this.attributeKeys,
+    required this.calculationProfiles,
+    required this.allocationProfiles,
     required this.onRemove,
     required this.required,
     required this.isoDate,
@@ -3176,6 +4485,12 @@ class _RateEntryEditor extends StatelessWidget {
 
   final int index;
   final _RateEntryDraft entry;
+  final List<JsonMap> components;
+  final String componentCode;
+  final String bookCurrency;
+  final Set<String> attributeKeys;
+  final List<JsonMap> calculationProfiles;
+  final List<JsonMap> allocationProfiles;
   final VoidCallback onRemove;
   final String? Function(String? value, String label) required;
   final String? Function(String? value, {bool required}) isoDate;
@@ -3184,6 +4499,128 @@ class _RateEntryEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final component = _rateComponent(components, componentCode);
+    final inheritedBasis = _text(
+      component ?? const <String, dynamic>{},
+      'calculation_basis',
+      fallback: 'FLAT',
+    ).toUpperCase();
+    final inheritedContext = _text(
+      component ?? const <String, dynamic>{},
+      'charge_context',
+      fallback: 'TRANSPORT',
+    ).toUpperCase();
+    final effectiveBasis = entry.basis.trim().isEmpty
+        ? inheritedBasis
+        : entry.basis.trim().toUpperCase();
+    final isPercentage = effectiveBasis.startsWith('PERCENT');
+    bool selected(String key) => attributeKeys.contains(key);
+
+    Widget textField({
+      required String label,
+      required String initialValue,
+      required ValueChanged<String> onValue,
+      double width = 170,
+      String? help,
+      String? Function(String?)? validator,
+      TextInputType? keyboardType,
+    }) => SizedBox(
+      width: width,
+      child: TextFormField(
+        initialValue: initialValue,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(labelText: label, helperText: help),
+        validator: validator,
+        onChanged: onValue,
+      ),
+    );
+
+    Widget valueDropdown({
+      required String label,
+      required String value,
+      required List<String> values,
+      required ValueChanged<String> onValue,
+      double width = 180,
+      String? help,
+      bool allowBlank = true,
+    }) {
+      final options = [...referenceValuesWithCurrent(values, value)];
+      if (allowBlank && !options.contains('')) options.insert(0, '');
+      return SizedBox(
+        width: width,
+        child: DropdownButtonFormField<String>(
+          initialValue: value,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: label, helperText: help),
+          items: options
+              .map(
+                (option) => DropdownMenuItem(
+                  value: option,
+                  child: Text(
+                    option.isEmpty ? 'Any / not restricted' : option,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          onChanged: (next) {
+            if (next != null) onValue(next);
+          },
+        ),
+      );
+    }
+
+    Widget profileDropdown({
+      required String label,
+      required String value,
+      required List<JsonMap> profiles,
+      required ValueChanged<String> onValue,
+    }) {
+      final ids = profiles
+          .map((profile) => '${profile['id']}')
+          .where((id) => id != 'null')
+          .toSet();
+      if (value.isNotEmpty) ids.add(value);
+      return SizedBox(
+        width: 280,
+        child: DropdownButtonFormField<String>(
+          initialValue: value,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: label,
+            helperText: 'Blank uses the charge component default.',
+          ),
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Inherit default')),
+            ...ids.map((id) {
+              final profile = profiles.cast<JsonMap?>().firstWhere(
+                (item) => '${item?['id']}' == id,
+                orElse: () => null,
+              );
+              final code = _text(
+                profile ?? const <String, dynamic>{},
+                'profile_code',
+                fallback: 'Profile #$id',
+              );
+              final name = _text(
+                profile ?? const <String, dynamic>{},
+                'profile_name',
+                fallback: '',
+              );
+              return DropdownMenuItem(
+                value: id,
+                child: Text(
+                  name.isEmpty ? code : '$code - $name',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }),
+          ],
+          onChanged: (next) => onValue(next ?? ''),
+        ),
+      );
+    }
+
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
@@ -3211,182 +4648,247 @@ class _RateEntryEditor extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 4),
+            Text(
+              '${componentCode.isEmpty ? 'Select a component above' : componentCode} defaults: $inheritedBasis basis, $inheritedContext context',
+              style: const TextStyle(
+                color: LedgerFlowDesign.muted,
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 12,
               runSpacing: 12,
               children: [
-                SizedBox(
-                  width: 180,
-                  child: TextFormField(
-                    initialValue: entry.componentCode,
-                    decoration: const InputDecoration(
-                      labelText: 'Component code',
+                if (selected('basis_override'))
+                  SizedBox(
+                    width: 250,
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey('rate-basis-$index-$inheritedBasis'),
+                      initialValue: entry.basis,
+                      isExpanded: true,
                       isDense: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Calculation basis',
+                        helperText: 'Blank inherits the component default.',
+                      ),
+                      items: [
+                        DropdownMenuItem(
+                          value: '',
+                          child: Text('Inherit ($inheritedBasis)'),
+                        ),
+                        ...referenceValuesWithCurrent(
+                          chargeCalculationBasisValues,
+                          entry.basis,
+                        ).map(
+                          (value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(value),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        entry.basis = value;
+                        onChanged();
+                      },
                     ),
-                    validator: (value) => required(value, 'Component code'),
-                    onChanged: (value) => entry.componentCode = value,
                   ),
-                ),
-                SizedBox(
-                  width: 170,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: entry.basis,
-                    isExpanded: true,
-                    isDense: true,
-                    decoration: const InputDecoration(labelText: 'Basis'),
-                    items: const [
-                      DropdownMenuItem(value: 'FLAT', child: Text('FLAT')),
-                      DropdownMenuItem(
-                        value: 'SHIPMENT',
-                        child: Text('SHIPMENT'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'PER_CONTAINER',
-                        child: Text('PER_CONTAINER'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'PER_WEIGHT',
-                        child: Text('PER_WEIGHT'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'PERCENT',
-                        child: Text('PERCENT'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) return;
-                      entry.basis = value;
-                      onChanged();
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 110,
-                  child: TextFormField(
-                    initialValue: entry.currency,
-                    decoration: const InputDecoration(
-                      labelText: 'Currency',
+                if (selected('charge_context_override'))
+                  SizedBox(
+                    width: 230,
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey('rate-context-$index-$inheritedContext'),
+                      initialValue: entry.chargeContext,
+                      isExpanded: true,
                       isDense: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Charge context',
+                        helperText: 'Blank inherits the component context.',
+                      ),
+                      items: [
+                        DropdownMenuItem(
+                          value: '',
+                          child: Text('Inherit ($inheritedContext)'),
+                        ),
+                        ...referenceValuesWithCurrent(
+                          chargeContextValues,
+                          entry.chargeContext,
+                        ).map(
+                          (value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(value),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        entry.chargeContext = value;
+                        onChanged();
+                      },
                     ),
-                    validator: (value) => required(value, 'Currency'),
-                    onChanged: (value) => entry.currency = value,
                   ),
+                valueDropdown(
+                  label: 'Currency',
+                  value: entry.currency.isEmpty ? bookCurrency : entry.currency,
+                  values: currencyValues,
+                  width: 125,
+                  help: 'Defaults from the rate-book header.',
+                  allowBlank: false,
+                  onValue: (value) => entry.currency = value,
                 ),
-                SizedBox(
-                  width: 140,
-                  child: TextFormField(
-                    key: ValueKey('rate-value-$index-${entry.basis}'),
-                    initialValue: entry.isPercentage
-                        ? entry.ratePercent
-                        : entry.rateAmount,
-                    decoration: InputDecoration(
-                      labelText: entry.isPercentage
-                          ? 'Rate percent'
-                          : 'Rate amount',
-                      isDense: true,
-                    ),
-                    validator: (value) => numeric(value, required: true),
-                    onChanged: (value) {
-                      if (entry.isPercentage) {
-                        entry.ratePercent = value;
-                      } else {
-                        entry.rateAmount = value;
-                      }
-                    },
+                textField(
+                  label: isPercentage ? 'Rate percent' : 'Rate amount',
+                  initialValue: isPercentage
+                      ? entry.ratePercent
+                      : entry.rateAmount,
+                  width: 155,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
                   ),
+                  validator: (value) => numeric(value, required: true),
+                  onValue: (value) {
+                    if (isPercentage) {
+                      entry.ratePercent = value;
+                    } else {
+                      entry.rateAmount = value;
+                    }
+                  },
                 ),
-                SizedBox(
-                  width: 130,
-                  child: TextFormField(
+                if (selected('origin_code'))
+                  textField(
+                    label: 'Origin',
                     initialValue: entry.originCode,
-                    decoration: const InputDecoration(
-                      labelText: 'Origin',
-                      isDense: true,
-                    ),
-                    onChanged: (value) => entry.originCode = value,
+                    help: 'Location code from the caller or location master.',
+                    onValue: (value) => entry.originCode = value,
                   ),
-                ),
-                SizedBox(
-                  width: 130,
-                  child: TextFormField(
+                if (selected('destination_code'))
+                  textField(
+                    label: 'Destination',
                     initialValue: entry.destinationCode,
-                    decoration: const InputDecoration(
-                      labelText: 'Destination',
-                      isDense: true,
-                    ),
-                    onChanged: (value) => entry.destinationCode = value,
+                    help: 'Location code from the caller or location master.',
+                    onValue: (value) => entry.destinationCode = value,
                   ),
-                ),
-                SizedBox(
-                  width: 130,
-                  child: TextFormField(
-                    initialValue: entry.equipmentType,
-                    decoration: const InputDecoration(
-                      labelText: 'Equipment',
-                      isDense: true,
-                    ),
-                    onChanged: (value) => entry.equipmentType = value,
+                if (selected('mode'))
+                  valueDropdown(
+                    label: 'Transport mode',
+                    value: entry.mode,
+                    values: transportModeValues,
+                    help: 'Must match the quote or contract mode.',
+                    onValue: (value) => entry.mode = value,
                   ),
-                ),
-                SizedBox(
-                  width: 150,
-                  child: TextFormField(
-                    initialValue: entry.validityFrom,
-                    decoration: const InputDecoration(
-                      labelText: 'Valid from',
-                      hintText: 'YYYY-MM-DD',
-                      isDense: true,
-                    ),
-                    validator: isoDate,
-                    onChanged: (value) => entry.validityFrom = value,
+                if (selected('equipment_type'))
+                  valueDropdown(
+                    label: 'Equipment',
+                    value: entry.equipmentType,
+                    values: equipmentTypeValues,
+                    help: 'Must match the request equipment type.',
+                    onValue: (value) => entry.equipmentType = value,
                   ),
-                ),
-                SizedBox(
-                  width: 150,
-                  child: TextFormField(
-                    initialValue: entry.validityTo,
-                    decoration: const InputDecoration(
-                      labelText: 'Valid to',
-                      hintText: 'YYYY-MM-DD',
-                      isDense: true,
-                    ),
-                    validator: isoDate,
-                    onChanged: (value) => entry.validityTo = value,
+                if (selected('commodity_code'))
+                  textField(
+                    label: 'Commodity',
+                    initialValue: entry.commodityCode,
+                    help: 'Caller-supplied commodity or goods code.',
+                    onValue: (value) => entry.commodityCode = value,
                   ),
-                ),
-                SizedBox(
-                  width: 170,
-                  child: TextFormField(
-                    initialValue: entry.calculationProfileId,
-                    decoration: const InputDecoration(
-                      labelText: 'Calc profile id',
-                      isDense: true,
-                    ),
-                    validator: (value) {
-                      final text = value?.trim() ?? '';
-                      if (text.isEmpty) return null;
-                      return _asInt(text) == null ? 'Enter an integer' : null;
-                    },
-                    onChanged: (value) => entry.calculationProfileId = value,
+                if (selected('service_level'))
+                  valueDropdown(
+                    label: 'Service level',
+                    value: entry.serviceLevel,
+                    values: serviceLevelValues,
+                    help: 'Must match the request service level.',
+                    onValue: (value) => entry.serviceLevel = value,
                   ),
-                ),
-                SizedBox(
-                  width: 170,
-                  child: TextFormField(
-                    initialValue: entry.allocationProfileId,
-                    decoration: const InputDecoration(
-                      labelText: 'Allocation profile id',
-                      isDense: true,
+                if (selected('scale_from'))
+                  textField(
+                    label: 'Scale from',
+                    initialValue: entry.scaleFrom,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
                     ),
-                    validator: (value) {
-                      final text = value?.trim() ?? '';
-                      if (text.isEmpty) return null;
-                      return _asInt(text) == null ? 'Enter an integer' : null;
-                    },
-                    onChanged: (value) => entry.allocationProfileId = value,
+                    validator: numeric,
+                    onValue: (value) => entry.scaleFrom = value,
                   ),
-                ),
+                if (selected('scale_to'))
+                  textField(
+                    label: 'Scale to',
+                    initialValue: entry.scaleTo,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: numeric,
+                    onValue: (value) => entry.scaleTo = value,
+                  ),
+                if (selected('minimum_amount'))
+                  textField(
+                    label: 'Minimum charge',
+                    initialValue: entry.minimumAmount,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: numeric,
+                    onValue: (value) => entry.minimumAmount = value,
+                  ),
+                if (selected('maximum_amount'))
+                  textField(
+                    label: 'Maximum charge',
+                    initialValue: entry.maximumAmount,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: numeric,
+                    onValue: (value) => entry.maximumAmount = value,
+                  ),
+                if (selected('validity_from'))
+                  SizedBox(
+                    width: 180,
+                    child: _DatePickerValueField(
+                      initialValue: entry.validityFrom,
+                      label: 'Valid from',
+                      help: 'Optional row-level effective start.',
+                      validator: isoDate,
+                      onChanged: (value) => entry.validityFrom = value,
+                    ),
+                  ),
+                if (selected('validity_to'))
+                  SizedBox(
+                    width: 180,
+                    child: _DatePickerValueField(
+                      initialValue: entry.validityTo,
+                      label: 'Valid to',
+                      help: 'Optional row-level effective end.',
+                      validator: isoDate,
+                      onChanged: (value) => entry.validityTo = value,
+                    ),
+                  ),
+                if (selected('calculation_profile_id'))
+                  profileDropdown(
+                    label: 'Calculation profile',
+                    value: entry.calculationProfileId,
+                    profiles: calculationProfiles,
+                    onValue: (value) => entry.calculationProfileId = value,
+                  ),
+                if (selected('allocation_profile_id'))
+                  profileDropdown(
+                    label: 'Allocation profile',
+                    value: entry.allocationProfileId,
+                    profiles: allocationProfiles,
+                    onValue: (value) => entry.allocationProfileId = value,
+                  ),
+                if (selected('priority'))
+                  textField(
+                    label: 'Priority',
+                    initialValue: entry.priority,
+                    help: 'Lower wins after specificity.',
+                    width: 130,
+                    keyboardType: TextInputType.number,
+                    validator: (value) => _asInt(value?.trim()) == null
+                        ? 'Enter an integer'
+                        : null,
+                    onValue: (value) => entry.priority = value,
+                  ),
               ],
             ),
             const SizedBox(height: 10),
@@ -3405,6 +4907,56 @@ class _RateEntryEditor extends StatelessWidget {
       ),
     );
   }
+}
+
+List<JsonMap> _rateComponentOptions(
+  List<JsonMap> components,
+  String selectedCode,
+) {
+  final selected = selectedCode.trim().toUpperCase();
+  final byCode = <String, JsonMap>{};
+  for (final component in components) {
+    final code = _text(component, 'component_code').trim().toUpperCase();
+    if (code.isEmpty) continue;
+    if (component['is_active'] != false || code == selected) {
+      byCode[code] = component;
+    }
+  }
+  if (selected.isNotEmpty && !byCode.containsKey(selected)) {
+    byCode[selected] = <String, dynamic>{
+      'component_code': selected,
+      'component_name': 'Unavailable component',
+      'is_active': false,
+    };
+  }
+  final options = byCode.values.toList(growable: false);
+  options.sort(
+    (left, right) => _rateComponentLabel(
+      left,
+    ).toLowerCase().compareTo(_rateComponentLabel(right).toLowerCase()),
+  );
+  return options;
+}
+
+JsonMap? _rateComponent(List<JsonMap> components, String componentCode) {
+  final selected = componentCode.trim().toUpperCase();
+  if (selected.isEmpty) return null;
+  return components.cast<JsonMap?>().firstWhere(
+    (component) =>
+        _text(
+          component ?? const <String, dynamic>{},
+          'component_code',
+        ).toUpperCase() ==
+        selected,
+    orElse: () => null,
+  );
+}
+
+String _rateComponentLabel(JsonMap component) {
+  final code = _text(component, 'component_code');
+  final name = _text(component, 'component_name', fallback: code);
+  final inactive = component['is_active'] == false ? ' - inactive' : '';
+  return '$name ($code)$inactive';
 }
 
 class _ProfileTable extends StatelessWidget {

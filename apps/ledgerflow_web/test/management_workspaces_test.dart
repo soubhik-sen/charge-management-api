@@ -57,6 +57,118 @@ void main() {
     expect(captured?['business_date_profile_id'], isNull);
   });
 
+  testWidgets('expands a component row inline and exposes edit', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1500, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: LedgerFlowDesign.theme,
+        home: ComponentManagementWorkspace(
+          records: const [
+            {
+              'id': 7,
+              'component_code': 'DROP_OFF',
+              'component_name': 'Drop Off',
+              'category': 'DESTINATION',
+              'charge_context': 'DESTINATION',
+              'default_party_role': 'BOTH',
+              'calculation_basis': 'PER_CONTAINER',
+              'charge_date_basis': 'DOCUMENT_DATE',
+              'business_date_policy_mode': 'LEGACY_BASIS',
+              'default_calculation_profile_id': 11,
+              'is_active': true,
+            },
+          ],
+          calculationProfiles: const [
+            {
+              'id': 11,
+              'profile_code': 'PER_CONTAINER',
+              'profile_name': 'Rate per container',
+            },
+          ],
+          allocationProfiles: const [],
+          businessDateProfiles: const [],
+          live: true,
+          onMutation:
+              ({
+                required method,
+                required path,
+                body,
+                required successMessage,
+              }) async => true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Default profile usage'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('component-row-7')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Default profile usage'), findsOneWidget);
+    expect(find.text('PER_CONTAINER - Rate per container'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Edit defaults'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Edit defaults'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit component'), findsOneWidget);
+    expect(find.text('DESTINATION'), findsWidgets);
+  });
+
+  testWidgets('uses a compact component table on narrow screens', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(700, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: LedgerFlowDesign.theme,
+        home: ComponentManagementWorkspace(
+          records: const [
+            {
+              'id': 8,
+              'component_code': 'PORT_FEE',
+              'component_name': 'Port Fee',
+              'category': 'PORT',
+              'charge_context': 'DESTINATION',
+              'default_party_role': 'PAYEE',
+              'calculation_basis': 'FLAT',
+              'is_active': true,
+            },
+          ],
+          calculationProfiles: const [],
+          allocationProfiles: const [],
+          businessDateProfiles: const [],
+          live: false,
+          onMutation:
+              ({
+                required method,
+                required path,
+                body,
+                required successMessage,
+              }) async => true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Category'), findsNothing);
+    expect(find.text('Context'), findsNothing);
+    final row = find.byKey(const ValueKey('component-row-8'));
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Classification'), findsOneWidget);
+    expect(find.text('Category'), findsOneWidget);
+    expect(find.text('DESTINATION'), findsOneWidget);
+  });
+
   testWidgets('creates a calculation profile with an initial draft', (
     tester,
   ) async {

@@ -20,13 +20,15 @@ The token is held only in memory. Reloading the page removes it. The browser nev
 3. Create business-date profiles, publish them, and add assignment scopes when inheritance is required.
 4. Create or edit charge components and select the published profiles as defaults.
 5. Maintain FX rates needed by cross-currency pricing.
-6. Create and publish rate books, then reference the appropriate component/profile defaults from contracts.
+6. Create and publish component-specific rate books.
+7. Create and publish calculation templates when a contract needs an ordered multi-component build.
+8. Reference published books or templates from contracts.
 
 This order prevents a component from pointing to a draft definition that cannot safely execute.
 
 ## Charge Components
 
-Open **Components** to search the component catalog and inspect current defaults.
+Open **Components** to search the full-width component catalog. Select a row to expand its classification, rating defaults, profile usage, and edit actions in place; select it again to collapse it.
 
 ### Create A Component
 
@@ -41,6 +43,12 @@ Open **Components** to search the component catalog and inspect current defaults
 6. Save the component.
 
 Use **Edit defaults** to change reusable behavior. **Deactivate** is a soft delete: historical documents retain their component reference while new work can exclude the inactive component.
+
+Category is stable classification metadata used for cataloging and reporting; it does not change the amount formula. Charge context identifies the operational side or lifecycle area where a charge applies. For example, `DESTINATION` means import/arrival-side work, and a rate row with that effective context matches a quote that supplies `charge_context=DESTINATION`. The tax switch similarly classifies a component for reporting and downstream tax handling; it does not calculate tax by itself.
+
+Calculation basis, charge context, calculation profile, allocation profile, and business-date policy are component-level defaults. A rate row may leave basis/context blank to inherit them or select an explicit override. The API returns both the resolved snapshot (`basis`, `charge_context`) used by that rate-book version and nullable override fields (`basis_override`, `charge_context_override`). This snapshot keeps published pricing reproducible if the component default changes later.
+
+Migration `0022` marks every pre-existing row basis as an explicit override because basis was mandatory in the earlier API. This preserves historical behavior instead of silently replacing it with a later component default.
 
 ## Calculation Profiles
 
@@ -126,17 +134,32 @@ FX sources themselves remain API-maintained. The UI derives source choices from 
 
 Open **Rate books** to manage pricing tables grouped by stable rate-book code.
 
-1. Select **New rate book**, enter the header and draft rate rows, then save it in `DRAFT` status.
-2. Edit the draft while it is under review. The UI sends its `lock_version` to prevent a stale overwrite.
-3. Select **Publish draft** to make that version available to contracts and rating.
-4. Select **New draft** from an existing version for later pricing changes.
-5. Inspect the real version history; published and retired versions are immutable.
+1. Select **New rate book** and choose the single charge component priced by the book. The component is fixed for the family.
+2. Choose **Row columns**. These controlled columns determine which lane, mode, equipment, commodity, service, scale, validity, profile, and override values appear on every row.
+3. Add rows. Use the dropdowns for controlled values, profile selectors for overrides, and date pickers for effective dates.
+4. Save the book in `DRAFT` status.
+5. Edit the draft while it is under review. The UI sends its `lock_version` to prevent a stale overwrite.
+6. Select **Publish draft** to make that version available to contracts and rating.
+7. Select **New draft** from an existing version for later pricing changes.
+8. Inspect the real version history; published and retired versions are immutable.
 
-Every fixed rate row requires `rate_amount`; percentage rows require `rate_percent` and receive their monetary base from quote context or a calculation-template subtotal. Contracts cannot release against an unpublished rate-book version.
+Every fixed rate row requires `rate_amount`; percentage rows require `rate_percent` and receive their monetary base from quote context or a calculation-template subtotal. Basis and charge context inherit from the header component unless their override columns are selected. Removing a row column also removes its values from the saved payload, so hidden dimensions cannot continue affecting matching. Contracts cannot release against an unpublished rate-book version.
+
+## Calculation Templates
+
+Open **Calculation templates** when a contract needs more than one charge component.
+
+1. Select **New template** and enter a stable code and name.
+2. Add ordered steps. Each step selects a component, relationship role, and optional rate book. The rate-book dropdown shows only books for that component.
+3. Optionally set a subtotal key, a boolean quote-context precondition key, or mark output as statistical.
+4. Save and edit the draft, then select **Publish** after every referenced rate book is published.
+5. Use **New draft** for later changes; published versions remain immutable.
+
+A rate book answers "how much for this one component?" A calculation template answers "which components run, in what order, and which rate book prices each one?" Subtotal keys accumulate earlier non-statistical steps and can provide the monetary base for later percentage steps.
 
 ## Version Lifecycle
 
-All three profile families use the same lifecycle:
+Versioned profiles, rate books, and calculation templates use the same lifecycle:
 
 ```text
 Create profile -> Draft version -> Review/edit -> Publish -> Retired by later publication
@@ -163,6 +186,7 @@ Typical UI operations require list/read actions plus:
 | Date assignments | `charge.business_date_profiles.assignments.create`, `update`, `delete` |
 | FX rates | `charge.fx_rates.create`, `update`, `deactivate` |
 | Rate books | `charge.rate_books.create`, `workspace.update`, `versions.create`, `publish` |
+| Calculation templates | `charge.calculation_templates.create`, `workspace.update`, `versions.create`, `publish` |
 
 The UI is not a security boundary. The API policy adapter must enforce the final authorization and tenant scope.
 

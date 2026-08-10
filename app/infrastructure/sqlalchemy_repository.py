@@ -47,6 +47,7 @@ from app.db.models import (
     ChargeRateContractRow,
 )
 from app.domain.models import (
+    RATE_BOOK_ROW_ATTRIBUTE_KEYS,
     BusinessDateProfile,
     BusinessDateProfileAssignment,
     BusinessDateProfileStep,
@@ -141,6 +142,21 @@ def _money_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     return Decimal(value).quantize(Decimal("0.01"))
+
+
+def _infer_rate_book_row_attribute_keys(entries: list[RateBookEntry]) -> list[str]:
+    inferred: list[str] = []
+    for key in RATE_BOOK_ROW_ATTRIBUTE_KEYS:
+        for entry in entries:
+            value = getattr(entry, key)
+            if key == "priority":
+                present = value != 100
+            else:
+                present = value not in (None, "")
+            if present:
+                inferred.append(key)
+                break
+    return inferred
 
 
 def _charge_line_depth(lines_by_id: dict[int, ChargeLine], line: ChargeLine, cache: dict[int, int]) -> int:
@@ -378,10 +394,10 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             .execution_options(populate_existing=True)
         )
         if row is None:
-            row = ChargeIdSequenceRow(bucket=bucket, last_value=0)
+            row = ChargeIdSequenceRow(bucket=bucket, last_value=self._ids[bucket])
             self.session.add(row)
         self._sequence_rows[bucket] = row
-        row.last_value = int(row.last_value) + 1
+        row.last_value = max(int(row.last_value), self._ids[bucket]) + 1
         self._ids[bucket] = int(row.last_value)
         self.session.flush()
         return self._ids[bucket]
@@ -884,10 +900,23 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             entries_by_book[entry.rate_book_id].append(entry)
             self._ids["rate_book_entry"] = max(self._ids["rate_book_entry"], entry.id)
         for row in books:
+            book_entries = sorted(entries_by_book.get(row.id, []), key=lambda item: item.id)
+            component = self.components.get(row.charge_component_id) if row.charge_component_id else None
+            if component is None:
+                component_codes = {entry.charge_component_code for entry in book_entries}
+                component_code = next(iter(component_codes)) if len(component_codes) == 1 else None
+            else:
+                component_code = component.component_code
             book = RateBook(
                 id=row.id,
                 rate_book_code=row.rate_book_code,
                 rate_book_name=row.rate_book_name,
+                charge_component_code=component_code,
+                row_attribute_keys=(
+                    list(row.row_attribute_keys_json)
+                    if row.row_attribute_keys_json is not None
+                    else _infer_rate_book_row_attribute_keys(book_entries)
+                ),
                 description=row.description,
                 currency=row.currency,
                 valid_from=row.valid_from,
@@ -898,7 +927,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 supersedes_rate_book_id=row.supersedes_rate_book_id,
                 lock_version=row.lock_version,
                 published_at=row.published_at,
-                entries=sorted(entries_by_book.get(row.id, []), key=lambda item: item.id),
+                entries=book_entries,
                 is_active=row.is_active,
             )
             self.rate_books[book.id] = book
@@ -944,6 +973,10 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 template_name=row.template_name,
                 description=row.description,
                 status=row.status,
+                version_number=row.version_number,
+                supersedes_calculation_template_id=row.supersedes_calculation_template_id,
+                lock_version=row.lock_version,
+                published_at=row.published_at,
                 is_active=row.is_active,
                 steps=sorted(steps_by_template.get(row.id, []), key=lambda item: (item.step_number, item.id)),
                 created_at=row.created_at,
@@ -1585,11 +1618,18 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
 
     def _persist_rate_books(self) -> None:
         for book in sorted(self.rate_books.values(), key=lambda item: item.id):
+            component = (
+                self.components_by_code.get(book.charge_component_code)
+                if book.charge_component_code
+                else None
+            )
             self.session.merge(
                 ChargeRateBookRow(
                     id=book.id,
                     rate_book_code=book.rate_book_code,
                     rate_book_name=book.rate_book_name,
+                    charge_component_id=component.id if component else None,
+                    row_attribute_keys_json=list(book.row_attribute_keys),
                     description=book.description,
                     currency=book.currency,
                     valid_from=book.valid_from,
@@ -1615,7 +1655,10 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     charge_component_id=component.id,
                     rate_amount=entry.rate_amount,
                     rate_percent=entry.rate_percent,
-                    basis=entry.basis,
+                    basis=entry.basis or "FLAT",
+                    basis_override=entry.basis_override,
+                    charge_context=entry.charge_context,
+                    charge_context_override=entry.charge_context_override,
                     currency=entry.currency,
                     calculation_profile_id=entry.calculation_profile_id,
                     allocation_profile_id=entry.allocation_profile_id,
@@ -1647,6 +1690,10 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     template_name=template.template_name,
                     description=template.description,
                     status=template.status,
+                    version_number=template.version_number,
+                    supersedes_calculation_template_id=template.supersedes_calculation_template_id,
+                    lock_version=template.lock_version,
+                    published_at=template.published_at,
                     is_active=template.is_active,
                     created_at=template.created_at,
                     updated_at=template.updated_at,

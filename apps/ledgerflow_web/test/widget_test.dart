@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ledgerflow_web/core/design.dart';
 import 'package:ledgerflow_web/features/ledgerflow_shell.dart';
 import 'package:ledgerflow_web/main.dart';
 
@@ -14,6 +15,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LedgerFlowShell), findsOneWidget);
+    expect(find.byType(LedgerFlowLogo), findsWidgets);
+    final applicationScale = tester.widget<Transform>(
+      find.byKey(const ValueKey('ledgerflow-application-scale')),
+    );
+    expect(applicationScale.transform.storage.first, closeTo(0.8, 0.001));
     expect(find.text('Charge operations'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.menu));
@@ -41,6 +47,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('What a component controls'), findsOneWidget);
+    expect(find.text('Default profile usage'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('component-row-1')));
+    await tester.pumpAndSettle();
     expect(find.text('Default profile usage'), findsOneWidget);
     expect(find.text('CONTAINER_FLAT - Container flat rate'), findsOneWidget);
     final create = tester.widget<FilledButton>(

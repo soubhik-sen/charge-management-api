@@ -18,6 +18,32 @@ def setup_function() -> None:
     repository.reset()
 
 
+def test_seeded_road_per_kilometer_profile_is_executable() -> None:
+    profiles = client.get(
+        "/api/v1/charge-management/calculation-profiles?q=PER_KILOMETER",
+        headers=AUTH,
+    )
+    assert profiles.status_code == 200, profiles.text
+    profile = profiles.json()["items"][0]
+    version_id = profile["published_version_id"]
+
+    preview = client.post(
+        "/api/v1/charge-management/calculations/preview",
+        headers=AUTH,
+        json={
+            "basis": "DISTANCE",
+            "rate_amount": "1.25",
+            "source_currency": "EUR",
+            "target_currency": "EUR",
+            "calculation_profile_version_id": version_id,
+            "calculation_inputs": {"DISTANCE_KM": "480"},
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["source_amount"] == "600.00"
+    assert preview.json()["quantity"] == "480.000000"
+
+
 def test_requires_bearer_token() -> None:
     response = client.get("/api/v1/charge-management/initialization-data")
     assert response.status_code == 401
@@ -45,7 +71,18 @@ def test_initialization_data_has_seeded_components() -> None:
     codes = {row["component_code"] for row in response.json()["components"]}
     assert "BASE_FREIGHT" in codes
     assert "MARGIN_MARKUP" in codes
-    assert len(codes) == 32
+    assert len(codes) == 54
+    road_components = {
+        row["component_code"]: row
+        for row in response.json()["components"]
+        if row["charge_context"] == "ROAD"
+    }
+    assert len(road_components) == 22
+    assert road_components["ROAD_FREIGHT_FTL"]["default_calculation_profile_id"] is not None
+    assert road_components["ROAD_FREIGHT_LTL"]["allocation_profile_id"] is not None
+    assert road_components["ROAD_TOLL"]["calculation_basis"] == "DISTANCE"
+    assert road_components["WAITING_TIME"]["calculation_basis"] == "PER_HOUR"
+    assert road_components["CMR_DOCUMENTATION"]["business_date_policy_mode"] == "PROFILE_OVERRIDE"
     assert {row["charge_date_basis"] for row in response.json()["components"]} == {"DOCUMENT_DATE"}
     assert response.json()["settings"]["quotation_policy"] == "OPTIONAL"
     assert response.json()["settings"]["quote_acceptance_mode"] == "CUSTOMER_ACCEPTANCE"
@@ -75,10 +112,17 @@ def test_initialization_data_has_seeded_components() -> None:
         "PROFILE_OVERRIDE",
     ]
     assert "CUSTOMER" in response.json()["reference_data"]["business_date_assignment_scope_types"]
-    assert response.json()["reference_data"]["business_date_shipment_scopes"] == ["OCEAN_HOUSE", "AIR_HOUSE"]
+    assert response.json()["reference_data"]["business_date_shipment_scopes"] == [
+        "OCEAN_HOUSE",
+        "AIR_HOUSE",
+        "ROAD_SHIPMENT",
+    ]
     assert response.json()["reference_data"]["business_date_purposes"] == ["EXCHANGE_RATE_DATE"]
     assert response.json()["reference_data"]["fx_rate_types"] == ["MID", "BUY", "SELL", "CUSTOM"]
     assert "SHIPPED_ON_BOARD_DATE" in response.json()["reference_data"]["business_date_keys"]
+    assert "ROAD_ACTUAL_PICKUP_DATE" in response.json()["reference_data"]["business_date_keys"]
+    assert "ROAD_ACTUAL_DELIVERY_DATE" in response.json()["reference_data"]["business_date_keys"]
+    assert "CMR_ISSUE_DATE" in response.json()["reference_data"]["business_date_keys"]
 
 
 def test_charge_component_crud_and_search() -> None:
@@ -155,9 +199,18 @@ def test_charge_component_crud_and_search() -> None:
 def test_calculation_profile_lifecycle_and_server_side_rating_snapshot() -> None:
     seeded = client.get("/api/v1/charge-management/calculation-profiles", headers=AUTH)
     assert seeded.status_code == 200, seeded.text
-    assert seeded.json()["total"] == 8
+    assert seeded.json()["total"] == 13
     seeded_codes = {row["profile_code"] for row in seeded.json()["items"]}
-    assert {"FLAT_AMOUNT", "PER_CONTAINER", "PER_DAY"} <= seeded_codes
+    assert {
+        "FLAT_AMOUNT",
+        "PER_CONTAINER",
+        "PER_DAY",
+        "PER_KILOMETER",
+        "PER_STOP",
+        "PER_PALLET",
+        "PER_LOADING_METER",
+        "PER_HOUR",
+    } <= seeded_codes
 
     created = client.post(
         "/api/v1/charge-management/calculation-profiles",
@@ -256,18 +309,35 @@ def test_calculation_profile_lifecycle_and_server_side_rating_snapshot() -> None
                 {
                     "charge_component_code": "CONTAINER_RATE_TEST",
                     "rate_amount": "25.00",
-                    "basis": "CONTAINER",
                     "currency": "USD",
                     "origin_code": "BRSSZ",
                     "destination_code": "USNYC",
                     "mode": "OCEAN",
-                    "calculation_profile_id": profile["id"],
+                },
+                {
+                    "charge_component_code": "CONTAINER_RATE_TEST",
+                    "rate_amount": "999.00",
+                    "charge_context_override": "DESTINATION",
+                    "currency": "USD",
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "priority": 1,
                 }
             ],
         },
     )
     assert rate_book.status_code == 201, rate_book.text
-    assert rate_book.json()["entries"][0]["calculation_profile_id"] == profile["id"]
+    inherited_entry = rate_book.json()["entries"][0]
+    assert inherited_entry["basis"] == "PER_CONTAINER"
+    assert inherited_entry["basis_override"] is None
+    assert inherited_entry["charge_context"] == "TRANSPORT"
+    assert inherited_entry["charge_context_override"] is None
+    assert inherited_entry["calculation_profile_id"] is None
+    destination_entry = rate_book.json()["entries"][1]
+    assert destination_entry["basis"] == "PER_CONTAINER"
+    assert destination_entry["charge_context"] == "DESTINATION"
+    assert destination_entry["charge_context_override"] == "DESTINATION"
     _publish_rate_book(rate_book.json()["id"])
 
     contract = client.post(
@@ -290,13 +360,12 @@ def test_calculation_profile_lifecycle_and_server_side_rating_snapshot() -> None
                     "origin_code": "BRSSZ",
                     "destination_code": "USNYC",
                     "mode": "OCEAN",
-                    "calculation_profile_id": profile["id"],
                 }
             ],
         },
     )
     assert contract.status_code == 201, contract.text
-    assert contract.json()["lines"][0]["calculation_profile_id"] == profile["id"]
+    assert contract.json()["lines"][0]["calculation_profile_id"] is None
 
     release = client.post(
         f"/api/v1/charge-management/contracts/{contract.json()['id']}/release",
@@ -319,6 +388,7 @@ def test_calculation_profile_lifecycle_and_server_side_rating_snapshot() -> None
         },
     )
     assert quote.status_code == 201, quote.text
+    assert quote.json()["charge_context"] == "TRANSPORT"
     quote_id = quote.json()["id"]
     _submit_quote(quote_id)
 
@@ -606,7 +676,9 @@ def test_component_alias_crud_and_search() -> None:
 def test_allocation_profile_lifecycle_and_component_propagation() -> None:
     seeded = client.get("/api/v1/charge-management/allocation-profiles", headers=AUTH)
     assert seeded.status_code == 200, seeded.text
-    assert seeded.json()["total"] == 3
+    assert seeded.json()["total"] == 6
+    seeded_codes = {row["profile_code"] for row in seeded.json()["items"]}
+    assert {"ROAD_WEIGHT_TO_ITEM", "ROAD_VOLUME_TO_ITEM", "ROAD_EQUAL_TO_ITEM"} <= seeded_codes
     assert {
         (
             row["versions"][0]["source_level"],
@@ -730,10 +802,10 @@ def test_allocation_profile_lifecycle_and_component_propagation() -> None:
 def test_business_date_profile_lifecycle_assignment_and_resolution() -> None:
     seeded = client.get("/api/v1/charge-management/business-date-profiles", headers=AUTH)
     assert seeded.status_code == 200, seeded.text
-    assert seeded.json()["total"] == 2
+    assert seeded.json()["total"] == 3
     assert {
         row["profile_code"] for row in seeded.json()["items"]
-    } == {"OCEAN_HOUSE_STANDARD", "AIR_HOUSE_STANDARD"}
+    } == {"OCEAN_HOUSE_STANDARD", "AIR_HOUSE_STANDARD", "ROAD_SHIPMENT_STANDARD"}
 
     created = client.post(
         "/api/v1/charge-management/business-date-profiles",
@@ -1135,6 +1207,10 @@ def test_rate_book_list_workspace_and_update_contract() -> None:
     assert updated.json()["rate_book"]["description"] == "Effective 2026 ocean rates"
     assert updated.json()["rate_book"]["calculation_basis"] == "PER_CONTAINER"
     assert updated.json()["entries"][0]["rate_amount"] == "1750.00"
+    assert updated.json()["entries"][0]["basis"] == "CONTAINER"
+    assert updated.json()["entries"][0]["basis_override"] == "CONTAINER"
+    assert updated.json()["entries"][0]["charge_context"] == "TRANSPORT"
+    assert updated.json()["entries"][0]["charge_context_override"] is None
     _publish_rate_book(rate_book_id)
     filtered = client.get(
         "/api/v1/charge-management/rate-books?status=PUBLISHED&calculation_basis=PER_CONTAINER",
@@ -1229,7 +1305,8 @@ def test_calculation_template_list_workspace_and_update_contract() -> None:
         json={
             "template_code": "CT-OCEAN-001",
             "template_name": "Updated ocean charge build",
-            "status": "RELEASED",
+            "status": "DRAFT",
+            "expected_lock_version": 1,
             "steps": [
                 {
                     "step_number": 10,
@@ -1243,8 +1320,117 @@ def test_calculation_template_list_workspace_and_update_contract() -> None:
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["template"]["template_name"] == "Updated ocean charge build"
-    assert updated.json()["template"]["status"] == "RELEASED"
+    assert updated.json()["template"]["status"] == "DRAFT"
+    assert updated.json()["template"]["lock_version"] == 2
     assert updated.json()["steps"][0]["relationship_role"] == "PAYER"
+
+    published = client.post(
+        f"/api/v1/charge-management/calculation-templates/{template_id}/publish",
+        headers=AUTH,
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["template"]["status"] == "PUBLISHED"
+    assert published.json()["template"]["version_number"] == 1
+
+    immutable = client.put(
+        f"/api/v1/charge-management/calculation-templates/{template_id}/workspace",
+        headers=AUTH,
+        json={
+            "template_code": "CT-OCEAN-001",
+            "template_name": "Should not update",
+            "status": "DRAFT",
+            "steps": [],
+        },
+    )
+    assert immutable.status_code == 409
+
+    versioned = client.post(
+        f"/api/v1/charge-management/calculation-templates/{template_id}/versions",
+        headers=AUTH,
+        json={
+            "template_code": "CT-OCEAN-001",
+            "template_name": "Ocean charge build v2",
+            "status": "DRAFT",
+            "steps": [
+                {
+                    "step_number": 10,
+                    "charge_component_code": "BASE_FREIGHT",
+                    "relationship_role": "BOTH",
+                    "rate_book_id": rate_book_id,
+                }
+            ],
+        },
+    )
+    assert versioned.status_code == 201, versioned.text
+    assert versioned.json()["template"]["version_number"] == 2
+    assert len(versioned.json()["versions"]) == 2
+
+
+def test_rate_book_is_component_scoped_and_persists_selected_row_columns() -> None:
+    created = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "ROAD_LINEHAUL_MADRID",
+            "rate_book_name": "Madrid road linehaul",
+            "charge_component_code": "BASE_FREIGHT",
+            "row_attribute_keys": [
+                "origin_code",
+                "destination_code",
+                "mode",
+                "service_level",
+                "validity_from",
+            ],
+            "currency": "EUR",
+            "entries": [
+                {
+                    "charge_component_code": "BASE_FREIGHT",
+                    "rate_amount": "475.00",
+                    "currency": "EUR",
+                    "origin_code": "ESMAD",
+                    "destination_code": "ESBCN",
+                    "mode": "ROAD",
+                    "service_level": "STANDARD",
+                    "validity_from": "2026-08-10",
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["charge_component_code"] == "BASE_FREIGHT"
+    assert payload["row_attribute_keys"] == [
+        "origin_code",
+        "destination_code",
+        "mode",
+        "service_level",
+        "validity_from",
+    ]
+
+    filtered = client.get(
+        "/api/v1/charge-management/rate-books?charge_component_code=BASE_FREIGHT",
+        headers=AUTH,
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 1
+
+    mismatched = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "INVALID_MIXED_COMPONENT",
+            "rate_book_name": "Invalid mixed component",
+            "charge_component_code": "BASE_FREIGHT",
+            "entries": [
+                {
+                    "charge_component_code": "FUEL_SURCHARGE",
+                    "rate_percent": "8.5",
+                    "currency": "EUR",
+                }
+            ],
+        },
+    )
+    assert mismatched.status_code == 422
 
 
 def test_contract_release_requires_rate_source_line() -> None:
@@ -2794,7 +2980,8 @@ def test_default_customer_pricing_rates_without_provider_cost_layer() -> None:
 def test_openapi_exposes_core_paths() -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
-    paths = response.json()["paths"]
+    openapi = response.json()
+    paths = openapi["paths"]
     assert "/api/v1/charge-management/calculations/preview" in paths
     assert "post" in paths["/api/v1/charge-management/calculations/preview"]
     assert "/api/v1/charge-management/business-dates/resolve" in paths
@@ -2850,6 +3037,12 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/invoices/{invoice_id}/workspace" in paths
     assert "put" in paths["/api/v1/charge-management/invoices/{invoice_id}/workspace"]
     assert "/api/v1/charge-management/charge-documents/{charge_document_id}/post-export" in paths
+    schemas = openapi["components"]["schemas"]
+    assert "date_values" in schemas["BusinessDateResolveRequest"]["properties"]
+    assert schemas["BusinessDateResolveRequest"]["properties"]["context"]["deprecated"] is True
+    assert "DOCUMENT_DATE" in schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
+    assert "ROAD_ACTUAL_PICKUP_DATE" in schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
+    assert "supplied_date_keys" in schemas["BusinessDateResolveResponse"]["properties"]
 
     contract_path = (
         Path(__file__).resolve().parents[1]
@@ -2865,6 +3058,14 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/calculation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/allocation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/business-date-profiles" in contract["paths"]
+    contract_schemas = contract["components"]["schemas"]
+    assert "date_values" in contract_schemas["BusinessDateResolveRequest"]["properties"]
+    assert contract_schemas["BusinessDateResolveRequest"]["properties"]["context"]["deprecated"] is True
+    assert "supplied_date_keys" in contract_schemas["BusinessDateResolveResponse"]["properties"]
+    assert (
+        "ROAD_ACTUAL_PICKUP_DATE"
+        in contract_schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
+    )
     assert "get" in contract["paths"]["/api/v1/charge-management/rate-books"]
     assert "/api/v1/charge-management/rate-books/{rate_book_id}/workspace" in contract["paths"]
     assert "/api/v1/charge-management/rate-books/{rate_book_id}/versions" in contract["paths"]

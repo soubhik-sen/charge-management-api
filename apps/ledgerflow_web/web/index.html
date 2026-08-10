@@ -20,12 +20,54 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="LedgerFlow open-source charge management workspace.">
-  <meta name="theme-color" content="#061A35">
+  <meta name="theme-color" content="#14213D">
   <style>
     html, body {
       margin: 0;
       min-height: 100%;
       background: #F6F8FA;
+    }
+    .ledgerflow-boot {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: #14213D;
+      font-family: "Manrope", "Avenir Next", sans-serif;
+    }
+    .ledgerflow-boot__content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .ledgerflow-boot__brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+    }
+    .ledgerflow-boot__brand span { color: #0F766E; }
+    .ledgerflow-boot__progress {
+      width: 116px;
+      height: 3px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #D8E0E8;
+    }
+    .ledgerflow-boot__progress::after {
+      content: "";
+      display: block;
+      width: 42%;
+      height: 100%;
+      background: #1BA6A6;
+      animation: ledgerflow-load 1.1s ease-in-out infinite alternate;
+    }
+    @keyframes ledgerflow-load {
+      from { transform: translateX(-20%); }
+      to { transform: translateX(160%); }
     }
   </style>
 
@@ -33,7 +75,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="LedgerFlow">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" href="icons/ledgerflow-mark.svg">
 
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="icons/ledgerflow-mark.svg"/>
@@ -42,6 +84,19 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <div class="ledgerflow-boot" id="ledgerflow-boot" aria-label="Loading LedgerFlow">
+    <div class="ledgerflow-boot__content">
+      <div class="ledgerflow-boot__brand">
+        <svg width="42" height="42" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M12 10h10v30h11l10 10H12V10Z" fill="#14213D"/>
+          <path d="M26 18h25v7H26zM26 29h25v7H26z" fill="#0F766E"/>
+          <path d="M34 39h12l12 12H46L34 39Z" fill="#1BA6A6"/>
+        </svg>
+        <div>Ledger<span>Flow</span></div>
+      </div>
+      <div class="ledgerflow-boot__progress" aria-hidden="true"></div>
+    </div>
+  </div>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -51,5 +106,10 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      document.getElementById('ledgerflow-boot')?.remove();
+    });
+  </script>
 </body>
 </html>

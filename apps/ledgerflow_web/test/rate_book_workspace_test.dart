@@ -19,6 +19,7 @@ void main() {
         home: Scaffold(
           body: RateBookWorkspace(
             rateBooks: _liveRateBooks,
+            components: _components,
             live: true,
             onMutation:
                 ({
@@ -43,6 +44,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Edit draft'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('Base freight (BASE_FREIGHT)'), findsOneWidget);
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Rate-book name'),
       'Atlantic 2026 draft revision',
@@ -69,6 +71,18 @@ void main() {
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Rate-book name'),
       'EU Truck 2026',
+    );
+    await tester.tap(find.byKey(const ValueKey('rate-book-component')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fuel surcharge (FUEL_SURCHARGE)').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Add row'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('defaults: PERCENTAGE basis'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Rate percent'),
+      '8.5',
     );
     await tester.tap(find.widgetWithText(FilledButton, 'Create rate book'));
     await tester.pumpAndSettle();
@@ -100,6 +114,19 @@ void main() {
     expect(calls[3]['path'], '/api/v1/charge-management/rate-books');
     expect(calls[3]['body']['rate_book_code'], 'EU_TRUCK_2026');
     expect(calls[3]['body']['rate_book_name'], 'EU Truck 2026');
+    expect(
+      calls[3]['body']['entries'][0]['charge_component_code'],
+      'FUEL_SURCHARGE',
+    );
+    expect(
+      calls[3]['body']['entries'][0].containsKey('basis_override'),
+      isFalse,
+    );
+    expect(
+      calls[3]['body']['entries'][0].containsKey('charge_context_override'),
+      isFalse,
+    );
+    expect(calls[3]['body']['entries'][0]['rate_percent'], '8.5');
   });
 
   testWidgets('demo mode is read-only and immutable versions are visible', (
@@ -114,6 +141,7 @@ void main() {
         home: Scaffold(
           body: RateBookWorkspace(
             rateBooks: _publishedOnlyRateBooks,
+            components: _components,
             live: false,
             onMutation:
                 ({
@@ -149,11 +177,45 @@ void main() {
   });
 }
 
+final List<JsonMap> _components = [
+  {
+    'component_code': 'BASE_FREIGHT',
+    'component_name': 'Base freight',
+    'calculation_basis': 'PER_CONTAINER',
+    'charge_context': 'TRANSPORT',
+    'is_active': true,
+  },
+  {
+    'component_code': 'FUEL_SURCHARGE',
+    'component_name': 'Fuel surcharge',
+    'calculation_basis': 'PERCENTAGE',
+    'charge_context': 'TRANSPORT',
+    'is_active': true,
+  },
+  {
+    'component_code': 'RETIRED_FEE',
+    'component_name': 'Retired fee',
+    'is_active': false,
+  },
+];
+
 final List<JsonMap> _liveRateBooks = [
   {
     'id': 12,
     'rate_book_code': 'ATLANTIC_2026',
     'rate_book_name': 'Atlantic 2026 draft',
+    'charge_component_code': 'BASE_FREIGHT',
+    'row_attribute_keys': [
+      'basis_override',
+      'origin_code',
+      'destination_code',
+      'equipment_type',
+      'mode',
+      'priority',
+      'minimum_amount',
+      'validity_from',
+      'validity_to',
+    ],
     'description': 'Draft revision for Atlantic ocean lanes.',
     'currency': 'USD',
     'status': 'DRAFT',
@@ -186,6 +248,7 @@ final List<JsonMap> _liveRateBooks = [
     'id': 11,
     'rate_book_code': 'ATLANTIC_2026',
     'rate_book_name': 'Atlantic 2026',
+    'charge_component_code': 'BASE_FREIGHT',
     'description': 'Published Atlantic base rates.',
     'currency': 'USD',
     'status': 'PUBLISHED',
@@ -219,6 +282,7 @@ final List<JsonMap> _publishedOnlyRateBooks = [
     'id': 41,
     'rate_book_code': 'PACIFIC_2026',
     'rate_book_name': 'Pacific 2026',
+    'charge_component_code': 'BASE_FREIGHT',
     'description': 'Published Pacific contract rates.',
     'currency': 'USD',
     'status': 'PUBLISHED',

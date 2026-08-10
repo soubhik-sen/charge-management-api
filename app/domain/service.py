@@ -146,7 +146,7 @@ CALCULATION_TRANSACTION_INPUT_RESOLVERS = {
 BUSINESS_DATE_POLICY_MODES = {"LEGACY_BASIS", "INHERIT_PROFILE", "PROFILE_OVERRIDE"}
 BUSINESS_DATE_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 BUSINESS_DATE_ASSIGNMENT_SCOPE_TYPES = {"GLOBAL", "COMPANY", "CUSTOMER", "VENDOR", "FORWARDER", "CARRIER"}
-BUSINESS_DATE_SHIPMENT_SCOPES = {"OCEAN_HOUSE", "AIR_HOUSE"}
+BUSINESS_DATE_SHIPMENT_SCOPES = {"OCEAN_HOUSE", "AIR_HOUSE", "ROAD_SHIPMENT"}
 BUSINESS_DATE_PURPOSES = {"EXCHANGE_RATE_DATE"}
 CHARGE_DOCUMENT_MUTABLE_STATUSES = {"ESTIMATED", "ACCRUED", "ACTUAL", "DISPUTED"}
 CHARGE_DOCUMENT_LOCKED_STATUSES = {"APPROVED", "EXPORTED", "REVERSED"}
@@ -165,6 +165,11 @@ BUSINESS_DATE_BASIS_KEYS = {
     "ACTUAL_FLIGHT_DEPARTURE_DATE",
     "AWB_EXECUTION_DATE",
     "ESTIMATED_FLIGHT_DEPARTURE_DATE",
+    "ROAD_ACTUAL_PICKUP_DATE",
+    "ROAD_PLANNED_PICKUP_DATE",
+    "ROAD_ACTUAL_DELIVERY_DATE",
+    "ROAD_PLANNED_DELIVERY_DATE",
+    "CMR_ISSUE_DATE",
 }
 BUSINESS_DATE_BASIS_KEY_CANDIDATES: dict[str, tuple[str, ...]] = {
     "DOCUMENT_DATE": ("document_date", "charge_date"),
@@ -228,6 +233,40 @@ BUSINESS_DATE_BASIS_KEY_CANDIDATES: dict[str, tuple[str, ...]] = {
         "estimated_departure_date",
         "business_dates.estimated_flight_departure_date",
         "shipment_business_dates.estimated_flight_departure_date",
+    ),
+    "ROAD_ACTUAL_PICKUP_DATE": (
+        "road_actual_pickup_date",
+        "actual_pickup_date",
+        "pickup_actual_date",
+        "business_dates.road_actual_pickup_date",
+        "shipment_business_dates.road_actual_pickup_date",
+    ),
+    "ROAD_PLANNED_PICKUP_DATE": (
+        "road_planned_pickup_date",
+        "planned_pickup_date",
+        "pickup_planned_date",
+        "business_dates.road_planned_pickup_date",
+        "shipment_business_dates.road_planned_pickup_date",
+    ),
+    "ROAD_ACTUAL_DELIVERY_DATE": (
+        "road_actual_delivery_date",
+        "actual_delivery_date",
+        "delivery_actual_date",
+        "business_dates.road_actual_delivery_date",
+        "shipment_business_dates.road_actual_delivery_date",
+    ),
+    "ROAD_PLANNED_DELIVERY_DATE": (
+        "road_planned_delivery_date",
+        "planned_delivery_date",
+        "delivery_planned_date",
+        "business_dates.road_planned_delivery_date",
+        "shipment_business_dates.road_planned_delivery_date",
+    ),
+    "CMR_ISSUE_DATE": (
+        "cmr_issue_date",
+        "consignment_note_issue_date",
+        "business_dates.cmr_issue_date",
+        "shipment_business_dates.cmr_issue_date",
     ),
 }
 LEGACY_BASIS_TO_BUSINESS_KEYS: dict[str, tuple[str, ...]] = {
@@ -512,8 +551,26 @@ class InMemoryChargeRepository:
         return self._ids[bucket]
 
     def seed_components(self) -> None:
+        calculation_profiles = {
+            profile.profile_code: profile for profile in self.calculation_profiles.values()
+        }
+        allocation_profiles = {
+            profile.profile_code: profile for profile in self.allocation_profiles.values()
+        }
+        business_date_profiles = {
+            profile.profile_code: profile for profile in self.business_date_profiles.values()
+        }
         for row in COMMON_CHARGE_COMPONENTS:
             code = str(row["component_code"])
+            calculation_profile = calculation_profiles.get(
+                str(row.get("default_calculation_profile_code") or "")
+            )
+            allocation_profile = allocation_profiles.get(
+                str(row.get("allocation_profile_code") or "")
+            )
+            business_date_profile = business_date_profiles.get(
+                str(row.get("business_date_profile_code") or "")
+            )
             component = ChargeComponent(
                 id=self.next_id("component"),
                 component_code=code,
@@ -523,7 +580,23 @@ class InMemoryChargeRepository:
                 charge_context=str(row["charge_context"]),
                 calculation_basis=str(row["calculation_basis"]),
                 charge_date_basis=_charge_date_basis(row.get("charge_date_basis")),
-                business_date_policy_mode="LEGACY_BASIS",
+                business_date_policy_mode=(
+                    "PROFILE_OVERRIDE" if business_date_profile is not None else "LEGACY_BASIS"
+                ),
+                business_date_profile_id=(
+                    business_date_profile.id if business_date_profile is not None else None
+                ),
+                allocation_profile_id=(
+                    allocation_profile.id if allocation_profile is not None else None
+                ),
+                allocation_profile_version_id=(
+                    allocation_profile.published_version_id
+                    if allocation_profile is not None
+                    else None
+                ),
+                default_calculation_profile_id=(
+                    calculation_profile.id if calculation_profile is not None else None
+                ),
                 is_tax=bool(row.get("is_tax", False)),
             )
             self.components[component.id] = component
@@ -1083,9 +1156,17 @@ class ChargeManagementService:
         else:
             profile = self._require_business_date_profile(int(payload.profile_id or 0))
             version = self._require_published_business_date_profile_version(profile)
+        date_values = {
+            str(item.date_type): item.date_value
+            for item in payload.date_values
+        }
+        supplied_date_keys = [str(item.date_type) for item in payload.date_values]
+        normalized_context = self._normalized_business_date_context(payload.context)
         reference_date = (
-            _coerce_date(payload.context.get("document_date"))
-            or _coerce_date(payload.context.get("charge_date"))
+            date_values.get("DOCUMENT_DATE")
+            or date_values.get("MANUAL_LINE_DATE")
+            or _coerce_date(normalized_context.get("document_date"))
+            or _coerce_date(normalized_context.get("charge_date"))
             or payload.fallback_date
             or date.today()
         )
@@ -1103,7 +1184,11 @@ class ChargeManagementService:
         attempted: list[str] = []
         for step in sorted(version.steps, key=lambda item: (item.step_number, item.id)):
             attempted.append(step.date_key)
-            resolved = self._resolve_business_date_value(step.date_key, payload.context)
+            resolved = self._resolve_business_date_value(
+                step.date_key,
+                normalized_context,
+                date_values=date_values,
+            )
             if resolved is not None:
                 return BusinessDateResolveResponse(
                     profile_id=profile.id,
@@ -1113,6 +1198,7 @@ class ChargeManagementService:
                     resolved_date=resolved,
                     selected_date_key=step.date_key,
                     attempted_date_keys=attempted,
+                    supplied_date_keys=supplied_date_keys,
                 )
         if payload.fallback_date is None:
             raise HTTPException(
@@ -1127,6 +1213,7 @@ class ChargeManagementService:
             resolved_date=payload.fallback_date,
             fallback_applied=True,
             attempted_date_keys=attempted,
+            supplied_date_keys=supplied_date_keys,
         )
 
     def create_business_date_profile(self, payload: BusinessDateProfileCreate) -> BusinessDateProfile:
@@ -1581,6 +1668,12 @@ class ChargeManagementService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="New rate books must start in DRAFT status and use the publish action.",
             )
+        if payload.charge_component_code is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="charge_component_code is required for a rate book.",
+            )
+        self._require_component(payload.charge_component_code)
         if any(
             row.rate_book_code.upper() == payload.rate_book_code.upper()
             for row in self.repository.rate_books.values()
@@ -1614,6 +1707,7 @@ class ChargeManagementService:
         active_only: bool | None = None,
         status_filter: str | None = None,
         calculation_basis: str | None = None,
+        charge_component_code: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> RateBookListResponse:
@@ -1627,6 +1721,13 @@ class ChargeManagementService:
                 row
                 for row in rows
                 if (row.calculation_basis or "").upper() == calculation_basis.upper()
+            ]
+        if charge_component_code:
+            rows = [
+                row
+                for row in rows
+                if (row.charge_component_code or "").upper()
+                == charge_component_code.strip().upper()
             ]
         if search:
             normalized = search.strip().upper()
@@ -1683,6 +1784,20 @@ class ChargeManagementService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="New rate book versions must start in DRAFT status.",
             )
+        if (
+            source.charge_component_code is not None
+            and payload.charge_component_code != source.charge_component_code
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A rate book version must keep the source charge component.",
+            )
+        if payload.charge_component_code is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="charge_component_code is required for a rate book version.",
+            )
+        self._require_component(payload.charge_component_code)
         existing_versions = [
             row
             for row in self.repository.rate_books.values()
@@ -1767,9 +1882,25 @@ class ChargeManagementService:
             for other in self.repository.rate_books.values()
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rate book code already exists")
+        if (
+            row.charge_component_code is not None
+            and payload.charge_component_code != row.charge_component_code
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A rate book family cannot change its charge component.",
+            )
+        if payload.charge_component_code is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="charge_component_code is required for a rate book.",
+            )
+        self._require_component(payload.charge_component_code)
         entries = self._rate_book_entries_from_payload(row.id, payload)
         row.rate_book_code = payload.rate_book_code.strip().upper()
         row.rate_book_name = payload.rate_book_name
+        row.charge_component_code = payload.charge_component_code
+        row.row_attribute_keys = list(payload.row_attribute_keys)
         row.description = payload.description
         row.currency = payload.currency.strip().upper()
         row.valid_from = payload.valid_from
@@ -1788,7 +1919,53 @@ class ChargeManagementService:
     ) -> list[RateBookEntry]:
         entries: list[RateBookEntry] = []
         for entry in payload.entries:
-            self._require_component(entry.charge_component_code)
+            component_code = payload.charge_component_code or entry.charge_component_code
+            component = self._require_component(component_code)
+            basis_override = (
+                entry.basis_override
+                if "basis_override" in entry.model_fields_set
+                else entry.basis
+            )
+            charge_context_override = (
+                entry.charge_context_override
+                if "charge_context_override" in entry.model_fields_set
+                else entry.charge_context
+            )
+            basis_override = _clean_optional(
+                basis_override.strip().upper() if basis_override else None
+            )
+            charge_context_override = _clean_optional(
+                charge_context_override.strip().upper()
+                if charge_context_override
+                else None
+            )
+            effective_basis = (
+                basis_override
+                or component.calculation_basis.strip().upper()
+                or "FLAT"
+            )
+            effective_charge_context = (
+                charge_context_override
+                or component.charge_context.strip().upper()
+                or "TRANSPORT"
+            )
+            if effective_basis in {"PERCENT", "PERCENTAGE"}:
+                if entry.rate_percent is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"rate_percent is required for effective percentage basis "
+                            f"on {component.component_code}."
+                        ),
+                    )
+            elif entry.rate_amount is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"rate_amount is required for effective {effective_basis} basis "
+                        f"on {component.component_code}."
+                    ),
+                )
             (
                 allocation_profile_id,
                 allocation_profile_version_id,
@@ -1808,10 +1985,26 @@ class ChargeManagementService:
                             "allocation_profile_id",
                             "allocation_profile_version_id",
                             "calculation_profile_id",
+                            "basis",
+                            "basis_override",
+                            "charge_context",
+                            "charge_context_override",
+                            "currency",
+                            "charge_component_code",
                         }
                     ),
                     id=self.repository.next_id("rate_book_entry"),
                     rate_book_id=rate_book_id,
+                    charge_component_code=component.component_code,
+                    basis=effective_basis,
+                    basis_override=basis_override,
+                    charge_context=effective_charge_context,
+                    charge_context_override=charge_context_override,
+                    currency=self._currency(
+                        entry.currency
+                        if "currency" in entry.model_fields_set
+                        else payload.currency
+                    ),
                     calculation_profile_id=calculation_profile_id,
                     allocation_profile_id=allocation_profile_id,
                     allocation_profile_version_id=allocation_profile_version_id,
@@ -1823,6 +2016,11 @@ class ChargeManagementService:
         self,
         payload: CalculationTemplatePayload,
     ) -> CalculationTemplate:
+        if payload.status.strip().upper() != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="New calculation templates must start in DRAFT status.",
+            )
         if any(
             row.template_code.upper() == payload.template_code.upper()
             for row in self.repository.calculation_templates.values()
@@ -1834,9 +2032,12 @@ class ChargeManagementService:
         template_id = self.repository.next_id("calculation_template")
         steps = self._template_steps_from_payload(template_id, payload)
         row = CalculationTemplate(
-            **payload.model_dump(exclude={"steps", "template_code"}),
+            **payload.model_dump(
+                exclude={"steps", "template_code", "status", "expected_lock_version"}
+            ),
             id=template_id,
-            template_code=payload.template_code.upper(),
+            template_code=payload.template_code.strip().upper(),
+            status="DRAFT",
             steps=steps,
         )
         self.repository.calculation_templates[row.id] = row
@@ -1869,7 +2070,7 @@ class ChargeManagementService:
                 or normalized in row.template_name.upper()
                 or normalized in row.status.upper()
             ]
-        rows.sort(key=lambda row: (row.template_code, row.id))
+        rows.sort(key=lambda row: (row.template_code, row.version_number, row.id))
         safe_offset = max(int(offset), 0)
         safe_limit = min(max(int(limit), 1), 200)
         return CalculationTemplateListResponse(
@@ -1884,7 +2085,121 @@ class ChargeManagementService:
         calculation_template_id: int,
     ) -> CalculationTemplateWorkspace:
         template = self._require_calculation_template(calculation_template_id)
-        return CalculationTemplateWorkspace(template=template, steps=template.steps)
+        versions = sorted(
+            [
+                row
+                for row in self.repository.calculation_templates.values()
+                if row.template_code == template.template_code
+            ],
+            key=lambda row: (row.version_number, row.id),
+            reverse=True,
+        )
+        return CalculationTemplateWorkspace(
+            template=template,
+            steps=template.steps,
+            versions=versions,
+        )
+
+    def list_calculation_template_versions(
+        self,
+        calculation_template_id: int,
+    ) -> list[CalculationTemplate]:
+        return self.get_calculation_template_workspace(calculation_template_id).versions
+
+    def create_calculation_template_version(
+        self,
+        calculation_template_id: int,
+        payload: CalculationTemplatePayload,
+    ) -> CalculationTemplateWorkspace:
+        source = self._require_calculation_template(calculation_template_id)
+        if payload.template_code.strip().upper() != source.template_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A calculation template version must keep the source template_code.",
+            )
+        if payload.status.strip().upper() != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="New calculation template versions must start in DRAFT status.",
+            )
+        existing_versions = [
+            row
+            for row in self.repository.calculation_templates.values()
+            if row.template_code == source.template_code
+        ]
+        template_id = self.repository.next_id("calculation_template")
+        version = CalculationTemplate(
+            **payload.model_dump(
+                exclude={"steps", "template_code", "status", "expected_lock_version"}
+            ),
+            id=template_id,
+            template_code=source.template_code,
+            status="DRAFT",
+            version_number=max(
+                (row.version_number for row in existing_versions),
+                default=0,
+            )
+            + 1,
+            supersedes_calculation_template_id=source.id,
+            steps=self._template_steps_from_payload(template_id, payload),
+        )
+        self.repository.calculation_templates[version.id] = version
+        return self.get_calculation_template_workspace(version.id)
+
+    def publish_calculation_template(
+        self,
+        calculation_template_id: int,
+    ) -> CalculationTemplateWorkspace:
+        template = self._require_calculation_template(calculation_template_id)
+        if template.status == "PUBLISHED":
+            return self.get_calculation_template_workspace(template.id)
+        if template.status != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only a draft calculation template version can be published.",
+            )
+        if not template.steps:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A calculation template must contain at least one step before publishing.",
+            )
+        for step in template.steps:
+            if step.rate_book_id is None:
+                continue
+            rate_book = self._require_rate_book(step.rate_book_id)
+            if not rate_book.is_active or rate_book.status != "PUBLISHED":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Rate book {rate_book.rate_book_code} version "
+                        f"{rate_book.version_number} must be published before the template."
+                    ),
+                )
+            if (
+                rate_book.charge_component_code is not None
+                and rate_book.charge_component_code != step.charge_component_code
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Template step {step.step_number} uses component "
+                        f"{step.charge_component_code}, but rate book "
+                        f"{rate_book.rate_book_code} is for "
+                        f"{rate_book.charge_component_code}."
+                    ),
+                )
+        for existing in self.repository.calculation_templates.values():
+            if existing.template_code != template.template_code:
+                continue
+            if existing.id == template.id:
+                existing.status = "PUBLISHED"
+                existing.published_at = utcnow()
+                existing.lock_version += 1
+                existing.updated_at = utcnow()
+            elif existing.status == "PUBLISHED":
+                existing.status = "RETIRED"
+                existing.updated_at = utcnow()
+        return self.get_calculation_template_workspace(template.id)
 
     def update_calculation_template_workspace(
         self,
@@ -1892,21 +2207,43 @@ class ChargeManagementService:
         payload: CalculationTemplatePayload,
     ) -> CalculationTemplateWorkspace:
         row = self._require_calculation_template(calculation_template_id)
-        if any(
-            other.id != row.id
-            and other.template_code.upper() == payload.template_code.upper()
+        if row.status != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Published calculation template versions are immutable; create a new version instead.",
+            )
+        if payload.status.strip().upper() != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A draft calculation template can only be published through the publish action.",
+            )
+        if (
+            payload.expected_lock_version is not None
+            and payload.expected_lock_version != row.lock_version
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Calculation template was modified concurrently; expected lock version "
+                    f"{payload.expected_lock_version}, current value is {row.lock_version}."
+                ),
+            )
+        next_template_code = payload.template_code.strip().upper()
+        if next_template_code != row.template_code and any(
+            other.template_code.upper() == next_template_code
             for other in self.repository.calculation_templates.values()
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Calculation template code already exists",
             )
-        row.template_code = payload.template_code.upper()
+        row.template_code = next_template_code
         row.template_name = payload.template_name
         row.description = payload.description
-        row.status = payload.status
+        row.status = "DRAFT"
         row.is_active = payload.is_active
         row.steps = self._template_steps_from_payload(row.id, payload)
+        row.lock_version += 1
         row.updated_at = utcnow()
         return self.get_calculation_template_workspace(calculation_template_id)
 
@@ -2077,6 +2414,14 @@ class ChargeManagementService:
         }
         for template_id in template_ids:
             template = self._require_calculation_template(template_id)
+            if not template.is_active or template.status != "PUBLISHED":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Calculation template {template.template_code} version "
+                        f"{template.version_number} must be published before contract release."
+                    ),
+                )
             rate_book_ids.update(
                 step.rate_book_id
                 for step in template.steps
@@ -3728,7 +4073,7 @@ class ChargeManagementService:
                 expanded_lines.append((contract_line, None))
                 continue
             template = self._require_calculation_template(template_id)
-            if not template.is_active or template.status.upper() in {"INACTIVE", "RETIRED"}:
+            if not template.is_active or template.status.upper() != "PUBLISHED":
                 continue
             for step in sorted(template.steps, key=lambda item: (item.step_number, item.id)):
                 if step.relationship_role not in {"BOTH", relationship_role}:
@@ -3778,11 +4123,12 @@ class ChargeManagementService:
             entry = self._best_rate_entry(rate_book, contract_line, quote)
             if entry is None:
                 continue
+            entry_basis = self._rate_entry_basis(entry)
             percentage_base_amount: Decimal | None = None
             if (
                 template_step is not None
                 and template_step.subtotal_key
-                and entry.basis.upper() in {"PERCENT", "PERCENTAGE"}
+                and entry_basis in {"PERCENT", "PERCENTAGE"}
             ):
                 subtotal_key = template_step.subtotal_key.strip().upper()
                 if subtotal_key not in subtotals:
@@ -3821,7 +4167,7 @@ class ChargeManagementService:
                 contract_line=contract_line,
                 percentage_base_amount=percentage_base_amount,
             )
-            percentage_basis = entry.basis.upper() in {"PERCENT", "PERCENTAGE"}
+            percentage_basis = entry_basis in {"PERCENT", "PERCENTAGE"}
             source_currency = quote.currency if percentage_basis else (entry.currency or quote.currency)
             source_amount = amount
             fx_resolution = self._resolve_fx(
@@ -3867,7 +4213,7 @@ class ChargeManagementService:
                     description=component.component_name,
                     amount=amount,
                     currency=quote.currency.upper(),
-                    basis=entry.basis,
+                    basis=entry_basis,
                     source_currency=source_currency.upper(),
                     source_amount=source_amount,
                     exchange_rate=fx_resolution.effective_rate,
@@ -3963,7 +4309,7 @@ class ChargeManagementService:
         *,
         percentage_base_amount: Decimal | None = None,
     ) -> Decimal:
-        basis = entry.basis.upper()
+        basis = self._rate_entry_basis(entry)
         rate_amount = dec(entry.rate_amount)
         if basis in {"PERCENT", "PERCENTAGE"}:
             if percentage_base_amount is None:
@@ -3992,8 +4338,12 @@ class ChargeManagementService:
             amount = rate_amount * max(dec(quote.container_count or quote.quantity), Decimal("1"))
         elif basis in {"PACKAGE", "QUANTITY"}:
             amount = rate_amount * max(dec(quote.package_count or quote.quantity), Decimal("1"))
-        elif basis == "PER_DAY":
-            amount = rate_amount * max(dec(quote.quantity), Decimal("1"))
+        elif basis in {"DAY", "PER_DAY"}:
+            duration = quote.context.get("duration_days", quote.quantity)
+            amount = rate_amount * max(dec(duration), Decimal("1"))
+        elif basis == "DISTANCE":
+            distance = quote.context.get("distance", quote.quantity)
+            amount = rate_amount * max(dec(distance), Decimal("1"))
         else:
             amount = rate_amount
         if entry.minimum_amount is not None:
@@ -4001,6 +4351,12 @@ class ChargeManagementService:
         if entry.maximum_amount is not None:
             amount = min(amount, entry.maximum_amount)
         return money(amount)
+
+    def _rate_entry_basis(self, entry: RateBookEntry) -> str:
+        if entry.basis and entry.basis.strip():
+            return entry.basis.strip().upper()
+        component = self._require_component(entry.charge_component_code)
+        return component.calculation_basis.strip().upper() or "FLAT"
 
     def _resolve_effective_quote_calculation(
         self,
@@ -4017,7 +4373,7 @@ class ChargeManagementService:
             or component.default_calculation_profile_id,
             None,
         )
-        if entry.basis.upper() in {"PERCENT", "PERCENTAGE"}:
+        if self._rate_entry_basis(entry) in {"PERCENT", "PERCENTAGE"}:
             percentage_base = (
                 percentage_base_amount
                 if percentage_base_amount is not None
@@ -5078,6 +5434,12 @@ class ChargeManagementService:
                 flattened[path] = nested_value
         return flattened
 
+    def _normalized_business_date_context(self, context: dict[str, Any]) -> dict[str, Any]:
+        return {
+            str(key).strip().lower(): value
+            for key, value in self._flatten_json_paths(context).items()
+        }
+
     def _business_date_context(self, document: ChargeDocument, line_payload: Any) -> dict[str, Any]:
         context: dict[str, Any] = {}
         if document.document_date is not None:
@@ -5094,23 +5456,30 @@ class ChargeManagementService:
             context.update(self._flatten_json_paths(selected_data.get("target_reference_snapshot_json") or {}))
         return context
 
-    def _resolve_business_date_value(self, date_key: str, context: dict[str, Any]) -> date | None:
+    def _resolve_business_date_value(
+        self,
+        date_key: str,
+        context: dict[str, Any],
+        *,
+        date_values: dict[str, date] | None = None,
+    ) -> date | None:
         normalized_key = (date_key or "").strip().upper()
+        if date_values is not None and normalized_key in date_values:
+            return date_values[normalized_key]
+        normalized_context = self._normalized_business_date_context(context)
         candidate_paths = BUSINESS_DATE_BASIS_KEY_CANDIDATES.get(normalized_key, ())
         for candidate in candidate_paths:
-            value = context.get(candidate)
-            if value is None and candidate.lower() != candidate:
-                value = context.get(candidate.lower())
+            value = normalized_context.get(candidate.lower())
             resolved = _coerce_date(value)
             if resolved is not None:
                 return resolved
-        direct = _coerce_date(context.get(normalized_key.lower()))
+        direct = _coerce_date(normalized_context.get(normalized_key.lower()))
         if direct is not None:
             return direct
         if normalized_key == "DOCUMENT_DATE":
-            return _coerce_date(context.get("document_date"))
+            return _coerce_date(normalized_context.get("document_date"))
         if normalized_key == "MANUAL_LINE_DATE":
-            return _coerce_date(context.get("charge_date"))
+            return _coerce_date(normalized_context.get("charge_date"))
         return None
 
     def _resolve_business_date_component_reference(
@@ -5500,6 +5869,19 @@ class ChargeManagementService:
                 if step.rate_book_id is not None
                 else None
             )
+            if (
+                rate_book is not None
+                and rate_book.charge_component_code is not None
+                and rate_book.charge_component_code
+                != step.charge_component_code.strip().upper()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Template step {step.step_number} component does not match "
+                        f"rate book {rate_book.rate_book_code}."
+                    ),
+                )
             steps.append(
                 CalculationTemplateStep(
                     **step.model_dump(exclude={"charge_component_code"}),

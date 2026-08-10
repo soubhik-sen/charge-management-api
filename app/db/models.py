@@ -526,7 +526,7 @@ class ChargeBusinessDateProfileAssignmentRow(TimestampMixin, Base):
             name="ck_charge_business_date_profile_assignment_owner_scope_key",
         ),
         CheckConstraint(
-            "shipment_scope in ('OCEAN_HOUSE', 'AIR_HOUSE')",
+            "shipment_scope in ('OCEAN_HOUSE', 'AIR_HOUSE', 'ROAD_SHIPMENT')",
             name="ck_charge_business_date_profile_assignment_shipment_scope",
         ),
         CheckConstraint(
@@ -551,6 +551,10 @@ class ChargeRateBookRow(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rate_book_code: Mapped[str] = mapped_column(String(80), nullable=False)
     rate_book_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    charge_component_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_component.id", ondelete="SET NULL")
+    )
+    row_attribute_keys_json: Mapped[list | None] = mapped_column(JSON)
     description: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
     valid_from: Mapped[object | None] = mapped_column(Date)
@@ -569,6 +573,7 @@ class ChargeRateBookRow(TimestampMixin, Base):
         back_populates="rate_book",
         cascade="all, delete-orphan",
     )
+    component: Mapped[ChargeComponentRow | None] = relationship()
 
     __table_args__ = (
         UniqueConstraint(
@@ -589,6 +594,9 @@ class ChargeRateBookEntryRow(Base):
     rate_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     rate_percent: Mapped[object | None] = mapped_column(Numeric(18, 6))
     basis: Mapped[str] = mapped_column(String(40), nullable=False, default="SHIPMENT")
+    basis_override: Mapped[str | None] = mapped_column(String(40))
+    charge_context: Mapped[str | None] = mapped_column(String(80))
+    charge_context_override: Mapped[str | None] = mapped_column(String(80))
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     calculation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile.id"))
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
@@ -701,15 +709,34 @@ class ChargeCalculationTemplateRow(TimestampMixin, Base):
     __tablename__ = "charge_calculation_template"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    template_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    template_code: Mapped[str] = mapped_column(String(80), nullable=False)
     template_name: Mapped[str] = mapped_column(String(180), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="DRAFT", server_default="DRAFT")
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    supersedes_calculation_template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_calculation_template.id", ondelete="SET NULL")
+    )
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     steps: Mapped[list["ChargeCalculationTemplateStepRow"]] = relationship(
         back_populates="template",
         cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "template_code",
+            "version_number",
+            name="uq_charge_calculation_template_code_version",
+        ),
+        Index(
+            "ix_charge_calculation_template_code_version",
+            "template_code",
+            "version_number",
+        ),
     )
 
 
@@ -921,7 +948,6 @@ class ChargeQuoteOptionLineRow(Base):
         ),
     )
 
-
 class ChargeDocumentRow(TimestampMixin, Base):
     __tablename__ = "charge_document"
 
@@ -958,7 +984,7 @@ class ChargeDocumentRow(TimestampMixin, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "shipment_scope is null or shipment_scope in ('OCEAN_HOUSE', 'AIR_HOUSE')",
+            "shipment_scope is null or shipment_scope in ('OCEAN_HOUSE', 'AIR_HOUSE', 'ROAD_SHIPMENT')",
             name="ck_charge_document_shipment_scope",
         ),
         Index("ix_charge_document_scope", "company_id", "customer_id", "vendor_id", "forwarder_id", "carrier_id"),

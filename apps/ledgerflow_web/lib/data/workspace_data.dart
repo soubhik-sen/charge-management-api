@@ -10,6 +10,7 @@ class WorkspaceData {
   static WorkspaceData demo() => WorkspaceData({
     'components': _components,
     'rateBooks': _rateBooks,
+    'calculationTemplates': _calculationTemplates,
     'quotes': _quotes,
     'documents': _documents,
     'invoices': _invoices,
@@ -164,6 +165,34 @@ final List<JsonMap> _rateBooks = [
     'valid_to': '2026-12-31',
     'entries': <JsonMap>[],
     'is_active': true,
+  },
+];
+
+final List<JsonMap> _calculationTemplates = [
+  {
+    'id': 1,
+    'template_code': 'ROAD_STANDARD_BUILD',
+    'template_name': 'Road standard charge build',
+    'description':
+        'Ordered components used to assemble a standard road quotation.',
+    'status': 'PUBLISHED',
+    'version_number': 1,
+    'lock_version': 2,
+    'is_active': true,
+    'steps': <JsonMap>[
+      {
+        'id': 1,
+        'template_id': 1,
+        'step_number': 10,
+        'charge_component_code': 'OCEAN_FREIGHT',
+        'relationship_role': 'BOTH',
+        'subtotal_key': 'BASE_TRANSPORT',
+        'rate_book_id': 1,
+        'rate_book_code': 'ATLANTIC_OCEAN_2026',
+        'rate_book_name': 'Atlantic Ocean 2026',
+        'is_statistical': false,
+      },
+    ],
   },
 ];
 

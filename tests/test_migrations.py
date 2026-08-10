@@ -103,7 +103,15 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
     contract_line_columns = {column["name"] for column in inspector.get_columns("charge_contract_line")}
     assert {"calculation_profile_id", "line_number", "priority", "is_active", "charge_context"} <= contract_line_columns
     rate_entry_columns = {column["name"] for column in inspector.get_columns("charge_rate_book_entry")}
-    assert {"calculation_profile_id", "rate_percent", "priority", "is_active"} <= rate_entry_columns
+    assert {
+        "calculation_profile_id",
+        "rate_percent",
+        "priority",
+        "is_active",
+        "basis_override",
+        "charge_context",
+        "charge_context_override",
+    } <= rate_entry_columns
     rate_book_columns = {column["name"] for column in inspector.get_columns("charge_rate_book")}
     assert {
         "description",
@@ -115,7 +123,19 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "supersedes_rate_book_id",
         "lock_version",
         "published_at",
+        "charge_component_id",
+        "row_attribute_keys_json",
     } <= rate_book_columns
+    calculation_template_columns = {
+        column["name"]
+        for column in inspector.get_columns("charge_calculation_template")
+    }
+    assert {
+        "version_number",
+        "supersedes_calculation_template_id",
+        "lock_version",
+        "published_at",
+    } <= calculation_template_columns
     quote_request_columns = {column["name"] for column in inspector.get_columns("charge_quote_request")}
     assert {"request_number", "chargeable_weight", "charge_context"} <= quote_request_columns
     with engine.connect() as connection:
@@ -126,9 +146,43 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         flat_count = connection.execute(
             text("select count(*) from charge_calculation_profile where profile_code = 'FLAT_AMOUNT'")
         ).scalar_one()
-    assert version == "0021_version_rate_books"
+        road_component_count = connection.execute(
+            text("select count(*) from charge_component where charge_context = 'ROAD'")
+        ).scalar_one()
+        road_calculation_count = connection.execute(
+            text(
+                "select count(*) from charge_calculation_profile "
+                "where profile_code in ('PER_KILOMETER', 'PER_STOP', 'PER_PALLET', "
+                "'PER_LOADING_METER', 'PER_HOUR')"
+            )
+        ).scalar_one()
+        road_allocation_count = connection.execute(
+            text("select count(*) from charge_allocation_profile where profile_code like 'ROAD_%'")
+        ).scalar_one()
+        road_date_count = connection.execute(
+            text(
+                "select count(*) from charge_business_date_profile "
+                "where profile_code = 'ROAD_SHIPMENT_STANDARD'"
+            )
+        ).scalar_one()
+        road_date_step_count = connection.execute(
+            text(
+                "select count(*) from charge_business_date_profile_step as step "
+                "join charge_business_date_profile_version as version on version.id = step.version_id "
+                "join charge_business_date_profile as profile on profile.id = version.profile_id "
+                "where profile.profile_code = 'ROAD_SHIPMENT_STANDARD' "
+                "and step.date_key in ('ROAD_ACTUAL_PICKUP_DATE', 'ROAD_PLANNED_PICKUP_DATE', "
+                "'CMR_ISSUE_DATE', 'DOCUMENT_DATE')"
+            )
+        ).scalar_one()
+    assert version == "0025_rate_book_template_schema"
     assert source_code == "MANUAL"
     assert flat_count == 1
+    assert road_component_count == 22
+    assert road_calculation_count == 5
+    assert road_allocation_count == 3
+    assert road_date_count == 1
+    assert road_date_step_count == 4
 
     # Exercise cyclic profile/version references with immediate FK checks, which
     # is closer to PostgreSQL behavior than SQLite's default configuration.
@@ -177,6 +231,15 @@ def test_rate_book_migration_promotes_legacy_active_rows(tmp_path, monkeypatch) 
                 "'FLAT', 'ACTIVE', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
             )
         )
+        connection.execute(
+            text(
+                "INSERT INTO charge_rate_book_entry "
+                "(id, rate_book_id, charge_component_id, rate_amount, basis, "
+                "currency, priority, is_active) "
+                "SELECT 9002, 9001, id, 25, 'CONTAINER', 'USD', 100, 1 "
+                "FROM charge_component WHERE component_code = 'BASE_FREIGHT'"
+            )
+        )
     engine.dispose()
 
     command.upgrade(config, "head")
@@ -188,9 +251,19 @@ def test_rate_book_migration_promotes_legacy_active_rows(tmp_path, monkeypatch) 
                 "FROM charge_rate_book WHERE id = 9001"
             )
         ).one()
+        migrated_entry = connection.execute(
+            text(
+                "SELECT basis, basis_override, charge_context, charge_context_override "
+                "FROM charge_rate_book_entry WHERE id = 9002"
+            )
+        ).one()
     assert migrated.status == "PUBLISHED"
     assert migrated.version_number == 1
     assert migrated.published_at is not None
+    assert migrated_entry.basis == "CONTAINER"
+    assert migrated_entry.basis_override == "CONTAINER"
+    assert migrated_entry.charge_context == "TRANSPORT"
+    assert migrated_entry.charge_context_override is None
     engine.dispose()
 
     command.downgrade(config, "0020_business_date_lock_version")

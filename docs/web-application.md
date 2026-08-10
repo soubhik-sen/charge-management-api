@@ -11,6 +11,7 @@ The Flutter web application under `apps/ledgerflow_web` is the reference user in
 | Charge documents | Expected charges, status, approval checks, and calculation, allocation, business-date, rate, and FX provenance. |
 | Invoices | Exception-first line matching, variance totals, resolution choices, match health, and linked document context. |
 | Rate books | Create books, edit drafts, create/publish versions, inspect real version history, and maintain date-effective rate rows and profile references. |
+| Calculation templates | Build ordered multi-component calculations, select component-specific books, and manage immutable published versions. |
 | Components | Search, inspect, create, edit, deactivate, and attach calculation, allocation, and business-date defaults. |
 | Profiles | Create/edit calculation and allocation profiles, manage draft versions, publish releases, and inspect usage. |
 | FX & dates | Create/edit/deactivate directional FX rates; create/version/publish effective-dated business-date profiles and maintain scoped assignments. |
@@ -26,7 +27,9 @@ Select **Connect API** to enter:
 - The API base URL.
 - A bearer access token issued for that API.
 
-The token is kept only in the running application state. It is not written to local storage, logs, source code, or build configuration. Refreshing the page clears it.
+Tokens entered through **Connect API** are kept only in the running application state. They are not written to local storage or logs, and refreshing the page clears them.
+
+For local testing only, `LEDGERFLOW_API_TOKEN` can be supplied as a Dart build define. The application connects automatically when this value is present. Dart defines are embedded in the compiled web assets, so never use this mechanism for production credentials.
 
 The UI never receives the JWT signing secret. Production deployments should use an external OIDC/OAuth issuer with asymmetric signing and configure the API through `JWT_ISSUER`, `JWT_AUDIENCE`, `JWT_JWKS_URL`, and `JWT_ALGORITHMS`.
 
@@ -37,8 +40,13 @@ Start the API first, then run:
 ```bash
 cd apps/ledgerflow_web
 flutter pub get
-flutter run -d chrome --dart-define=LEDGERFLOW_API_URL=http://localhost:8000
+flutter run -d chrome --web-port=8080 \
+  --dart-define=LEDGERFLOW_API_URL=http://localhost:8000 \
+  --dart-define=LEDGERFLOW_API_TOKEN=local-dev-token \
+  --dart-define=LEDGERFLOW_UI_SCALE=0.8
 ```
+
+`LEDGERFLOW_UI_SCALE` defaults to `0.8` and scales the complete application viewport, including navigation, tables, forms, dialogs, and overlays. Set it to `1.0` to render the original Flutter logical size.
 
 Allow the Flutter development origin in the API process:
 
@@ -57,11 +65,15 @@ flutter test
 flutter build web --release --dart-define=LEDGERFLOW_API_URL=https://api.example.com
 ```
 
+Production builds intentionally omit `LEDGERFLOW_API_TOKEN` and obtain a user token through **Connect API** or a host application's identity flow.
+
 The compiled site is written to `apps/ledgerflow_web/build/web`. Configure an SPA rewrite from `/*` to `/index.html` on the static host.
+
+For local same-origin operation, set `LEDGERFLOW_WEB_DIRECTORY=apps/ledgerflow_web/build/web` on the API process and build with `LEDGERFLOW_API_URL` set to that API origin. API, health, and documentation routes remain registered ahead of the optional static mount.
 
 ## Administration Workflows
 
-When connected to a live API, the reference UI performs persisted master-data administration through the public REST contract. It supports component create/edit/deactivate; calculation, allocation, and business-date profile create/edit/version/publish; business-date assignment create/edit/remove; rate-book create/draft-edit/version/publish; and FX-rate create/edit/deactivate.
+When connected to a live API, the reference UI performs persisted master-data administration through the public REST contract. It supports component create/edit/deactivate; calculation, allocation, and business-date profile create/edit/version/publish; business-date assignment create/edit/remove; rate-book create/draft-edit/version/publish; and FX-rate create/edit/deactivate. Rate rows select an active charge component from the component master rather than accepting an unvalidated component code.
 
 Demo mode deliberately disables writes. Profile selectors show published definitions only, while inspectors retain complete version history. API lifecycle and authorization checks remain authoritative.
 

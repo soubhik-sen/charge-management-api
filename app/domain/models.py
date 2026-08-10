@@ -4,7 +4,15 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 
 def utcnow() -> datetime:
@@ -16,6 +24,26 @@ class ApiModel(BaseModel):
 
 
 CalculationProfileStatus = Literal["DRAFT", "PUBLISHED", "RETIRED"]
+CalculationTemplateStatus = Literal["DRAFT", "PUBLISHED", "RETIRED"]
+RateBookRowAttributeKey = Literal[
+    "basis_override",
+    "charge_context_override",
+    "origin_code",
+    "destination_code",
+    "mode",
+    "equipment_type",
+    "commodity_code",
+    "service_level",
+    "scale_from",
+    "scale_to",
+    "minimum_amount",
+    "maximum_amount",
+    "validity_from",
+    "validity_to",
+    "calculation_profile_id",
+    "allocation_profile_id",
+    "priority",
+]
 CalculationApplicationLevel = Literal["SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
 CalculationMethod = Literal["FLAT_AMOUNT", "RATE_TIMES_PRODUCT"]
 CalculationFactorResolver = Literal[
@@ -32,7 +60,44 @@ CalculationFactorResolver = Literal[
     "DURATION_DAYS",
     "FIXED_VALUE",
 ]
+
+RATE_BOOK_ROW_ATTRIBUTE_KEYS = (
+    "basis_override",
+    "charge_context_override",
+    "origin_code",
+    "destination_code",
+    "mode",
+    "equipment_type",
+    "commodity_code",
+    "service_level",
+    "scale_from",
+    "scale_to",
+    "minimum_amount",
+    "maximum_amount",
+    "validity_from",
+    "validity_to",
+    "calculation_profile_id",
+    "allocation_profile_id",
+    "priority",
+)
 ChargeTargetScopeMode = Literal["ALL_ELIGIBLE", "SELECTED_TARGETS"]
+BusinessDateType = Literal[
+    "DOCUMENT_DATE",
+    "MANUAL_LINE_DATE",
+    "SHIPPED_ON_BOARD_DATE",
+    "SHIPMENT_ACTUAL_DEPARTURE_DATE",
+    "SHIPMENT_PLANNED_DEPARTURE_DATE",
+    "SHIPMENT_ARRIVAL_DATE",
+    "HOUSE_BILL_ISSUE_DATE",
+    "ACTUAL_FLIGHT_DEPARTURE_DATE",
+    "AWB_EXECUTION_DATE",
+    "ESTIMATED_FLIGHT_DEPARTURE_DATE",
+    "ROAD_ACTUAL_PICKUP_DATE",
+    "ROAD_PLANNED_PICKUP_DATE",
+    "ROAD_ACTUAL_DELIVERY_DATE",
+    "ROAD_PLANNED_DELIVERY_DATE",
+    "CMR_ISSUE_DATE",
+]
 
 
 class ChargeComponent(ApiModel):
@@ -327,8 +392,15 @@ class ChargeCalculationProfileListResponse(ApiModel):
 
 class BusinessDateProfileStepPayload(ApiModel):
     step_number: int
-    date_key: str
+    date_key: BusinessDateType = Field(
+        description="Supported operational date identifier evaluated at this fallback position."
+    )
     notes: str | None = None
+
+    @field_validator("date_key", mode="before")
+    @classmethod
+    def normalize_date_key(cls, value: Any) -> Any:
+        return value.strip().upper() if isinstance(value, str) else value
 
 
 class BusinessDateProfileStepCreate(BusinessDateProfileStepPayload):
@@ -360,9 +432,16 @@ class BusinessDateProfileCreate(ApiModel):
     profile_name: str
     description: str | None = None
     initial_version: BusinessDateProfileVersionCreate | None = None
-    event_codes: list[str] | None = None
+    event_codes: list[BusinessDateType] | None = None
     effective_from: date | None = None
     effective_to: date | None = None
+
+    @field_validator("event_codes", mode="before")
+    @classmethod
+    def normalize_event_codes(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        return [item.strip().upper() if isinstance(item, str) else item for item in value]
 
     @model_validator(mode="after")
     def normalize_flat_version(self) -> "BusinessDateProfileCreate":
@@ -433,16 +512,70 @@ class BusinessDateProfile(ApiModel):
         return self.profile_code
 
 
+class BusinessDateValue(ApiModel):
+    date_type: BusinessDateType = Field(
+        description=(
+            "Supported operational date identifier. The API normalizes lowercase input to "
+            "the documented uppercase value."
+        )
+    )
+    date_value: date = Field(description="Caller-supplied date in ISO 8601 YYYY-MM-DD format.")
+
+    @field_validator("date_type", mode="before")
+    @classmethod
+    def normalize_date_type(cls, value: Any) -> Any:
+        return value.strip().upper() if isinstance(value, str) else value
+
+
 class BusinessDateResolveRequest(ApiModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "profile_id": 1,
+                    "date_values": [
+                        {
+                            "date_type": "SHIPMENT_ACTUAL_DEPARTURE_DATE",
+                            "date_value": "2026-08-09",
+                        },
+                        {
+                            "date_type": "DOCUMENT_DATE",
+                            "date_value": "2026-08-10",
+                        },
+                    ],
+                    "fallback_date": "2026-08-10",
+                }
+            ]
+        },
+    )
+
     profile_id: int | None = None
     profile_version_id: int | None = None
-    context: dict[str, Any] = Field(default_factory=dict)
+    date_values: list[BusinessDateValue] = Field(
+        default_factory=list,
+        description=(
+            "Typed dates supplied by the caller. Date types must be unique and are "
+            "evaluated in the order defined by the selected profile."
+        ),
+    )
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={"deprecated": True},
+        description=(
+            "Deprecated untyped date context retained for backward compatibility. "
+            "New integrations should send date_values."
+        ),
+    )
     fallback_date: date | None = None
 
     @model_validator(mode="after")
     def validate_profile_reference(self) -> "BusinessDateResolveRequest":
         if self.profile_id is None and self.profile_version_id is None:
             raise ValueError("profile_id or profile_version_id is required")
+        date_types = [item.date_type for item in self.date_values]
+        if len(date_types) != len(set(date_types)):
+            raise ValueError("date_values must contain at most one value for each date_type")
         return self
 
 
@@ -452,9 +585,10 @@ class BusinessDateResolveResponse(ApiModel):
     profile_version_id: int
     version_number: int
     resolved_date: date
-    selected_date_key: str | None = None
+    selected_date_key: BusinessDateType | None = None
     fallback_applied: bool = False
-    attempted_date_keys: list[str] = Field(default_factory=list)
+    attempted_date_keys: list[BusinessDateType] = Field(default_factory=list)
+    supplied_date_keys: list[BusinessDateType] = Field(default_factory=list)
 
 
 class BusinessDateProfileListResponse(ApiModel):
@@ -467,7 +601,7 @@ class BusinessDateProfileListResponse(ApiModel):
 class BusinessDateProfileAssignmentPayload(ApiModel):
     scope_type: Literal["GLOBAL", "COMPANY", "CUSTOMER", "VENDOR", "FORWARDER", "CARRIER"]
     scope_id: int | None = None
-    shipment_scope: Literal["OCEAN_HOUSE", "AIR_HOUSE"]
+    shipment_scope: Literal["OCEAN_HOUSE", "AIR_HOUSE", "ROAD_SHIPMENT"]
     business_purpose: Literal["EXCHANGE_RATE_DATE"] = "EXCHANGE_RATE_DATE"
     priority: int = 100
     is_active: bool = True
@@ -667,6 +801,11 @@ class ChargeReferenceData(ApiModel):
         "PACKAGE",
         "DOCUMENT",
         "DAY",
+        "DISTANCE",
+        "PER_HOUR",
+        "PER_LOADING_METER",
+        "PER_PALLET",
+        "PER_STOP",
         "PERCENTAGE",
     ]
     modes: list[str] = ["OCEAN", "AIR", "ROAD", "RAIL", "MULTIMODAL"]
@@ -705,7 +844,11 @@ class ChargeReferenceData(ApiModel):
         "FORWARDER",
         "CARRIER",
     ]
-    business_date_shipment_scopes: list[str] = ["OCEAN_HOUSE", "AIR_HOUSE"]
+    business_date_shipment_scopes: list[str] = [
+        "OCEAN_HOUSE",
+        "AIR_HOUSE",
+        "ROAD_SHIPMENT",
+    ]
     business_date_purposes: list[str] = ["EXCHANGE_RATE_DATE"]
     business_date_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
     fx_rate_types: list[str] = ["MID", "BUY", "SELL", "CUSTOM"]
@@ -720,6 +863,11 @@ class ChargeReferenceData(ApiModel):
         "ACTUAL_FLIGHT_DEPARTURE_DATE",
         "AWB_EXECUTION_DATE",
         "ESTIMATED_FLIGHT_DEPARTURE_DATE",
+        "ROAD_ACTUAL_PICKUP_DATE",
+        "ROAD_PLANNED_PICKUP_DATE",
+        "ROAD_ACTUAL_DELIVERY_DATE",
+        "ROAD_PLANNED_DELIVERY_DATE",
+        "CMR_ISSUE_DATE",
     ]
 
 
@@ -741,7 +889,10 @@ class RateBookEntryPayload(ApiModel):
     charge_component_code: str
     rate_amount: Decimal | None = None
     rate_percent: Decimal | None = None
-    basis: str = "SHIPMENT"
+    basis: str | None = None
+    basis_override: str | None = None
+    charge_context: str | None = None
+    charge_context_override: str | None = None
     currency: str = "USD"
     calculation_profile_id: int | None = None
     allocation_profile_id: int | None = None
@@ -763,7 +914,15 @@ class RateBookEntryPayload(ApiModel):
 
     @model_validator(mode="after")
     def validate_rate_entry(self) -> "RateBookEntryPayload":
-        if self.basis.strip().upper() in {"PERCENT", "PERCENTAGE"}:
+        configured_basis = (
+            self.basis_override
+            if "basis_override" in self.model_fields_set
+            else self.basis
+        )
+        if configured_basis is None:
+            if self.rate_amount is None and self.rate_percent is None:
+                raise ValueError("rate_amount or rate_percent is required")
+        elif configured_basis.strip().upper() in {"PERCENT", "PERCENTAGE"}:
             if self.rate_percent is None:
                 raise ValueError("rate_percent is required for percentage basis")
         elif self.rate_amount is None:
@@ -778,6 +937,14 @@ class RateBookEntryPayload(ApiModel):
 class RateBookPayload(ApiModel):
     rate_book_code: str
     rate_book_name: str
+    charge_component_code: str | None = None
+    row_attribute_keys: list[RateBookRowAttributeKey] = Field(
+        default_factory=list,
+        description=(
+            "Controlled applicability and override columns shared by every row in this "
+            "rate-book version. Rate value, currency, component, and active state are core fields."
+        ),
+    )
     description: str | None = None
     currency: str = "USD"
     valid_from: date | None = None
@@ -792,6 +959,72 @@ class RateBookPayload(ApiModel):
     def validate_validity(self) -> "RateBookPayload":
         if self.valid_from is not None and self.valid_to is not None and self.valid_from > self.valid_to:
             raise ValueError("valid_from must be less than or equal to valid_to")
+        normalized_keys: list[str] = []
+        for raw_key in self.row_attribute_keys:
+            key = raw_key.strip().lower()
+            if key not in RATE_BOOK_ROW_ATTRIBUTE_KEYS:
+                raise ValueError(f"Unsupported rate-book row attribute: {raw_key}")
+            if key not in normalized_keys:
+                normalized_keys.append(key)
+
+        component_codes = {
+            entry.charge_component_code.strip().upper()
+            for entry in self.entries
+            if entry.charge_component_code.strip()
+        }
+        component_code = self.charge_component_code.strip().upper() if self.charge_component_code else None
+        if component_code is None and len(component_codes) == 1:
+            component_code = next(iter(component_codes))
+        if component_code is not None and any(code != component_code for code in component_codes):
+            raise ValueError("All rate rows must use the rate book's charge_component_code")
+
+        if "row_attribute_keys" not in self.model_fields_set:
+            for entry in self.entries:
+                if (
+                    "basis" in entry.model_fields_set
+                    and entry.basis not in (None, "")
+                    and "basis_override" not in normalized_keys
+                ):
+                    normalized_keys.append("basis_override")
+                if (
+                    "charge_context" in entry.model_fields_set
+                    and entry.charge_context not in (None, "")
+                    and "charge_context_override" not in normalized_keys
+                ):
+                    normalized_keys.append("charge_context_override")
+                for key in RATE_BOOK_ROW_ATTRIBUTE_KEYS:
+                    value = getattr(entry, key)
+                    if key in entry.model_fields_set and value not in (None, "") and key not in normalized_keys:
+                        normalized_keys.append(key)
+        else:
+            selected = set(normalized_keys)
+            for entry in self.entries:
+                if (
+                    "basis_override" not in selected
+                    and "basis" in entry.model_fields_set
+                    and entry.basis not in (None, "")
+                ):
+                    raise ValueError("Rate row basis is outside row_attribute_keys")
+                if (
+                    "charge_context_override" not in selected
+                    and "charge_context" in entry.model_fields_set
+                    and entry.charge_context not in (None, "")
+                ):
+                    raise ValueError("Rate row charge context is outside row_attribute_keys")
+                hidden_values = [
+                    key
+                    for key in RATE_BOOK_ROW_ATTRIBUTE_KEYS
+                    if key not in selected
+                    and key in entry.model_fields_set
+                    and getattr(entry, key) not in (None, "")
+                ]
+                if hidden_values:
+                    raise ValueError(
+                        "Rate row contains values outside row_attribute_keys: "
+                        + ", ".join(hidden_values)
+                    )
+        self.charge_component_code = component_code
+        self.row_attribute_keys = normalized_keys
         return self
 
 
@@ -804,6 +1037,8 @@ class RateBook(ApiModel):
     id: int
     rate_book_code: str
     rate_book_name: str
+    charge_component_code: str | None = None
+    row_attribute_keys: list[RateBookRowAttributeKey] = Field(default_factory=list)
     description: str | None = None
     currency: str = "USD"
     valid_from: date | None = None
@@ -832,7 +1067,7 @@ class RateBookWorkspace(ApiModel):
 
 
 class CalculationTemplateStepPayload(ApiModel):
-    step_number: int
+    step_number: int = Field(ge=1)
     charge_component_code: str
     relationship_role: Literal["PAYER", "PAYEE", "BOTH"] = "BOTH"
     subtotal_key: str | None = None
@@ -845,9 +1080,17 @@ class CalculationTemplatePayload(ApiModel):
     template_code: str
     template_name: str
     description: str | None = None
-    status: str = "DRAFT"
+    status: CalculationTemplateStatus = "DRAFT"
     is_active: bool = True
     steps: list[CalculationTemplateStepPayload] = Field(default_factory=list)
+    expected_lock_version: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_steps(self) -> "CalculationTemplatePayload":
+        step_numbers = [step.step_number for step in self.steps]
+        if len(step_numbers) != len(set(step_numbers)):
+            raise ValueError("Calculation template step numbers must be unique")
+        return self
 
 
 class CalculationTemplateStep(CalculationTemplateStepPayload):
@@ -857,9 +1100,18 @@ class CalculationTemplateStep(CalculationTemplateStepPayload):
     rate_book_name: str | None = None
 
 
-class CalculationTemplate(CalculationTemplatePayload):
+class CalculationTemplate(ApiModel):
     id: int
+    template_code: str
+    template_name: str
+    description: str | None = None
+    status: CalculationTemplateStatus = "DRAFT"
+    is_active: bool = True
     steps: list[CalculationTemplateStep] = Field(default_factory=list)
+    version_number: int = 1
+    supersedes_calculation_template_id: int | None = None
+    lock_version: int = 1
+    published_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -874,6 +1126,7 @@ class CalculationTemplateListResponse(ApiModel):
 class CalculationTemplateWorkspace(ApiModel):
     template: CalculationTemplate
     steps: list[CalculationTemplateStep] = Field(default_factory=list)
+    versions: list[CalculationTemplate] = Field(default_factory=list)
 
 
 class ContractLinePayload(ApiModel):
@@ -1017,7 +1270,7 @@ class QuoteRequestCreate(ApiModel):
     valid_to: date | None = None
     expires_at: datetime | None = None
     margin_rules: dict[str, Any] = Field(default_factory=dict)
-    charge_context: str | None = None
+    charge_context: str | None = "TRANSPORT"
     context: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -1267,7 +1520,7 @@ class ChargeDocumentCreate(ApiModel):
     source_object_type: str = "MANUAL"
     source_object_id: str | None = None
     document_scope_level: str | None = None
-    shipment_scope: Literal["OCEAN_HOUSE", "AIR_HOUSE"] | None = None
+    shipment_scope: Literal["OCEAN_HOUSE", "AIR_HOUSE", "ROAD_SHIPMENT"] | None = None
     document_date: date | None = None
     source_reference_snapshot_json: dict[str, Any] | None = None
     company_id: int | None = None
@@ -1355,7 +1608,7 @@ class ChargeDocument(ApiModel):
     source_object_type: str = "MANUAL"
     source_object_id: str | None = None
     document_scope_level: str | None = None
-    shipment_scope: Literal["OCEAN_HOUSE", "AIR_HOUSE"] | None = None
+    shipment_scope: Literal["OCEAN_HOUSE", "AIR_HOUSE", "ROAD_SHIPMENT"] | None = None
     document_date: date | None = None
     source_reference_snapshot_json: dict[str, Any] | None = None
     company_id: int | None = None

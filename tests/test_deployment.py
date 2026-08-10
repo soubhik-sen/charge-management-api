@@ -16,6 +16,23 @@ def test_health_endpoint_is_available_without_authentication() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_optional_same_origin_web_app_preserves_api_routes(tmp_path, monkeypatch) -> None:
+    (tmp_path / "index.html").write_text(
+        "<html><body>LedgerFlow local</body></html>",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LEDGERFLOW_WEB_DIRECTORY", str(tmp_path))
+    client = TestClient(create_app())
+
+    index = client.get("/")
+    health = client.get("/health")
+
+    assert index.status_code == 200
+    assert "LedgerFlow local" in index.text
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+
+
 def test_readiness_endpoint_reports_database_ok(monkeypatch) -> None:
     called = False
 

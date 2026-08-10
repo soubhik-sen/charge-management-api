@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../core/design.dart';
+import '../core/reference_values.dart';
 import '../data/workspace_data.dart';
 import 'workspace_pages.dart' hide WorkspaceMutation;
 
@@ -47,7 +48,6 @@ class _ComponentManagementWorkspaceState
   @override
   void initState() {
     super.initState();
-    _selectedId = _id(widget.records.firstOrNull);
     _search.addListener(_refresh);
   }
 
@@ -56,7 +56,7 @@ class _ComponentManagementWorkspaceState
     super.didUpdateWidget(oldWidget);
     if (_selectedId != null &&
         !widget.records.any((record) => _id(record) == _selectedId)) {
-      _selectedId = _id(widget.records.firstOrNull);
+      _selectedId = null;
     }
   }
 
@@ -79,19 +79,14 @@ class _ComponentManagementWorkspaceState
             _value(record, 'component_code'),
             _value(record, 'component_name'),
             _value(record, 'category'),
+            _value(record, 'charge_context'),
           ].any((value) => value.toLowerCase().contains(query)),
         )
         .toList(growable: false);
   }
 
-  JsonMap? get _selected => widget.records.cast<JsonMap?>().firstWhere(
-    (record) => _id(record) == _selectedId,
-    orElse: () => widget.records.firstOrNull,
-  );
-
   @override
   Widget build(BuildContext context) {
-    final selected = _selected;
     return PageCanvas(
       title: 'Charge components',
       subtitle:
@@ -115,177 +110,168 @@ class _ComponentManagementWorkspaceState
           ],
         ),
         const SizedBox(height: 16),
-        ResponsiveColumns(
-          leftFlex: 5,
-          rightFlex: 3,
-          left: SurfaceCard(
-            padding: EdgeInsets.zero,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: TextField(
-                    controller: _search,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      labelText: 'Search code, name, or category',
-                    ),
+        SurfaceCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  controller: _search,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    labelText: 'Search code, name, category, or context',
                   ),
                 ),
-                const Divider(height: 1),
-                if (_filtered.isEmpty)
-                  const EmptyState(message: 'No components match the search.')
-                else
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      showCheckboxColumn: false,
-                      columns: const [
-                        DataColumn(label: Text('Code')),
-                        DataColumn(label: Text('Name')),
-                        DataColumn(label: Text('Category')),
-                        DataColumn(label: Text('Role')),
-                        DataColumn(label: Text('Basis')),
-                        DataColumn(label: Text('Status')),
+              ),
+              const Divider(height: 1),
+              if (_filtered.isEmpty)
+                const EmptyState(message: 'No components match the search.')
+              else
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 850;
+                    return Column(
+                      children: [
+                        _ComponentTableHeader(compact: compact),
+                        for (final record in _filtered)
+                          _ExpandableComponentRow(
+                            component: record,
+                            compact: compact,
+                            expanded: _id(record) == _selectedId,
+                            onTap: () {
+                              final id = _id(record);
+                              setState(
+                                () =>
+                                    _selectedId = _selectedId == id ? null : id,
+                              );
+                            },
+                            details: _componentExpandedDetails(record),
+                          ),
                       ],
-                      rows: _filtered.map((record) {
-                        final id = _id(record);
-                        return DataRow(
-                          selected: id == _selectedId,
-                          onSelectChanged: (_) =>
-                              setState(() => _selectedId = id),
-                          cells: [
-                            DataCell(
-                              Text(
-                                _value(record, 'component_code'),
-                                style: const TextStyle(
-                                  color: LedgerFlowDesign.info,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            DataCell(Text(_value(record, 'component_name'))),
-                            DataCell(Text(_value(record, 'category'))),
-                            DataCell(
-                              Text(_value(record, 'default_party_role')),
-                            ),
-                            DataCell(Text(_value(record, 'calculation_basis'))),
-                            DataCell(
-                              StatusPill(
-                                record['is_active'] == false
-                                    ? 'INACTIVE'
-                                    : 'ACTIVE',
-                              ),
-                            ),
-                          ],
-                        );
-                      }).toList(),
-                    ),
-                  ),
-              ],
-            ),
+                    );
+                  },
+                ),
+            ],
           ),
-          right: selected == null
-              ? const SurfaceCard(
-                  child: EmptyState(message: 'Select a component to inspect.'),
-                )
-              : _componentInspector(selected),
         ),
       ],
     );
   }
 
-  Widget _componentInspector(JsonMap component) {
+  Widget _componentExpandedDetails(JsonMap component) {
     final active = component['is_active'] != false;
-    return SurfaceCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SectionHeading(
-            title: _value(component, 'component_name'),
-            subtitle: _value(component, 'component_code'),
-            action: PopupMenuButton<String>(
-              tooltip: 'Component actions',
-              onSelected: (action) {
-                if (action == 'edit') _editComponent(component);
-                if (action == 'deactivate') _deactivate(component);
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: 'edit',
-                  enabled: widget.live,
-                  child: const Text('Edit component'),
-                ),
-                PopupMenuItem(
-                  value: 'deactivate',
-                  enabled: widget.live && active,
-                  child: const Text('Deactivate'),
-                ),
-              ],
+    return ColoredBox(
+      color: const Color(0xFFF4F8F7),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+        child: Wrap(
+          spacing: 38,
+          runSpacing: 18,
+          crossAxisAlignment: WrapCrossAlignment.start,
+          children: [
+            SizedBox(
+              width: 260,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _InlineDetailHeading('Classification'),
+                  DetailRow(
+                    label: 'Category',
+                    value: _value(component, 'category'),
+                  ),
+                  DetailRow(
+                    label: 'Context',
+                    value: _value(component, 'charge_context'),
+                  ),
+                  DetailRow(
+                    label: 'Party role',
+                    value: _value(component, 'default_party_role'),
+                  ),
+                  DetailRow(
+                    label: 'Tax class',
+                    value: component['is_tax'] == true ? 'TAX' : 'STANDARD',
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          StatusPill(active ? 'ACTIVE' : 'INACTIVE'),
-          const SizedBox(height: 14),
-          DetailRow(label: 'Category', value: _value(component, 'category')),
-          DetailRow(
-            label: 'Party role',
-            value: _value(component, 'default_party_role'),
-          ),
-          DetailRow(
-            label: 'Context',
-            value: _value(component, 'charge_context'),
-          ),
-          DetailRow(
-            label: 'Calc. basis',
-            value: _value(component, 'calculation_basis'),
-          ),
-          DetailRow(
-            label: 'Date basis',
-            value: _value(component, 'charge_date_basis'),
-          ),
-          const Divider(height: 26),
-          const Text(
-            'Default profile usage',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 5),
-          DetailRow(
-            label: 'Calculation',
-            value: _profileName(
-              widget.calculationProfiles,
-              component['default_calculation_profile_id'],
+            SizedBox(
+              width: 360,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _InlineDetailHeading('Default profile usage'),
+                  DetailRow(
+                    label: 'Calculation',
+                    value: _profileName(
+                      widget.calculationProfiles,
+                      component['default_calculation_profile_id'],
+                    ),
+                  ),
+                  DetailRow(
+                    label: 'Allocation',
+                    value: _profileName(
+                      widget.allocationProfiles,
+                      component['allocation_profile_id'],
+                    ),
+                  ),
+                  DetailRow(
+                    label: 'Business date',
+                    value: _profileName(
+                      widget.businessDateProfiles,
+                      component['business_date_profile_id'],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          DetailRow(
-            label: 'Allocation',
-            value: _profileName(
-              widget.allocationProfiles,
-              component['allocation_profile_id'],
+            SizedBox(
+              width: 260,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _InlineDetailHeading('Rating defaults'),
+                  DetailRow(
+                    label: 'Calc. basis',
+                    value: _value(component, 'calculation_basis'),
+                  ),
+                  DetailRow(
+                    label: 'Date basis',
+                    value: _value(component, 'charge_date_basis'),
+                  ),
+                  DetailRow(
+                    label: 'Date policy',
+                    value: _value(component, 'business_date_policy_mode'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          DetailRow(
-            label: 'Business date',
-            value: _profileName(
-              widget.businessDateProfiles,
-              component['business_date_profile_id'],
+            SizedBox(
+              width: 190,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FilledButton.icon(
+                    onPressed: widget.live
+                        ? () => _editComponent(component)
+                        : null,
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Edit defaults'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: widget.live && active
+                        ? () => _deactivate(component)
+                        : null,
+                    icon: const Icon(Icons.block_outlined),
+                    label: const Text('Deactivate'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          DetailRow(
-            label: 'Date policy',
-            value: _value(component, 'business_date_policy_mode'),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: widget.live ? () => _editComponent(component) : null,
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Edit defaults'),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -327,6 +313,164 @@ class _ComponentManagementWorkspaceState
       successMessage: 'Component deactivated.',
     );
   }
+}
+
+class _ComponentTableHeader extends StatelessWidget {
+  const _ComponentTableHeader({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: const Color(0xFFF7F9FB),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          const _ComponentTableCell('Code', flex: 5, header: true),
+          const _ComponentTableCell('Name', flex: 4, header: true),
+          if (!compact) ...const [
+            _ComponentTableCell('Category', flex: 3, header: true),
+            _ComponentTableCell('Context', flex: 3, header: true),
+            _ComponentTableCell('Role', flex: 2, header: true),
+            _ComponentTableCell('Basis', flex: 3, header: true),
+          ],
+          const SizedBox(width: 88, child: Text('Status')),
+          const SizedBox(width: 32),
+        ],
+      ),
+    ),
+  );
+}
+
+class _ExpandableComponentRow extends StatelessWidget {
+  const _ExpandableComponentRow({
+    required this.component,
+    required this.compact,
+    required this.expanded,
+    required this.onTap,
+    required this.details,
+  });
+
+  final JsonMap component;
+  final bool compact;
+  final bool expanded;
+  final VoidCallback onTap;
+  final Widget details;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Material(
+        color: expanded ? const Color(0xFFEAF4F2) : Colors.transparent,
+        child: InkWell(
+          key: ValueKey('component-row-${component['id']}'),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                _ComponentTableCell(
+                  _value(component, 'component_code'),
+                  flex: 5,
+                  emphasis: true,
+                ),
+                _ComponentTableCell(
+                  _value(component, 'component_name'),
+                  flex: 4,
+                ),
+                if (!compact) ...[
+                  _ComponentTableCell(_value(component, 'category'), flex: 3),
+                  _ComponentTableCell(
+                    _value(component, 'charge_context'),
+                    flex: 3,
+                  ),
+                  _ComponentTableCell(
+                    _value(component, 'default_party_role'),
+                    flex: 2,
+                  ),
+                  _ComponentTableCell(
+                    _value(component, 'calculation_basis'),
+                    flex: 3,
+                  ),
+                ],
+                SizedBox(
+                  width: 88,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: StatusPill(
+                      component['is_active'] == false ? 'INACTIVE' : 'ACTIVE',
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 32,
+                  child: Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    color: LedgerFlowDesign.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      AnimatedSize(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: expanded ? details : const SizedBox.shrink(),
+      ),
+      const Divider(height: 1),
+    ],
+  );
+}
+
+class _ComponentTableCell extends StatelessWidget {
+  const _ComponentTableCell(
+    this.value, {
+    required this.flex,
+    this.header = false,
+    this.emphasis = false,
+  });
+
+  final String value;
+  final int flex;
+  final bool header;
+  final bool emphasis;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    flex: flex,
+    child: Padding(
+      padding: const EdgeInsets.only(right: 12),
+      child: Text(
+        value,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: emphasis ? LedgerFlowDesign.info : null,
+          fontSize: header ? 12 : 13,
+          fontWeight: header || emphasis ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+    ),
+  );
+}
+
+class _InlineDetailHeading extends StatelessWidget {
+  const _InlineDetailHeading(this.value);
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 7),
+    child: Text(
+      value,
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    ),
+  );
 }
 
 enum ProfileKind { calculation, allocation, businessDate }
@@ -1077,9 +1221,9 @@ class _ComponentDialogState extends State<_ComponentDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _code;
   late final TextEditingController _name;
-  late final TextEditingController _category;
-  late final TextEditingController _context;
-  late final TextEditingController _basis;
+  late String _category;
+  late String _context;
+  late String _basis;
   late String _role;
   late String _dateBasis;
   late String _datePolicy;
@@ -1100,15 +1244,9 @@ class _ComponentDialogState extends State<_ComponentDialog> {
     _name = TextEditingController(
       text: _value(value, 'component_name', fallback: ''),
     );
-    _category = TextEditingController(
-      text: _value(value, 'category', fallback: 'ACCESSORIAL'),
-    );
-    _context = TextEditingController(
-      text: _value(value, 'charge_context', fallback: 'TRANSPORT'),
-    );
-    _basis = TextEditingController(
-      text: _value(value, 'calculation_basis', fallback: 'FLAT'),
-    );
+    _category = _value(value, 'category', fallback: 'ACCESSORIAL');
+    _context = _value(value, 'charge_context', fallback: 'TRANSPORT');
+    _basis = _value(value, 'calculation_basis', fallback: 'FLAT');
     _role = _value(value, 'default_party_role', fallback: 'BOTH');
     _dateBasis = _value(value, 'charge_date_basis', fallback: 'DOCUMENT_DATE');
     _datePolicy = _value(
@@ -1137,9 +1275,6 @@ class _ComponentDialogState extends State<_ComponentDialog> {
   void dispose() {
     _code.dispose();
     _name.dispose();
-    _category.dispose();
-    _context.dispose();
-    _basis.dispose();
     super.dispose();
   }
 
@@ -1160,7 +1295,8 @@ class _ComponentDialogState extends State<_ComponentDialog> {
               children: [
                 const _DialogSection(
                   title: 'Identity',
-                  text: 'Codes are stable API-facing identifiers.',
+                  text:
+                      'Codes and categories identify the charge. Context locates it in the operational lifecycle; DESTINATION means the import or arrival side.',
                 ),
                 _TwoFields(
                   left: _requiredField(_code, 'Component code'),
@@ -1168,8 +1304,24 @@ class _ComponentDialogState extends State<_ComponentDialog> {
                 ),
                 const SizedBox(height: 12),
                 _TwoFields(
-                  left: _requiredField(_category, 'Category'),
-                  right: _requiredField(_context, 'Charge context'),
+                  left: _dropdown(
+                    label: 'Category',
+                    value: _category,
+                    values: referenceValuesWithCurrent(
+                      chargeCategoryValues,
+                      _category,
+                    ),
+                    onChanged: (value) => setState(() => _category = value!),
+                  ),
+                  right: _dropdown(
+                    label: 'Charge context',
+                    value: _context,
+                    values: referenceValuesWithCurrent(
+                      chargeContextValues,
+                      _context,
+                    ),
+                    onChanged: (value) => setState(() => _context = value!),
+                  ),
                 ),
                 const SizedBox(height: 18),
                 const _DialogSection(
@@ -1184,7 +1336,15 @@ class _ComponentDialogState extends State<_ComponentDialog> {
                     values: const ['PAYER', 'PAYEE', 'BOTH'],
                     onChanged: (value) => setState(() => _role = value!),
                   ),
-                  right: _requiredField(_basis, 'Calculation basis'),
+                  right: _dropdown(
+                    label: 'Calculation basis',
+                    value: _basis,
+                    values: referenceValuesWithCurrent(
+                      chargeCalculationBasisValues,
+                      _basis,
+                    ),
+                    onChanged: (value) => setState(() => _basis = value!),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 _ProfileDropdown(
@@ -1247,17 +1407,26 @@ class _ComponentDialogState extends State<_ComponentDialog> {
                 Wrap(
                   spacing: 28,
                   children: [
-                    SwitchListTile.adaptive(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Tax component'),
-                      value: _isTax,
-                      onChanged: (value) => setState(() => _isTax = value),
+                    SizedBox(
+                      width: 350,
+                      child: SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Tax classification'),
+                        subtitle: const Text(
+                          'Classifies the component for reporting; calculation still comes from its rate or profile.',
+                        ),
+                        value: _isTax,
+                        onChanged: (value) => setState(() => _isTax = value),
+                      ),
                     ),
-                    SwitchListTile.adaptive(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Active'),
-                      value: _active,
-                      onChanged: (value) => setState(() => _active = value),
+                    SizedBox(
+                      width: 220,
+                      child: SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Active'),
+                        value: _active,
+                        onChanged: (value) => setState(() => _active = value),
+                      ),
                     ),
                   ],
                 ),
@@ -1281,10 +1450,10 @@ class _ComponentDialogState extends State<_ComponentDialog> {
     Navigator.pop<JsonMap>(context, {
       'component_code': _code.text.trim(),
       'component_name': _name.text.trim(),
-      'category': _category.text.trim(),
+      'category': _category,
       'default_party_role': _role,
-      'charge_context': _context.text.trim(),
-      'calculation_basis': _basis.text.trim(),
+      'charge_context': _context,
+      'calculation_basis': _basis,
       'charge_date_basis': _dateBasis,
       'business_date_policy_mode': _datePolicy,
       'business_date_profile_id': _datePolicy == 'PROFILE_OVERRIDE'
@@ -2183,7 +2352,7 @@ class _AssignmentDialogState extends State<_AssignmentDialog> {
               left: _dropdown(
                 label: 'Shipment scope',
                 value: _shipmentScope,
-                values: const ['OCEAN_HOUSE', 'AIR_HOUSE'],
+                values: const ['OCEAN_HOUSE', 'AIR_HOUSE', 'ROAD_SHIPMENT'],
                 onChanged: (value) => setState(() => _shipmentScope = value!),
               ),
               right: TextFormField(

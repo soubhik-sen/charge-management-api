@@ -16,6 +16,7 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 - Effective-dated charge components, aliases, versioned rate books, executable calculation templates, and contracts.
 - Deterministic rate-row selection by applicability, specificity, priority, and scale floor.
 - Versioned calculation profiles for flat, single-axis, and compound rate formulas.
+- Seeded road-freight pack with FTL/LTL, fuel, toll, waiting, ADR, pallet, stop, delivery, permit, CMR, calculation, allocation, and date-policy metadata.
 - A side-effect-free calculation preview API for flat, quantity, percentage, profile, FX, and allocation evaluation.
 - Versioned allocation profiles with effective periods, missing-driver policy, and exact minor-unit distribution.
 - Versioned business-date profiles with effective periods, ordered fallback steps, scoped assignments, and standalone resolution.
@@ -26,7 +27,7 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 - PostgreSQL runtime with SQLAlchemy and Alembic migrations.
 - JWT authentication using any standards-compliant issuer through JWKS or a shared secret.
 - Generated OpenAPI contract and PostgreSQL-backed API tests with JUnit/coverage reports.
-- Responsive operations UI for quotes, charge documents, invoice reconciliation, rate books, components, profiles, business dates, and FX rates.
+- Responsive operations UI for quotes, charge documents, invoice reconciliation, component-scoped rate books, calculation templates, components, profiles, business dates, and FX rates.
 
 ## Five-Minute Start
 
@@ -99,6 +100,7 @@ Create or update the Blueprint from this repository in Render. The API exposes `
 | --- | --- |
 | [Quickstart](docs/quickstart.md) | First local call with Docker or Python |
 | [Core concepts](docs/core-concepts.md) | What each module means and how the modules work together |
+| [Road freight metadata](docs/road-freight-metadata.md) | Seeded road components, profiles, caller inputs, and standards basis |
 | [API examples](docs/api-examples.md) | Calculation preview, allocation, business-date, FX, and rating requests |
 | [Authentication](docs/authentication.md) | JWT, claims, local mode, and authorization boundary |
 | [Database](docs/database.md) | Schema groups, migrations, and persistence behavior |

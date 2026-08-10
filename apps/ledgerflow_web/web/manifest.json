@@ -4,7 +4,7 @@
     "start_url": ".",
     "display": "standalone",
     "background_color": "#F6F8FA",
-    "theme_color": "#061A35",
+    "theme_color": "#14213D",
     "description": "Open-source charge management workspace.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,

@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#061A35"/>
-  <path d="M16 19h21l11 11v15H27L16 34V19Z" fill="none" stroke="#18B6AE" stroke-width="5" stroke-linejoin="round"/>
-  <path d="M17 34h18v11M37 19v12h11" fill="none" stroke="#8CE5DE" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="LedgerFlow">
+  <rect width="64" height="64" rx="14" fill="#14213D"/>
+  <path d="M12 10h10v30h11l10 10H12V10Z" fill="#FFFFFF"/>
+  <path d="M26 18h25v7H26zM26 29h25v7H26z" fill="#0F766E"/>
+  <path d="M34 39h12l12 12H46L34 39Z" fill="#1BA6A6"/>
 </svg>

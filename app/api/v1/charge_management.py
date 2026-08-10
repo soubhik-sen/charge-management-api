@@ -139,7 +139,16 @@ def preview_calculation(
     return service.preview_calculation(payload)
 
 
-@router.post("/business-dates/resolve", response_model=BusinessDateResolveResponse)
+@router.post(
+    "/business-dates/resolve",
+    response_model=BusinessDateResolveResponse,
+    summary="Resolve a business date from typed caller dates",
+    description=(
+        "Evaluates the selected profile's ordered date keys against `date_values`. "
+        "Allowed date identifiers are shown by the `BusinessDateValue.date_type` enum "
+        "and returned by `GET /initialization-data` in `reference_data.business_date_keys`."
+    ),
+)
 def resolve_business_date(
     payload: BusinessDateResolveRequest,
     principal: Principal = Depends(require_bearer_principal),
@@ -689,6 +698,7 @@ def list_rate_books(
     active_only: bool | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     calculation_basis: str | None = Query(default=None),
+    charge_component_code: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(require_bearer_principal),
@@ -699,6 +709,7 @@ def list_rate_books(
         active_only=active_only,
         status_filter=status_filter,
         calculation_basis=calculation_basis,
+        charge_component_code=charge_component_code,
         limit=limit,
         offset=offset,
     )
@@ -793,6 +804,47 @@ def get_calculation_template_workspace(
 ) -> CalculationTemplateWorkspace:
     _allow(principal, "charge.calculation_templates.workspace.read")
     return service.get_calculation_template_workspace(calculation_template_id)
+
+
+@router.get(
+    "/calculation-templates/{calculation_template_id}/versions",
+    response_model=list[CalculationTemplate],
+)
+def list_calculation_template_versions(
+    calculation_template_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> list[CalculationTemplate]:
+    _allow(principal, "charge.calculation_templates.versions.list")
+    return service.list_calculation_template_versions(calculation_template_id)
+
+
+@router.post(
+    "/calculation-templates/{calculation_template_id}/versions",
+    response_model=CalculationTemplateWorkspace,
+    status_code=201,
+)
+def create_calculation_template_version(
+    calculation_template_id: int,
+    payload: CalculationTemplatePayload,
+    principal: Principal = Depends(require_bearer_principal),
+) -> CalculationTemplateWorkspace:
+    _allow(principal, "charge.calculation_templates.versions.create")
+    return service.create_calculation_template_version(
+        calculation_template_id,
+        payload,
+    )
+
+
+@router.post(
+    "/calculation-templates/{calculation_template_id}/publish",
+    response_model=CalculationTemplateWorkspace,
+)
+def publish_calculation_template(
+    calculation_template_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> CalculationTemplateWorkspace:
+    _allow(principal, "charge.calculation_templates.publish")
+    return service.publish_calculation_template(calculation_template_id)
 
 
 @router.put(

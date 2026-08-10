@@ -28,7 +28,7 @@ void main() {
       httpClient: client,
     ).loadWorkspace();
 
-    expect(requested, hasLength(10));
+    expect(requested, hasLength(11));
     expect(requested.every((uri) => uri.host == 'api.example.test'), isTrue);
     expect(data['components'], isEmpty);
   });

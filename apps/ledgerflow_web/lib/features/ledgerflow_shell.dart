@@ -20,6 +20,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
     _Destination('Charge documents', Icons.folder_copy_outlined),
     _Destination('Invoices', Icons.receipt_long_outlined),
     _Destination('Rate books', Icons.menu_book_outlined),
+    _Destination('Calculation templates', Icons.schema_outlined),
     _Destination('Components', Icons.account_tree_outlined),
     _Destination('Profiles', Icons.tune_outlined),
     _Destination('FX & dates', Icons.currency_exchange_outlined),
@@ -33,6 +34,18 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
   String _apiUrl = LedgerFlowApiClient.defaultBaseUrl;
   String? _lastError;
   LedgerFlowApiClient? _client;
+  String? _token;
+
+  @override
+  void initState() {
+    super.initState();
+    final token = LedgerFlowApiClient.defaultToken.trim();
+    if (token.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _connect(_apiUrl, token),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -91,7 +104,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
                         const Positioned.fill(
                           child: ColoredBox(
                             color: Color(0x99FFFFFF),
-                            child: Center(child: CircularProgressIndicator()),
+                            child: Center(child: _LedgerFlowLoadingState()),
                           ),
                         ),
                     ],
@@ -201,10 +214,20 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
     3 => InvoiceWorkspace(invoices: _data['invoices']),
     4 => RateBookWorkspace(
       rateBooks: _data['rateBooks'],
+      components: _data['components'],
+      calculationProfiles: _data['calculationProfiles'],
+      allocationProfiles: _data['allocationProfiles'],
       live: _live,
       onMutation: _mutate,
     ),
-    5 => ComponentManagementWorkspace(
+    5 => CalculationTemplateWorkspacePage(
+      templates: _data['calculationTemplates'],
+      components: _data['components'],
+      rateBooks: _data['rateBooks'],
+      live: _live,
+      onMutation: _mutate,
+    ),
+    6 => ComponentManagementWorkspace(
       records: _data['components'],
       calculationProfiles: _data['calculationProfiles'],
       allocationProfiles: _data['allocationProfiles'],
@@ -212,7 +235,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
       live: _live,
       onMutation: _mutate,
     ),
-    6 => ProfileManagementHub(data: _data, live: _live, onMutation: _mutate),
+    7 => ProfileManagementHub(data: _data, live: _live, onMutation: _mutate),
     _ => FxDateManagementHub(
       data: _data,
       live: _live,
@@ -225,11 +248,20 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
 
   Future<void> _showConnectionDialog() async {
     final urlController = TextEditingController(text: _apiUrl);
-    final tokenController = TextEditingController();
+    final tokenController = TextEditingController(
+      text: _token ?? LedgerFlowApiClient.defaultToken,
+    );
     final result = await showDialog<_ConnectionInput>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Connect LedgerFlow API'),
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            LedgerFlowLogo(markSize: 32, fontSize: 20),
+            SizedBox(height: 16),
+            Text('Connect API'),
+          ],
+        ),
         content: SizedBox(
           width: 540,
           child: Column(
@@ -324,8 +356,6 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
       if (mounted) setState(() => _loading = false);
     }
   }
-
-  String? _token;
 
   Future<void> _reload() async {
     final token = _token;
@@ -424,7 +454,14 @@ class _TopBar extends StatelessWidget {
       child: Row(
         children: [
           if (compact)
-            IconButton(onPressed: onMenu, icon: const Icon(Icons.menu))
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(onPressed: onMenu, icon: const Icon(Icons.menu)),
+                const SizedBox(width: 4),
+                const LedgerFlowLogo(markSize: 29, fontSize: 17),
+              ],
+            )
           else
             const Text(
               'Charge management',
@@ -476,31 +513,48 @@ class _Brand extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Padding(
       padding: EdgeInsets.fromLTRB(20, 24, 16, 18),
-      child: Row(
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: LedgerFlowDesign.teal,
-              borderRadius: BorderRadius.all(Radius.circular(9)),
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(8),
-              child: Icon(Icons.waterfall_chart, color: Colors.white, size: 22),
-            ),
-          ),
-          SizedBox(width: 11),
-          Text(
-            'LedgerFlow',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: LedgerFlowLogo(markSize: 38, fontSize: 20, onDark: true),
       ),
     );
   }
+}
+
+class _LedgerFlowLoadingState extends StatelessWidget {
+  const _LedgerFlowLoadingState();
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: LedgerFlowDesign.border),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x140B1930),
+          blurRadius: 28,
+          offset: Offset(0, 12),
+        ),
+      ],
+    ),
+    child: const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LedgerFlowLogo(markSize: 40, fontSize: 21),
+          SizedBox(height: 16),
+          SizedBox(width: 116, child: LinearProgressIndicator(minHeight: 3)),
+          SizedBox(height: 10),
+          Text(
+            'Loading workspace',
+            style: TextStyle(fontSize: 12, color: LedgerFlowDesign.muted),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Destination {

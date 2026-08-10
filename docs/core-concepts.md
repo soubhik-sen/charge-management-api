@@ -58,6 +58,8 @@ The simplest way to remember the boundary is:
 
 You do not need every module for every integration. A direct-charge implementation can start with components, optional allocation/date/FX setup, and charge documents. Contract-based quotation needs the pricing and quote modules as well.
 
+For road transport, start with the seeded road component and profile pack described in [Road freight metadata](road-freight-metadata.md). It documents which operational values the caller must supply for distance, stop, pallet, loading-meter, time, and business-date calculations.
+
 ## Current Execution Boundary
 
 The API separates maintained business configuration from executable built-in behavior. Rate-book matching and versioning, calculation-profile and calculation-template execution, quote ranking/award, date resolution, FX resolution, allocation preview, document lifecycle, and invoice matching are executable today.
@@ -87,6 +89,8 @@ Examples:
 - Default charge-date behavior.
 - Optional business-date and allocation profile references.
 - Tax and active flags.
+
+Category is classification metadata for cataloging and reporting. Charge context is an applicability dimension: `DESTINATION`, for example, identifies import/arrival-side charges. The tax flag classifies a component for reporting and downstream tax handling; it does not calculate a tax amount by itself.
 
 ### How To Use It
 
@@ -125,11 +129,12 @@ Aliases normalize input; they are not separate charge types and they do not repl
 
 ### What It Is
 
-The API term is **rate book**. A rate book is a named collection of **rate book entries**, and those entries are the rate table rows.
+The API term is **rate book**. A rate book is a versioned price table for exactly one charge component. Its **rate book entries** are the table rows. The component is fixed on the header; rows vary the price and only the applicability or override columns selected in `row_attribute_keys`.
 
-Each entry connects a charge component to an amount and optional applicability conditions:
+Each entry connects the header component to an amount and optional applicability conditions:
 
-- Fixed `rate_amount` or percentage `rate_percent`, currency, and calculation basis.
+- Fixed `rate_amount` or percentage `rate_percent`, currency, and an inherited or overridden calculation basis.
+- Inherited or overridden charge context.
 - Origin and destination.
 - Transport mode and equipment type.
 - Commodity and service level.
@@ -141,16 +146,26 @@ Each entry connects a charge component to an amount and optional applicability c
 
 ### Example
 
-A rate book named `EU_OCEAN_2026` could contain:
+A rate book named `EU_OCEAN_FREIGHT_2026` for component `OCEAN_FREIGHT` could contain:
 
-| Component | Origin | Destination | Equipment | Rate | Basis |
-| --- | --- | --- | --- | ---: | --- |
-| `OCEAN_FREIGHT` | `ESBCN` | `USNYC` | `40HC` | 2,500 USD | `CONTAINER` |
-| `DOCUMENTATION_FEE` | `ESBCN` | `USNYC` | Any | 75 USD | `SHIPMENT` |
+| Origin | Destination | Equipment | Service level | Rate |
+| --- | --- | --- | --- | ---: |
+| `ESBCN` | `USNYC` | `40HC` | `STANDARD` | 2,500 USD |
+| `ESBCN` | `USNYC` | `40HC` | `EXPRESS` | 2,900 USD |
+
+Create a separate `EU_DOCUMENTATION_2026` rate book for `DOCUMENTATION_FEE`. A calculation template can then combine the freight and documentation books in one ordered calculation.
+
+### Row Schema
+
+`row_attribute_keys` is the controlled table schema shared by every row in a rate-book version. Supported optional columns are:
+
+`origin_code`, `destination_code`, `mode`, `equipment_type`, `commodity_code`, `service_level`, `scale_from`, `scale_to`, `minimum_amount`, `maximum_amount`, `validity_from`, `validity_to`, `basis_override`, `charge_context_override`, `calculation_profile_id`, `allocation_profile_id`, and `priority`.
+
+Rate value, currency, component, and active state are core row fields and do not need to appear in `row_attribute_keys`. The API rejects row values outside the selected schema so a hidden stale value cannot affect matching unexpectedly. Legacy books with one component are inferred on read; new books must send `charge_component_code` explicitly.
 
 ### How To Use It
 
-1. Create a rate book and its entries with `POST /rate-books`.
+1. Choose one charge component and create a rate book with `charge_component_code`, `row_attribute_keys`, and entries through `POST /rate-books`.
 2. Find books through `GET /rate-books`.
 3. Open the full book with `GET /rate-books/{id}/workspace`.
 4. Edit a draft through `PUT /rate-books/{id}/workspace`, passing `expected_lock_version` for optimistic concurrency.
@@ -158,7 +173,9 @@ A rate book named `EU_OCEAN_2026` could contain:
 6. Create the next draft with `POST /rate-books/{id}/versions` and inspect history with `GET /rate-books/{id}/versions`.
 7. Reference the published rate-book version from a contract header, contract line, or calculation-template step.
 
-The built-in rater selects at most one rate entry for each applicable contract line. It first removes inactive, out-of-date, out-of-scale, and dimension-mismatched rows. It then chooses the most specific row, followed by the lowest numeric priority, the highest matching `scale_from`, and finally the stable row ID. This makes overlapping rate-table rows deterministic. Header `valid_from`/`valid_to` and `is_active` are applied before entry selection; entry date fields retain the API names `validity_from`/`validity_to` for backward compatibility.
+When a row omits `basis_override` or `charge_context_override`, the API resolves the value from its component. The response stores that effective snapshot in `basis` and `charge_context`, while the override fields remain null. This makes a published version reproducible if a component default later changes. Rows created before migration `0022` retain their previously required row basis as an explicit `basis_override` for the same compatibility reason.
+
+The built-in rater selects at most one rate entry for each applicable contract line. It first removes inactive, out-of-date, out-of-scale, context-mismatched, and dimension-mismatched rows. Quote context defaults to `TRANSPORT`; callers should explicitly send another value for origin-, destination-, tax-, or other context-specific pricing. The rater then chooses the most specific row, followed by the lowest numeric priority, the highest matching `scale_from`, and finally the stable row ID. This makes overlapping rate-table rows deterministic. Header `valid_from`/`valid_to` and `is_active` are applied before entry selection; entry date fields retain the API names `validity_from`/`validity_to` for backward compatibility.
 
 Use basis `PERCENT` with `rate_percent`. A percentage always needs an explicit monetary base: a template percentage step uses its named prior subtotal, while a direct quote context uses `percentage_base_amount` or a component-specific entry in `percentage_bases`. The API rejects a percentage with no base rather than calculating against an implicit value. Use `rate_amount` for fixed and quantity-based rows. `CHARGEABLE_WEIGHT` uses quote `chargeable_weight` for rating.
 
@@ -220,10 +237,14 @@ A step can define:
 ### How To Use It
 
 1. Create rate books and components first.
-2. Create the template with `POST /calculation-templates`.
+2. Create the initial draft template with `POST /calculation-templates`.
 3. List/search with `GET /calculation-templates`.
-4. Open or update it through `/calculation-templates/{id}/workspace`.
-5. Reference it as the default on a contract or as an override on a contract line.
+4. Open or update a draft through `/calculation-templates/{id}/workspace`, using `expected_lock_version` when editing.
+5. Publish with `POST /calculation-templates/{id}/publish`. The prior published version in the family is retired.
+6. Create a later draft with `POST /calculation-templates/{id}/versions` and inspect history with `GET /calculation-templates/{id}/versions`.
+7. Reference a published template as the default on a contract or as an override on a contract line.
+
+Every step that pins a rate book must use the same charge component as that book. Draft templates may be edited; published and retired versions are immutable. Contract release and runtime rating accept published templates only.
 
 The built-in contract rater expands template steps in order, filters them by relationship role and precondition, resolves each step's rate book, and carries named subtotals into later percentage steps. Statistical steps remain visible for provenance but do not contribute to payer/payee totals. Every resulting option line records the source contract, rate-book version, and exact rate-book entry.
 
@@ -335,11 +356,24 @@ The first available date wins.
 4. Optionally assign it by scope, shipment scope, and purpose through `/business-date-profiles/{id}/assignments`.
 5. Set components to `INHERIT_PROFILE` or `PROFILE_OVERRIDE` as required.
 6. Supply `document_date`, `charge_date`, and operational dates in `source_reference_snapshot_json` or target snapshots when creating the charge document.
-7. Use `POST /business-dates/resolve` to test or reuse a profile against a context object without creating a charge document.
+7. Use `POST /business-dates/resolve` to test or reuse a profile without creating a charge document. Send `date_values` as typed `{date_type, date_value}` objects so the API can validate and acknowledge exactly which operational dates the caller provided.
+
+The supported caller date types are `DOCUMENT_DATE`, `MANUAL_LINE_DATE`,
+`SHIPPED_ON_BOARD_DATE`, `SHIPMENT_ACTUAL_DEPARTURE_DATE`,
+`SHIPMENT_PLANNED_DEPARTURE_DATE`, `SHIPMENT_ARRIVAL_DATE`,
+`HOUSE_BILL_ISSUE_DATE`, `ACTUAL_FLIGHT_DEPARTURE_DATE`, `AWB_EXECUTION_DATE`, and
+`ESTIMATED_FLIGHT_DEPARTURE_DATE`. Road callers can additionally provide
+`ROAD_ACTUAL_PICKUP_DATE`, `ROAD_PLANNED_PICKUP_DATE`, `ROAD_ACTUAL_DELIVERY_DATE`,
+`ROAD_PLANNED_DELIVERY_DATE`, and `CMR_ISSUE_DATE`. Date types are normalized to uppercase. Unknown or duplicate
+types and invalid ISO date values are rejected with `422`. The response returns
+`supplied_date_keys` as confirmation. The old untyped `context` field is deprecated but remains
+accepted for backward compatibility. Swagger UI shows the enum and request example under
+`POST /business-dates/resolve`; clients can also read the same list from
+`GET /initialization-data` at `reference_data.business_date_keys`.
 
 Resolution precedence is explicit `exchange_rate_date`, manual line `charge_date`, line date-basis override, component profile/assignment/legacy policy, then document fallback.
 
-An assignment can be global or scoped to company, customer, vendor, forwarder, or carrier. `shipment_scope` distinguishes `OCEAN_HOUSE` and `AIR_HOUSE`. Only one effective assignment can own the same scope, shipment scope, and purpose slot.
+An assignment can be global or scoped to company, customer, vendor, forwarder, or carrier. `shipment_scope` distinguishes `OCEAN_HOUSE`, `AIR_HOUSE`, and `ROAD_SHIPMENT`. Only one effective assignment can own the same scope, shipment scope, and purpose slot.
 
 ## FX Rate Source And FX Rate
 

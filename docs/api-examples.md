@@ -105,15 +105,25 @@ curl -sS -X POST "$BASE_URL/business-dates/resolve" \
   -H "Content-Type: application/json" \
   -d "{
     \"profile_id\": $PROFILE_ID,
-    \"context\": {
-      \"SHIPMENT_ACTUAL_DEPARTURE_DATE\": \"2026-07-20\",
-      \"DOCUMENT_DATE\": \"2026-07-21\"
-    },
+    \"date_values\": [
+      {
+        \"date_type\": \"SHIPMENT_ACTUAL_DEPARTURE_DATE\",
+        \"date_value\": \"2026-07-20\"
+      },
+      {
+        \"date_type\": \"DOCUMENT_DATE\",
+        \"date_value\": \"2026-07-21\"
+      }
+    ],
     \"fallback_date\": \"2026-07-22\"
   }"
 ```
 
-The response identifies the published profile version, attempted keys, selected key, resolved date, and whether the explicit fallback was used.
+Each item names exactly what date the caller supplied. The API rejects unknown date types,
+invalid ISO dates, and duplicate date types with `422`. The response identifies the normalized
+supplied keys, published profile version, attempted keys, selected key, resolved date, and whether
+the explicit fallback was used. The former untyped `context` object remains accepted only for
+backward compatibility.
 
 ## Maintain And Resolve An FX Rate
 
@@ -203,13 +213,22 @@ curl -sS -X POST "$BASE_URL/rate-books" \
   -d '{
     "rate_book_code": "EU_OCEAN_2026",
     "rate_book_name": "EU ocean customer rates",
+    "charge_component_code": "BASE_FREIGHT",
+    "row_attribute_keys": [
+      "origin_code",
+      "destination_code",
+      "mode",
+      "scale_from",
+      "basis_override",
+      "priority"
+    ],
     "status": "DRAFT",
     "valid_from": "2026-01-01",
     "valid_to": "2026-12-31",
     "entries": [{
       "charge_component_code": "BASE_FREIGHT",
       "rate_amount": "2500",
-      "basis": "PER_CONTAINER",
+      "basis_override": "PER_CONTAINER",
       "currency": "USD",
       "origin_code": "ESBCN",
       "destination_code": "USNYC",
@@ -294,6 +313,13 @@ curl -sS -X POST "$BASE_URL/rate-books/$RATE_BOOK_ID/versions" \
   -d '{
     "rate_book_code": "EU_OCEAN_2026",
     "rate_book_name": "EU ocean customer rates",
+    "charge_component_code": "BASE_FREIGHT",
+    "row_attribute_keys": [
+      "origin_code",
+      "destination_code",
+      "mode",
+      "basis_override"
+    ],
     "status": "DRAFT",
     "currency": "USD",
     "valid_from": "2026-01-01",
@@ -301,7 +327,7 @@ curl -sS -X POST "$BASE_URL/rate-books/$RATE_BOOK_ID/versions" \
     "entries": [{
       "charge_component_code": "BASE_FREIGHT",
       "rate_amount": "2600",
-      "basis": "PER_CONTAINER",
+      "basis_override": "PER_CONTAINER",
       "currency": "USD",
       "origin_code": "ESBCN",
       "destination_code": "USNYC",
@@ -311,6 +337,30 @@ curl -sS -X POST "$BASE_URL/rate-books/$RATE_BOOK_ID/versions" \
 ```
 
 The response contains the complete version history. Publish the returned draft ID when it is ready; the API retires the prior published version while contracts pinned to it remain reproducible.
+
+To combine multiple component-specific books, create and publish a calculation template:
+
+```bash
+curl -sS -X POST "$BASE_URL/calculation-templates" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"template_code\": \"EU_OCEAN_STANDARD\",
+    \"template_name\": \"EU ocean standard charge build\",
+    \"status\": \"DRAFT\",
+    \"steps\": [{
+      \"step_number\": 10,
+      \"charge_component_code\": \"BASE_FREIGHT\",
+      \"relationship_role\": \"BOTH\",
+      \"subtotal_key\": \"BASE_TRANSPORT\",
+      \"rate_book_id\": $RATE_BOOK_ID
+    }]
+  }"
+
+TEMPLATE_ID=replace_with_returned_template_id
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/calculation-templates/$TEMPLATE_ID/publish"
+```
 
 ## Discover The Remaining API
 

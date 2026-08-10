@@ -243,15 +243,115 @@ def test_flux_compatible_component_and_business_date_fields_round_trip() -> None
         headers=AUTH,
         json={
             "profile_id": profile_payload["id"],
-            "context": {
-                "document_date": "2026-06-10",
-                "shipment_actual_departure_date": "2026-06-08",
-            },
+            "date_values": [
+                {
+                    "date_type": "shipment_actual_departure_date",
+                    "date_value": "2026-06-08",
+                },
+                {"date_type": "DOCUMENT_DATE", "date_value": "2026-06-10"},
+            ],
         },
     )
     assert resolved.status_code == 200, resolved.text
     assert resolved.json()["resolved_date"] == "2026-06-08"
     assert resolved.json()["selected_date_key"] == "SHIPMENT_ACTUAL_DEPARTURE_DATE"
+    assert resolved.json()["supplied_date_keys"] == [
+        "SHIPMENT_ACTUAL_DEPARTURE_DATE",
+        "DOCUMENT_DATE",
+    ]
+
+    legacy_context = client.post(
+        "/api/v1/charge-management/business-dates/resolve",
+        headers=AUTH,
+        json={
+            "profile_id": profile_payload["id"],
+            "context": {
+                "SHIPMENT_ACTUAL_DEPARTURE_DATE": "2026-06-09",
+                "DOCUMENT_DATE": "2026-06-10",
+            },
+        },
+    )
+    assert legacy_context.status_code == 200, legacy_context.text
+    assert legacy_context.json()["resolved_date"] == "2026-06-09"
+    assert legacy_context.json()["supplied_date_keys"] == []
+
+    unsupported_date_type = client.post(
+        "/api/v1/charge-management/business-dates/resolve",
+        headers=AUTH,
+        json={
+            "profile_id": profile_payload["id"],
+            "date_values": [
+                {"date_type": "CUSTOM_UNKNOWN_DATE", "date_value": "2026-06-08"}
+            ],
+        },
+    )
+    assert unsupported_date_type.status_code == 422
+
+    duplicate_date_type = client.post(
+        "/api/v1/charge-management/business-dates/resolve",
+        headers=AUTH,
+        json={
+            "profile_id": profile_payload["id"],
+            "date_values": [
+                {"date_type": "DOCUMENT_DATE", "date_value": "2026-06-08"},
+                {"date_type": "document_date", "date_value": "2026-06-09"},
+            ],
+        },
+    )
+    assert duplicate_date_type.status_code == 422
+
+    invalid_date_value = client.post(
+        "/api/v1/charge-management/business-dates/resolve",
+        headers=AUTH,
+        json={
+            "profile_id": profile_payload["id"],
+            "date_values": [
+                {"date_type": "DOCUMENT_DATE", "date_value": "not-a-date"}
+            ],
+        },
+    )
+    assert invalid_date_value.status_code == 422
+
+
+def test_seeded_road_business_date_profile_uses_explicit_pickup_dates() -> None:
+    profiles = client.get(
+        "/api/v1/charge-management/business-date-profiles",
+        headers=AUTH,
+    )
+    assert profiles.status_code == 200, profiles.text
+    profile = next(
+        row
+        for row in profiles.json()["items"]
+        if row["profile_code"] == "ROAD_SHIPMENT_STANDARD"
+    )
+    published_version = next(
+        version for version in profile["versions"] if version["status"] == "PUBLISHED"
+    )
+    assert [step["date_key"] for step in published_version["steps"]] == [
+        "ROAD_ACTUAL_PICKUP_DATE",
+        "ROAD_PLANNED_PICKUP_DATE",
+        "CMR_ISSUE_DATE",
+        "DOCUMENT_DATE",
+    ]
+
+    resolved = client.post(
+        "/api/v1/charge-management/business-dates/resolve",
+        headers=AUTH,
+        json={
+            "profile_id": profile["id"],
+            "date_values": [
+                {
+                    "date_type": "ROAD_PLANNED_PICKUP_DATE",
+                    "date_value": "2026-06-08",
+                },
+                {"date_type": "CMR_ISSUE_DATE", "date_value": "2026-06-09"},
+                {"date_type": "DOCUMENT_DATE", "date_value": "2026-06-10"},
+            ],
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["resolved_date"] == "2026-06-08"
+    assert resolved.json()["selected_date_key"] == "ROAD_PLANNED_PICKUP_DATE"
 
 
 def test_document_converts_foreign_lines_and_invoice_requires_document_currency() -> None:
@@ -300,20 +400,17 @@ def test_quote_rating_executes_template_subtotals_and_percentage_steps() -> None
         "/api/v1/charge-management/rate-books",
         headers=AUTH,
         json={
-            "rate_book_code": "RB-TEMPLATE-EXECUTION",
-            "rate_book_name": "Template execution rates",
+            "rate_book_code": "RB-TEMPLATE-BASE",
+            "rate_book_name": "Template base rates",
+            "charge_component_code": "BASE_FREIGHT",
+            "row_attribute_keys": ["basis_override"],
             "status": "DRAFT",
             "entries": [
                 {
                     "charge_component_code": "BASE_FREIGHT",
                     "rate_amount": "100",
-                    "basis": "FLAT",
-                },
-                {
-                    "charge_component_code": "FUEL_SURCHARGE",
-                    "rate_percent": "10",
-                    "basis": "PERCENTAGE",
-                },
+                    "basis_override": "FLAT",
+                }
             ],
         },
     )
@@ -324,13 +421,38 @@ def test_quote_rating_executes_template_subtotals_and_percentage_steps() -> None
         headers=AUTH,
     )
     assert published_rate_book.status_code == 200, published_rate_book.text
+    fuel_rate_book = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RB-TEMPLATE-FUEL",
+            "rate_book_name": "Template fuel rates",
+            "charge_component_code": "FUEL_SURCHARGE",
+            "row_attribute_keys": ["basis_override"],
+            "status": "DRAFT",
+            "entries": [
+                {
+                    "charge_component_code": "FUEL_SURCHARGE",
+                    "rate_percent": "10",
+                    "basis_override": "PERCENTAGE",
+                }
+            ],
+        },
+    )
+    assert fuel_rate_book.status_code == 201, fuel_rate_book.text
+    fuel_rate_book_id = fuel_rate_book.json()["id"]
+    published_fuel_rate_book = client.post(
+        f"/api/v1/charge-management/rate-books/{fuel_rate_book_id}/publish",
+        headers=AUTH,
+    )
+    assert published_fuel_rate_book.status_code == 200, published_fuel_rate_book.text
     template = client.post(
         "/api/v1/charge-management/calculation-templates",
         headers=AUTH,
         json={
             "template_code": "TPL-FREIGHT-SURCHARGE",
             "template_name": "Freight plus surcharge",
-            "status": "ACTIVE",
+            "status": "DRAFT",
             "steps": [
                 {
                     "step_number": 1,
@@ -344,12 +466,17 @@ def test_quote_rating_executes_template_subtotals_and_percentage_steps() -> None
                     "charge_component_code": "FUEL_SURCHARGE",
                     "relationship_role": "PAYEE",
                     "subtotal_key": "FREIGHT",
-                    "rate_book_id": rate_book_id,
+                    "rate_book_id": fuel_rate_book_id,
                 },
             ],
         },
     )
     assert template.status_code == 201, template.text
+    published_template = client.post(
+        f"/api/v1/charge-management/calculation-templates/{template.json()['id']}/publish",
+        headers=AUTH,
+    )
+    assert published_template.status_code == 200, published_template.text
     contract = client.post(
         "/api/v1/charge-management/contracts",
         headers=AUTH,

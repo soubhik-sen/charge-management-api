@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.charge_management import router as charge_management_router
 from app.operations import readiness
@@ -56,6 +58,19 @@ def create_app() -> FastAPI:
                 },
             )
         return {"status": "ok", "checks": {"database": "ok"}}
+
+    web_directory = os.getenv("LEDGERFLOW_WEB_DIRECTORY", "").strip()
+    if web_directory:
+        resolved_web_directory = Path(web_directory).expanduser().resolve()
+        if not resolved_web_directory.is_dir():
+            raise RuntimeError(
+                f"LEDGERFLOW_WEB_DIRECTORY is not a directory: {resolved_web_directory}"
+            )
+        app.mount(
+            "/",
+            StaticFiles(directory=resolved_web_directory, html=True),
+            name="ledgerflow-web",
+        )
 
     return app
 
