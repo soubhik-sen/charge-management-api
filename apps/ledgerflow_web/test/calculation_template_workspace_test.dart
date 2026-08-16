@@ -88,6 +88,18 @@ void main() {
     expect(find.textContaining('Spain fuel'), findsNothing);
     await tester.tap(find.textContaining('Spain road linehaul').last);
     await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Subtotal key'),
+      'BASE_TRANSPORT',
+    );
+    await tester.tap(find.text('Add result to subtotal'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('PAYER = supplier cost; PAYEE = customer price'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('requires_tail_lift'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Save draft'));
     await tester.pumpAndSettle();
 
@@ -103,5 +115,7 @@ void main() {
     final steps = body['steps'] as List<dynamic>;
     expect(steps.single['charge_component_code'], 'ROAD_LINEHAUL');
     expect(steps.single['rate_book_id'], 21);
+    expect(steps.single['subtotal_key'], 'BASE_TRANSPORT');
+    expect(steps.single['accumulate_result_in_subtotal'], isFalse);
   });
 }

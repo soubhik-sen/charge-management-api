@@ -13,7 +13,7 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 
 ## Capabilities
 
-- Effective-dated charge components, aliases, versioned rate books, executable calculation templates, and contracts.
+- Effective-dated charge components, aliases, versioned rate books, executable calculation templates, and party-bound contracts with header templates, conditional routes, and deterministic selection.
 - Deterministic rate-row selection by applicability, specificity, priority, and scale floor.
 - Versioned calculation profiles for flat, single-axis, and compound rate formulas.
 - Seeded road-freight pack with FTL/LTL, fuel, toll, waiting, ADR, pallet, stop, delivery, permit, CMR, calculation, allocation, and date-policy metadata.
@@ -27,7 +27,8 @@ Charge calculation rarely stops at `quantity * rate`. Real implementations also 
 - PostgreSQL runtime with SQLAlchemy and Alembic migrations.
 - JWT authentication using any standards-compliant issuer through JWKS or a shared secret.
 - Generated OpenAPI contract and PostgreSQL-backed API tests with JUnit/coverage reports.
-- Responsive operations UI for quotes, charge documents, invoice reconciliation, component-scoped rate books, calculation templates, components, profiles, business dates, and FX rates.
+- Responsive operations UI for contract authoring and release; quote JSON import, matching, rating, ranking, award, and provenance; charge-document approval, export, reversal, guarded deletion, and audit snapshots; invoice reconciliation and guarded deletion; component-scoped rate books; calculation templates; components; profiles; business dates; and FX rates.
+- Opt-in [road pricing study](docs/road-pricing-study.md) with realistic component-specific rate tables, subtotal-derived fuel, conditional accessorials, and a statistical benchmark.
 
 ## Five-Minute Start
 
@@ -100,7 +101,9 @@ Create or update the Blueprint from this repository in Render. The API exposes `
 | --- | --- |
 | [Quickstart](docs/quickstart.md) | First local call with Docker or Python |
 | [Core concepts](docs/core-concepts.md) | What each module means and how the modules work together |
+| [Caller attribute mapping](docs/caller-attribute-mapping.md) | Canonical rate dimensions, per-caller schema mappings, and lifecycle rules |
 | [Road freight metadata](docs/road-freight-metadata.md) | Seeded road components, profiles, caller inputs, and standards basis |
+| [Road pricing study](docs/road-pricing-study.md) | Rerunnable contract, calculation template, rate tables, and expected quote result |
 | [API examples](docs/api-examples.md) | Calculation preview, allocation, business-date, FX, and rating requests |
 | [Authentication](docs/authentication.md) | JWT, claims, local mode, and authorization boundary |
 | [Database](docs/database.md) | Schema groups, migrations, and persistence behavior |
@@ -108,6 +111,7 @@ Create or update the Blueprint from this repository in Render. The API exposes `
 | [Architecture](docs/architecture.md) | Layers, domain boundary, and extension adapters |
 | [Web application](docs/web-application.md) | UI modules, local use, authentication, and deployment |
 | [UI administration](docs/ui-administration.md) | Create, publish, assign, and use components and profiles |
+| [Road quote fixture](examples/road-quote-request.json) | Importable caller request for an end-to-end road quote test |
 | [Generated OpenAPI](app/contracts/charge-management-api.openapi.json) | Complete machine-readable endpoint contract |
 
 ## Test Results

@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../core/api_client.dart';
 import '../core/design.dart';
 import '../data/workspace_data.dart';
+import 'caller_mappings_workspace.dart';
 import 'management_workspaces.dart';
+import 'transaction_workspaces.dart';
 import 'workspace_pages.dart';
 
 class LedgerFlowShell extends StatefulWidget {
@@ -17,11 +19,13 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
   static const _destinations = <_Destination>[
     _Destination('Overview', Icons.home_outlined),
     _Destination('Quotes', Icons.request_quote_outlined),
+    _Destination('Contracts', Icons.handshake_outlined),
     _Destination('Charge documents', Icons.folder_copy_outlined),
     _Destination('Invoices', Icons.receipt_long_outlined),
     _Destination('Rate books', Icons.menu_book_outlined),
     _Destination('Calculation templates', Icons.schema_outlined),
     _Destination('Components', Icons.account_tree_outlined),
+    _Destination('Caller mappings', Icons.alt_route_outlined),
     _Destination('Profiles', Icons.tune_outlined),
     _Destination('FX & dates', Icons.currency_exchange_outlined),
   ];
@@ -61,7 +65,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
           : null,
       body: Row(
         children: [
-          if (!compact) SizedBox(width: 238, child: _navigation()),
+          if (!compact) SizedBox(width: 216, child: _navigation()),
           Expanded(
             child: Column(
               children: [
@@ -124,42 +128,50 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
       child: Column(
         children: [
           const _Brand(),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Expanded(
             child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 11),
               itemCount: _destinations.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 4),
+              separatorBuilder: (_, _) => const SizedBox(height: 3),
               itemBuilder: (context, index) {
                 final item = _destinations[index];
                 final selected = index == _selectedIndex;
-                return Material(
-                  color: selected ? LedgerFlowDesign.teal : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  child: ListTile(
-                    dense: true,
-                    minLeadingWidth: 22,
-                    selected: selected,
-                    selectedColor: Colors.white,
-                    textColor: const Color(0xFFDCE7F4),
-                    iconColor: const Color(0xFFDCE7F4),
-                    leading: Icon(item.icon, size: 21),
-                    title: Text(
-                      item.label,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+                return SizedBox(
+                  height: 37,
+                  child: Material(
+                    color: selected
+                        ? LedgerFlowDesign.teal
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(7),
+                    child: ListTile(
+                      dense: true,
+                      minLeadingWidth: 20,
+                      selected: selected,
+                      selectedColor: Colors.white,
+                      textColor: const Color(0xFFDCE7F4),
+                      iconColor: const Color(0xFFDCE7F4),
+                      leading: Icon(item.icon, size: 18),
+                      title: Text(
+                        item.label,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      onTap: () {
+                        setState(() => _selectedIndex = index);
+                        if (closeAfterSelection) Navigator.of(context).pop();
+                      },
                     ),
-                    onTap: () {
-                      setState(() => _selectedIndex = index);
-                      if (closeAfterSelection) Navigator.of(context).pop();
-                    },
                   ),
                 );
               },
             ),
           ),
           Container(
-            margin: const EdgeInsets.all(12),
-            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.07),
               borderRadius: BorderRadius.circular(10),
@@ -169,12 +181,12 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
               children: [
                 Icon(
                   _live ? Icons.cloud_done_outlined : Icons.science_outlined,
-                  size: 20,
+                  size: 18,
                   color: _live
                       ? const Color(0xFF54D6C7)
                       : const Color(0xFFFFCC80),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -183,12 +195,13 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
                         _live ? 'Live API' : 'Demo workspace',
                         style: const TextStyle(
                           color: Colors.white,
+                          fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                       Text(
                         _live
-                            ? Uri.parse(_apiUrl).host
+                            ? _apiHostLabel(_apiUrl)
                             : 'No credentials required',
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -209,25 +222,53 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
 
   Widget _page() => switch (_selectedIndex) {
     0 => OperationsDashboard(data: _data, onOpen: _selectPage),
-    1 => QuoteWorkspace(quotes: _data['quotes']),
-    2 => ChargeDocumentWorkspace(documents: _data['documents']),
-    3 => InvoiceWorkspace(invoices: _data['invoices']),
-    4 => RateBookWorkspace(
+    1 => TransactionQuoteWorkspace(
+      quotes: _data['quotes'],
+      contracts: _data['contracts'],
+      live: _live,
+      client: _client,
+      onReload: _reload,
+    ),
+    2 => ContractManagementWorkspace(
+      contracts: _data['contracts'],
+      components: _data['components'],
+      rateBooks: _data['rateBooks'],
+      calculationTemplates: _data['calculationTemplates'],
+      calculationProfiles: _data['calculationProfiles'],
+      allocationProfiles: _data['allocationProfiles'],
+      live: _live,
+      client: _client,
+      onReload: _reload,
+    ),
+    3 => ChargeDocumentWorkspace(
+      documents: _data['documents'],
+      live: _live,
+      client: _client,
+      onReload: _reload,
+    ),
+    4 => InvoiceWorkspace(
+      invoices: _data['invoices'],
+      live: _live,
+      client: _client,
+      onReload: _reload,
+    ),
+    5 => RateBookWorkspace(
       rateBooks: _data['rateBooks'],
       components: _data['components'],
+      pricingDimensions: _data['pricingDimensions'],
       calculationProfiles: _data['calculationProfiles'],
       allocationProfiles: _data['allocationProfiles'],
       live: _live,
       onMutation: _mutate,
     ),
-    5 => CalculationTemplateWorkspacePage(
+    6 => CalculationTemplateWorkspacePage(
       templates: _data['calculationTemplates'],
       components: _data['components'],
       rateBooks: _data['rateBooks'],
       live: _live,
       onMutation: _mutate,
     ),
-    6 => ComponentManagementWorkspace(
+    7 => ComponentManagementWorkspace(
       records: _data['components'],
       calculationProfiles: _data['calculationProfiles'],
       allocationProfiles: _data['allocationProfiles'],
@@ -235,7 +276,14 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
       live: _live,
       onMutation: _mutate,
     ),
-    7 => ProfileManagementHub(data: _data, live: _live, onMutation: _mutate),
+    8 => CallerMappingsWorkspace(
+      pricingDimensions: _data['pricingDimensions'],
+      callerMappingProfiles: _data['callerMappingProfiles'],
+      live: _live,
+      onMutation: _mutate,
+      client: _client,
+    ),
+    9 => ProfileManagementHub(data: _data, live: _live, onMutation: _mutate),
     _ => FxDateManagementHub(
       data: _data,
       live: _live,
@@ -445,8 +493,8 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 66,
-      padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 24),
+      height: 50,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 16),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: LedgerFlowDesign.border)),
@@ -459,20 +507,20 @@ class _TopBar extends StatelessWidget {
               children: [
                 IconButton(onPressed: onMenu, icon: const Icon(Icons.menu)),
                 const SizedBox(width: 4),
-                const LedgerFlowLogo(markSize: 29, fontSize: 17),
+                const LedgerFlowLogo(markSize: 27, fontSize: 16),
               ],
             )
           else
             const Text(
               'Charge management',
-              style: TextStyle(fontSize: 14, color: LedgerFlowDesign.muted),
+              style: TextStyle(fontSize: 12, color: LedgerFlowDesign.muted),
             ),
           const Spacer(),
           if (live && !compact)
             Padding(
-              padding: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.only(right: 8),
               child: Text(
-                Uri.parse(apiUrl).host,
+                _apiHostLabel(apiUrl),
                 style: const TextStyle(
                   fontSize: 12,
                   color: LedgerFlowDesign.muted,
@@ -490,9 +538,9 @@ class _TopBar extends StatelessWidget {
             icon: Icon(live ? Icons.cloud_done_outlined : Icons.link),
             label: Text(live ? 'API connected' : 'Connect API'),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           const CircleAvatar(
-            radius: 18,
+            radius: 14,
             backgroundColor: LedgerFlowDesign.teal,
             foregroundColor: Colors.white,
             child: Text(
@@ -506,16 +554,21 @@ class _TopBar extends StatelessWidget {
   }
 }
 
+String _apiHostLabel(String apiUrl) {
+  final host = Uri.tryParse(apiUrl)?.host ?? '';
+  return host.isEmpty ? 'same origin' : host;
+}
+
 class _Brand extends StatelessWidget {
   const _Brand();
 
   @override
   Widget build(BuildContext context) {
     return const Padding(
-      padding: EdgeInsets.fromLTRB(20, 24, 16, 18),
+      padding: EdgeInsets.fromLTRB(19, 14, 14, 10),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: LedgerFlowLogo(markSize: 38, fontSize: 20, onDark: true),
+        child: LedgerFlowLogo(markSize: 31, fontSize: 17, onDark: true),
       ),
     );
   }

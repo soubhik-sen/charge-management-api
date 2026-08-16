@@ -28,9 +28,11 @@ void main() {
       httpClient: client,
     ).loadWorkspace();
 
-    expect(requested, hasLength(11));
+    expect(requested, hasLength(13));
     expect(requested.every((uri) => uri.host == 'api.example.test'), isTrue);
     expect(data['components'], isEmpty);
+    expect(data['pricingDimensions'], isEmpty);
+    expect(data['callerMappingProfiles'], isEmpty);
   });
 
   test('loads workspace resources across all server pages', () async {

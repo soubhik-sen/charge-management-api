@@ -27,6 +27,8 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
     assert "charge_id_sequence" in tables
     assert "charge_fx_rate_source" in tables
     assert "charge_fx_rate" in tables
+    assert "charge_pricing_dimension" in tables
+    assert "charge_caller_mapping_profile" in tables
     assert "charge_allocation_profile" in tables
     allocation_version_columns = {
         column["name"]
@@ -95,13 +97,32 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "exchange_rate_source_code",
         "exchange_rate_type",
         "exchange_rate_method",
+        "source_contract_line_id",
+        "source_contract_template_route_id",
         "source_rate_book_entry_id",
+        "source_calculation_template_id",
+        "source_calculation_template_step_id",
         "is_statistical",
     } <= quote_line_columns
     component_columns = {column["name"] for column in inspector.get_columns("charge_component")}
     assert "default_calculation_profile_id" in component_columns
     contract_line_columns = {column["name"] for column in inspector.get_columns("charge_contract_line")}
     assert {"calculation_profile_id", "line_number", "priority", "is_active", "charge_context"} <= contract_line_columns
+    contract_columns = {column["name"] for column in inspector.get_columns("charge_rate_contract")}
+    assert "selection_priority" in contract_columns
+    assert "charge_contract_template_route" in tables
+    template_route_columns = {
+        column["name"] for column in inspector.get_columns("charge_contract_template_route")
+    }
+    assert {
+        "contract_id",
+        "calculation_template_id",
+        "route_number",
+        "priority",
+        "origin_code",
+        "destination_code",
+        "mode",
+    } <= template_route_columns
     rate_entry_columns = {column["name"] for column in inspector.get_columns("charge_rate_book_entry")}
     assert {
         "calculation_profile_id",
@@ -125,6 +146,7 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "published_at",
         "charge_component_id",
         "row_attribute_keys_json",
+        "dimension_codes_json",
     } <= rate_book_columns
     calculation_template_columns = {
         column["name"]
@@ -136,8 +158,43 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "lock_version",
         "published_at",
     } <= calculation_template_columns
+    calculation_template_step_columns = {
+        column["name"]
+        for column in inspector.get_columns("charge_calculation_template_step")
+    }
+    assert "accumulate_result_in_subtotal" in calculation_template_step_columns
     quote_request_columns = {column["name"] for column in inspector.get_columns("charge_quote_request")}
-    assert {"request_number", "chargeable_weight", "charge_context"} <= quote_request_columns
+    assert {
+        "request_number",
+        "chargeable_weight",
+        "charge_context",
+        "calculation_inputs_json",
+        "component_calculation_inputs_json",
+        "date_values_json",
+        "caller_system_code",
+        "caller_schema_version",
+        "caller_mapping_profile_code",
+        "caller_attributes_json",
+        "dimension_values_json",
+    } <= quote_request_columns
+    quote_commitment_columns = {
+        column["name"] for column in inspector.get_columns("charge_quote_commitment")
+    }
+    assert {
+        "execution_identity",
+        "execution_source_system",
+        "execution_plan_id",
+        "execution_route_id",
+        "execution_source_id",
+        "execution_request_number",
+    } <= quote_commitment_columns
+    quote_commitment_indexes = {
+        index["name"] for index in inspector.get_indexes("charge_quote_commitment")
+    }
+    assert {
+        "uq_charge_quote_commitment_execution_identity",
+        "ix_charge_quote_commitment_execution_route",
+    } <= quote_commitment_indexes
     with engine.connect() as connection:
         version = connection.execute(text("select version_num from alembic_version")).scalar_one()
         source_code = connection.execute(
@@ -175,7 +232,24 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
                 "'CMR_ISSUE_DATE', 'DOCUMENT_DATE')"
             )
         ).scalar_one()
-    assert version == "0025_rate_book_template_schema"
+        reusable_default_count = connection.execute(
+            text(
+                "select count(*) from charge_component as component "
+                "join charge_calculation_profile as profile "
+                "on profile.id = component.default_calculation_profile_id "
+                "where (component.component_code in ('LINE_HAUL', 'ROAD_TOLL') "
+                "and profile.profile_code = 'PER_KILOMETER') "
+                "or (component.component_code in ('STORAGE', 'DEMURRAGE', 'DETENTION') "
+                "and profile.profile_code = 'PER_DAY') "
+                "or (component.component_code = 'WAITING_TIME' and profile.profile_code = 'PER_HOUR') "
+                "or (component.component_code = 'PALLET_EXCHANGE' and profile.profile_code = 'PER_PALLET') "
+                "or (component.component_code = 'MULTI_STOP_SURCHARGE' and profile.profile_code = 'PER_STOP')"
+            )
+        ).scalar_one()
+        pricing_dimension_count = connection.execute(
+            text("select count(*) from charge_pricing_dimension where is_system = true")
+        ).scalar_one()
+    assert version == "0031_route_commitment_identity"
     assert source_code == "MANUAL"
     assert flat_count == 1
     assert road_component_count == 22
@@ -183,6 +257,8 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
     assert road_allocation_count == 3
     assert road_date_count == 1
     assert road_date_step_count == 4
+    assert reusable_default_count == 8
+    assert pricing_dimension_count == 7
 
     # Exercise cyclic profile/version references with immediate FK checks, which
     # is closer to PostgreSQL behavior than SQLite's default configuration.

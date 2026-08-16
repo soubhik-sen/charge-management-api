@@ -51,6 +51,8 @@ Every seeded road component has `charge_context=ROAD`. Category and context clas
 
 The first four use the generic `MANUAL` factor resolver because route and loading-unit data belong to the caller's TMS, ERP, routing engine, or shipment adapter. `PER_HOUR` uses the built-in duration resolver. Missing required factors block calculation instead of silently assuming `1`.
 
+The seed pack assigns `PER_KILOMETER` to `ROAD_TOLL`, `PER_HOUR` to `WAITING_TIME`, `PER_PALLET` to `PALLET_EXCHANGE`, and `PER_STOP` to `MULTI_STOP_SURCHARGE`. Rate-book rows and contract lines can still override those component defaults explicitly.
+
 Use `POST /api/v1/charge-management/calculations/preview` with the published profile version and `calculation_inputs`:
 
 ```json

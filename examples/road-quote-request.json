@@ -1,0 +1,54 @@
+{
+  "source_object_type": "ROAD_SHIPMENT",
+  "source_object_id": "ROAD-DEMO-001",
+  "company_id": 1001,
+  "customer_id": 2001,
+  "origin_code": "ESBCN",
+  "destination_code": "ESMAD",
+  "mode": "ROAD",
+  "equipment_type": "CURTAINSIDER",
+  "commodity_code": "GENERAL",
+  "service_level": "STANDARD",
+  "currency": "EUR",
+  "quantity": "1",
+  "gross_weight": "18500",
+  "chargeable_weight": "18500",
+  "gross_volume_cbm": "42",
+  "package_count": "24",
+  "requested_service_date": "2026-08-15",
+  "charge_context": "ROAD",
+  "calculation_inputs": {
+    "DISTANCE_KM": "620",
+    "STOP_COUNT": "2"
+  },
+  "component_calculation_inputs": {
+    "ROAD_TOLL": {
+      "DISTANCE_KM": "620"
+    },
+    "WAITING_TIME": {
+      "DURATION_HOURS": "1.5"
+    },
+    "ROAD_INTERNAL_COST_REFERENCE": {
+      "DISTANCE_KM": "620"
+    }
+  },
+  "date_values": [
+    {
+      "date_type": "ROAD_ACTUAL_PICKUP_DATE",
+      "date_value": "2026-08-15"
+    },
+    {
+      "date_type": "ROAD_PLANNED_PICKUP_DATE",
+      "date_value": "2026-08-14"
+    },
+    {
+      "date_type": "DOCUMENT_DATE",
+      "date_value": "2026-08-10"
+    }
+  ],
+  "context": {
+    "duration_days": "2",
+    "requires_tail_lift": true,
+    "charge_waiting_time": true
+  }
+}

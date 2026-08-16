@@ -65,6 +65,51 @@ class ChargeIdSequenceRow(Base):
     last_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
+class ChargePricingDimensionRow(TimestampMixin, Base):
+    __tablename__ = "charge_pricing_dimension"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dimension_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    dimension_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    data_type: Mapped[str] = mapped_column(String(20), nullable=False, default="STRING", server_default="STRING")
+    built_in_field: Mapped[str | None] = mapped_column(String(80), unique=True)
+    allowed_values_json: Mapped[list | None] = mapped_column(JSON)
+    case_sensitive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    __table_args__ = (
+        CheckConstraint(
+            "data_type in ('STRING', 'DECIMAL', 'INTEGER', 'BOOLEAN', 'DATE')",
+            name="ck_charge_pricing_dimension_data_type",
+        ),
+        Index("ix_charge_pricing_dimension_active_code", "is_active", "dimension_code"),
+    )
+
+
+class ChargeCallerMappingProfileRow(TimestampMixin, Base):
+    __tablename__ = "charge_caller_mapping_profile"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    profile_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    caller_system_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(40), nullable=False, default="1", server_default="1")
+    description: Mapped[str | None] = mapped_column(Text)
+    mappings_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    __table_args__ = (
+        Index(
+            "ix_charge_caller_mapping_profile_lookup",
+            "caller_system_code",
+            "schema_version",
+            "is_active",
+        ),
+    )
+
+
 class ChargeFxRateSourceRow(TimestampMixin, Base):
     __tablename__ = "charge_fx_rate_source"
 
@@ -555,6 +600,7 @@ class ChargeRateBookRow(TimestampMixin, Base):
         ForeignKey("charge_component.id", ondelete="SET NULL")
     )
     row_attribute_keys_json: Mapped[list | None] = mapped_column(JSON)
+    dimension_codes_json: Mapped[list | None] = mapped_column(JSON)
     description: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
     valid_from: Mapped[object | None] = mapped_column(Date)
@@ -647,6 +693,7 @@ class ChargeRateContractRow(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
     valid_from: Mapped[object | None] = mapped_column(Date)
     valid_to: Mapped[object | None] = mapped_column(Date)
+    selection_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
     default_rate_book_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book.id"))
     default_calculation_template_id: Mapped[int | None] = mapped_column(
         ForeignKey("charge_calculation_template.id")
@@ -659,6 +706,10 @@ class ChargeRateContractRow(TimestampMixin, Base):
     external_reference: Mapped[str | None] = mapped_column(String(160))
 
     lines: Mapped[list["ChargeContractLineRow"]] = relationship(
+        back_populates="contract",
+        cascade="all, delete-orphan",
+    )
+    template_routes: Mapped[list["ChargeContractTemplateRouteRow"]] = relationship(
         back_populates="contract",
         cascade="all, delete-orphan",
     )
@@ -702,6 +753,41 @@ class ChargeContractLineRow(Base):
         UniqueConstraint("contract_id", "line_number", name="uq_charge_contract_line_number"),
         Index("ix_charge_contract_line_contract_component", "contract_id", "charge_component_id"),
         Index("ix_charge_contract_line_lane", "origin_code", "destination_code", "mode"),
+    )
+
+
+class ChargeContractTemplateRouteRow(Base):
+    __tablename__ = "charge_contract_template_route"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    contract_id: Mapped[int] = mapped_column(
+        ForeignKey("charge_rate_contract.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    calculation_template_id: Mapped[int] = mapped_column(
+        ForeignKey("charge_calculation_template.id"),
+        nullable=False,
+    )
+    route_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    origin_code: Mapped[str | None] = mapped_column(String(40))
+    destination_code: Mapped[str | None] = mapped_column(String(40))
+    mode: Mapped[str | None] = mapped_column(String(40))
+    equipment_type: Mapped[str | None] = mapped_column(String(60))
+    commodity_code: Mapped[str | None] = mapped_column(String(80))
+    service_level: Mapped[str | None] = mapped_column(String(80))
+    charge_context: Mapped[str | None] = mapped_column(String(80))
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    valid_from: Mapped[object | None] = mapped_column(Date)
+    valid_to: Mapped[object | None] = mapped_column(Date)
+
+    contract: Mapped[ChargeRateContractRow] = relationship(back_populates="template_routes")
+    calculation_template: Mapped["ChargeCalculationTemplateRow"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("contract_id", "route_number", name="uq_charge_contract_template_route_number"),
+        Index("ix_charge_contract_template_route_contract", "contract_id", "priority"),
+        Index("ix_charge_contract_template_route_scope", "origin_code", "destination_code", "mode"),
     )
 
 
@@ -751,6 +837,12 @@ class ChargeCalculationTemplateStepRow(Base):
     rate_book_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book.id"))
     precondition_json: Mapped[dict | None] = mapped_column(JSON)
     subtotal_group: Mapped[str | None] = mapped_column(String(80))
+    accumulate_result_in_subtotal: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
     is_statistical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     template: Mapped[ChargeCalculationTemplateRow] = relationship(back_populates="steps")
@@ -773,6 +865,11 @@ class ChargeQuoteRequestRow(TimestampMixin, Base):
     request_number: Mapped[str | None] = mapped_column(String(80), unique=True)
     source_object_type: Mapped[str] = mapped_column(String(60), nullable=False, default="MANUAL", server_default="MANUAL")
     source_object_id: Mapped[str | None] = mapped_column(String(120))
+    caller_system_code: Mapped[str | None] = mapped_column(String(80))
+    caller_schema_version: Mapped[str | None] = mapped_column(String(40))
+    caller_mapping_profile_code: Mapped[str | None] = mapped_column(String(80))
+    caller_attributes_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    dimension_values_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     company_id: Mapped[int | None] = mapped_column(Integer)
     customer_id: Mapped[int | None] = mapped_column(Integer)
     vendor_id: Mapped[int | None] = mapped_column(Integer)
@@ -802,6 +899,9 @@ class ChargeQuoteRequestRow(TimestampMixin, Base):
     margin_rules_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     charge_context: Mapped[str | None] = mapped_column(String(80))
     context_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    calculation_inputs_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    component_calculation_inputs_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    date_values_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     options: Mapped[list["ChargeQuoteOptionRow"]] = relationship(
         back_populates="quote_request",
@@ -932,8 +1032,16 @@ class ChargeQuoteOptionLineRow(Base):
     pinned_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     effective_allocation_snapshot_json: Mapped[dict | None] = mapped_column(JSON)
     source_contract_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_contract.id"))
+    source_contract_line_id: Mapped[int | None] = mapped_column(ForeignKey("charge_contract_line.id"))
+    source_contract_template_route_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_contract_template_route.id")
+    )
     source_rate_book_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book.id"))
     source_rate_book_entry_id: Mapped[int | None] = mapped_column(ForeignKey("charge_rate_book_entry.id"))
+    source_calculation_template_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_template.id"))
+    source_calculation_template_step_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_calculation_template_step.id")
+    )
     is_statistical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_margin_line: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
@@ -1000,6 +1108,12 @@ class ChargeQuoteCommitmentRow(TimestampMixin, Base):
     quote_request_id: Mapped[int] = mapped_column(ForeignKey("charge_quote_request.id", ondelete="CASCADE"), nullable=False)
     quote_option_id: Mapped[int] = mapped_column(ForeignKey("charge_quote_option.id"), nullable=False, unique=True)
     charge_document_id: Mapped[int] = mapped_column(ForeignKey("charge_document.id"), nullable=False)
+    execution_identity: Mapped[str | None] = mapped_column(String(64), unique=True)
+    execution_source_system: Mapped[str | None] = mapped_column(String(80))
+    execution_plan_id: Mapped[str | None] = mapped_column(String(160))
+    execution_route_id: Mapped[str | None] = mapped_column(String(200))
+    execution_source_id: Mapped[str | None] = mapped_column(String(200))
+    execution_request_number: Mapped[str | None] = mapped_column(String(120))
     company_id: Mapped[int | None] = mapped_column(Integer)
     customer_id: Mapped[int | None] = mapped_column(Integer)
     vendor_id: Mapped[int | None] = mapped_column(Integer)
@@ -1029,6 +1143,12 @@ class ChargeQuoteCommitmentRow(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE", server_default="ACTIVE")
 
     __table_args__ = (
+        Index(
+            "ix_charge_quote_commitment_execution_route",
+            "execution_source_system",
+            "execution_plan_id",
+            "execution_route_id",
+        ),
         Index("ix_charge_quote_commitment_scope", "company_id", "customer_id", "vendor_id", "forwarder_id", "carrier_id"),
         Index("ix_charge_quote_commitment_lane", "origin_code", "destination_code", "mode"),
         Index("ix_charge_quote_commitment_status_validity", "status", "valid_to"),

@@ -5,13 +5,13 @@ import 'features/ledgerflow_shell.dart';
 
 void main() {
   final configuredScale = double.tryParse(
-    const String.fromEnvironment('LEDGERFLOW_UI_SCALE', defaultValue: '0.8'),
+    const String.fromEnvironment('LEDGERFLOW_UI_SCALE', defaultValue: '1.0'),
   );
-  runApp(LedgerFlowApp(scale: configuredScale ?? 0.8));
+  runApp(LedgerFlowApp(scale: configuredScale ?? 1.0));
 }
 
 class LedgerFlowApp extends StatelessWidget {
-  const LedgerFlowApp({this.scale = 0.8, super.key}) : assert(scale > 0);
+  const LedgerFlowApp({this.scale = 1.0, super.key}) : assert(scale > 0);
 
   final double scale;
 

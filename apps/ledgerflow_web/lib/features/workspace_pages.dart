@@ -1,10 +1,13 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../core/api_client.dart';
 import '../core/design.dart';
 import '../core/reference_values.dart';
 import '../data/workspace_data.dart';
+import 'transaction_record_list.dart';
 
 typedef WorkspaceMutation =
     Future<bool> Function({
@@ -62,9 +65,7 @@ class OperationsDashboard extends StatelessWidget {
         label: const Text('New quote'),
       ),
       children: [
-        Wrap(
-          spacing: 14,
-          runSpacing: 14,
+        ResponsiveMetricGrid(
           children: [
             MetricCard(
               label: 'Open quotes',
@@ -110,6 +111,7 @@ class OperationsDashboard extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 SizedBox(
+                  width: double.infinity,
                   height: 255,
                   child: CustomPaint(painter: _TrendPainter()),
                 ),
@@ -124,7 +126,7 @@ class OperationsDashboard extends StatelessWidget {
                   title: 'Approval queue',
                   subtitle: 'Exception-first review',
                   action: TextButton(
-                    onPressed: () => onOpen(2),
+                    onPressed: () => onOpen(3),
                     child: const Text('View all'),
                   ),
                 ),
@@ -153,7 +155,7 @@ class OperationsDashboard extends StatelessWidget {
                   title: 'Recent charge documents',
                   subtitle: 'Calculation and approval status',
                   action: TextButton(
-                    onPressed: () => onOpen(2),
+                    onPressed: () => onOpen(3),
                     child: const Text('View all'),
                   ),
                 ),
@@ -332,9 +334,18 @@ class _QuoteWorkspaceState extends State<QuoteWorkspace> {
 }
 
 class ChargeDocumentWorkspace extends StatefulWidget {
-  const ChargeDocumentWorkspace({required this.documents, super.key});
+  const ChargeDocumentWorkspace({
+    required this.documents,
+    required this.live,
+    required this.client,
+    required this.onReload,
+    super.key,
+  });
 
   final List<JsonMap> documents;
+  final bool live;
+  final LedgerFlowApiClient? client;
+  final Future<void> Function() onReload;
 
   @override
   State<ChargeDocumentWorkspace> createState() =>
@@ -344,19 +355,300 @@ class ChargeDocumentWorkspace extends StatefulWidget {
 class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
   int _selected = 0;
   int _selectedLine = 0;
+  bool _busy = false;
+  JsonMap? _workspace;
+  JsonMap? _lastExport;
+
+  static const _mutableStatuses = <String>{
+    'ESTIMATED',
+    'ACCRUED',
+    'ACTUAL',
+    'DISPUTED',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadWorkspace());
+  }
+
+  @override
+  void didUpdateWidget(covariant ChargeDocumentWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldSelectedId = oldWidget.documents.isEmpty
+        ? null
+        : _asInt(
+            oldWidget.documents[_selected.clamp(
+              0,
+              oldWidget.documents.length - 1,
+            )]['id'],
+          );
+    if (_selected >= widget.documents.length) {
+      _selected = widget.documents.isEmpty ? 0 : widget.documents.length - 1;
+    }
+    if (oldSelectedId != _selectedDocumentId || oldWidget.live != widget.live) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadWorkspace());
+    }
+  }
+
+  int? get _selectedDocumentId => widget.documents.isEmpty
+      ? null
+      : _asInt(
+          widget.documents[_selected.clamp(
+            0,
+            widget.documents.length - 1,
+          )]['id'],
+        );
+
+  JsonMap? get _listDocument => widget.documents.isEmpty
+      ? null
+      : widget.documents[_selected.clamp(0, widget.documents.length - 1)];
+
+  JsonMap? get _document {
+    final nested = _workspace?['document'];
+    return nested is Map<String, dynamic>
+        ? JsonMap.from(nested)
+        : _listDocument;
+  }
+
+  List<JsonMap> get _invoices => _rows(_workspace ?? const {}, 'invoices');
+  List<JsonMap> get _matchResults =>
+      _rows(_workspace ?? const {}, 'match_results');
+
+  JsonMap? get _sourceQuoteOption {
+    final nested = _workspace?['source_quote_option'];
+    return nested is Map<String, dynamic> ? JsonMap.from(nested) : null;
+  }
+
+  List<JsonMap> get _approvalChecks {
+    final checks = _rows(_workspace ?? const {}, 'approval_checks');
+    if (checks.isNotEmpty) return checks;
+    final document = _document;
+    if (document == null) return const [];
+    final statusValue = _text(document, 'status').toUpperCase();
+    final blockedStatus = {
+      'DISPUTED',
+      'EXPORTED',
+      'REVERSED',
+    }.contains(statusValue);
+    final blocker = _localProcessingBlocker(_rows(document, 'lines'));
+    return [
+      {
+        'code': 'STATUS_ELIGIBLE',
+        'label': 'Document status permits approval',
+        'passed': !blockedStatus,
+        'detail': blockedStatus
+            ? 'Status $statusValue cannot be approved.'
+            : 'Status $statusValue is eligible for approval.',
+      },
+      {
+        'code': 'LINE_PROCESSING_COMPLETE',
+        'label': 'Calculations and allocations are complete',
+        'passed': blocker == null,
+        'detail': blocker ?? 'No line has pending or failed processing.',
+      },
+    ];
+  }
+
+  bool get _approvalReady => _workspace?['approval_ready'] is bool
+      ? _workspace!['approval_ready'] == true
+      : _approvalChecks.every((check) => check['passed'] == true);
+
+  Future<void> _loadWorkspace() async {
+    final id = _selectedDocumentId;
+    final client = widget.client;
+    if (!widget.live || id == null || client == null) {
+      if (mounted) setState(() => _workspace = null);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final response = await client.requestJson(
+        'GET',
+        '/api/v1/charge-management/charge-documents/$id/workspace',
+      );
+      if (!mounted) return;
+      setState(() {
+        _workspace = response;
+        final lines = _rows(_document ?? const {}, 'lines');
+        _selectedLine = lines.isEmpty
+            ? 0
+            : _selectedLine.clamp(0, lines.length - 1);
+      });
+    } catch (error) {
+      if (mounted) _showDocumentError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<JsonMap?> _request(
+    String method,
+    String path, {
+    JsonMap? body,
+    required String success,
+  }) async {
+    final client = widget.client;
+    if (client == null) return null;
+    setState(() => _busy = true);
+    try {
+      final response = await client.requestJson(method, path, body: body);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(success)));
+      }
+      await widget.onReload();
+      await _loadWorkspace();
+      return response;
+    } catch (error) {
+      if (mounted) _showDocumentError(error);
+      return null;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _showDocumentError(Object error) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Document action failed: $error'),
+        backgroundColor: LedgerFlowDesign.danger,
+      ),
+    );
+  }
+
+  Future<void> _setStatus(JsonMap document) async {
+    final statusValue = await showDialog<String>(
+      context: context,
+      builder: (_) => _DocumentStatusDialog(
+        currentStatus: _text(document, 'status').toUpperCase(),
+      ),
+    );
+    if (statusValue == null || statusValue == _text(document, 'status')) return;
+    await _request(
+      'PUT',
+      '/api/v1/charge-management/charge-documents/${document['id']}/workspace',
+      body: {'status': statusValue},
+      success: 'Document status changed to $statusValue.',
+    );
+  }
+
+  Future<void> _approve(JsonMap document) async {
+    final confirmed = await _confirmAction(
+      context,
+      title: 'Approve ${_text(document, 'document_number')}?',
+      message:
+          'Approval locks the document and copies each line actual amount, or expected amount when actual is absent, into its approved amount.',
+      action: 'Approve',
+    );
+    if (!confirmed) return;
+    await _request(
+      'POST',
+      '/api/v1/charge-management/charge-documents/${document['id']}/approve',
+      success: 'Charge document approved.',
+    );
+  }
+
+  Future<void> _export(JsonMap document) async {
+    final response = await _request(
+      'POST',
+      '/api/v1/charge-management/charge-documents/${document['id']}/post-export',
+      success: _text(document, 'status').toUpperCase() == 'EXPORTED'
+          ? 'Existing export batch loaded.'
+          : 'Internal export batch created.',
+    );
+    if (response == null || !mounted) return;
+    setState(() => _lastExport = response);
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _ExportResultDialog(export: response),
+    );
+  }
+
+  Future<void> _reverse(JsonMap document) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => _DocumentReversalDialog(
+        documentNumber: _text(document, 'document_number'),
+      ),
+    );
+    if (reason == null) return;
+    await _request(
+      'POST',
+      '/api/v1/charge-management/charge-documents/${document['id']}/reverse',
+      body: {'reason': reason},
+      success: 'Charge document reversed.',
+    );
+  }
+
+  Future<void> _deleteDocument(JsonMap document) async {
+    final confirmed = await _confirmAction(
+      context,
+      title: 'Delete ${_text(document, 'document_number')}?',
+      message:
+          'This permanently deletes the charge document and its lines. Documents linked to quotes, invoices, commitments, derived pricing, approvals, or exports are protected by the API.',
+      action: 'Delete document',
+      destructive: true,
+    );
+    if (!confirmed) return;
+    final client = widget.client;
+    if (client == null) return;
+    setState(() => _busy = true);
+    try {
+      await client.requestJson(
+        'DELETE',
+        '/api/v1/charge-management/charge-documents/${document['id']}',
+      );
+      if (!mounted) return;
+      setState(() {
+        _selected = math.max(0, _selected - 1);
+        _selectedLine = 0;
+        _workspace = null;
+        _lastExport = null;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Charge document deleted.')));
+      await widget.onReload();
+    } catch (error) {
+      if (mounted) _showDocumentError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  JsonMap? _sourceQuoteLine(JsonMap line) {
+    final sourceLineId = _asInt(line['source_quote_option_line_id']);
+    if (sourceLineId == null) return null;
+    for (final sourceLine in _rows(_sourceQuoteOption ?? const {}, 'lines')) {
+      if (_asInt(sourceLine['id']) == sourceLineId) return sourceLine;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.documents.isEmpty) {
-      return const PageCanvas(
+    final document = _document;
+    if (document == null) {
+      return PageCanvas(
         title: 'Charge documents',
         subtitle:
             'Inspect calculated charges, provenance, approvals, and export readiness.',
-        children: [EmptyState(message: 'No charge documents are available.')],
+        children: [
+          if (!widget.live)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 16),
+              child: Text(
+                'Connect a live API to execute document lifecycle actions.',
+                style: TextStyle(color: LedgerFlowDesign.muted),
+              ),
+            ),
+          const EmptyState(message: 'No charge documents are available.'),
+        ],
       );
     }
     final index = math.min(_selected, widget.documents.length - 1);
-    final document = widget.documents[index];
     final lines = _rows(document, 'lines');
     final lineIndex = lines.isEmpty
         ? 0
@@ -367,6 +659,21 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
     final payee = _number(document['payee_total_amount']);
     final margin = _number(document['margin_amount']);
     final marginPercent = payee == 0 ? 0 : margin / payee * 100;
+    final statusValue = _text(document, 'status').toUpperCase();
+    final mutable = _mutableStatuses.contains(statusValue);
+    final canApprove =
+        widget.live &&
+        !_busy &&
+        mutable &&
+        statusValue != 'DISPUTED' &&
+        _approvalReady;
+    final canExport =
+        widget.live && !_busy && {'APPROVED', 'EXPORTED'}.contains(statusValue);
+    final canReverse =
+        widget.live && !_busy && {'APPROVED', 'EXPORTED'}.contains(statusValue);
+    final sourceLine = selectedLine == null
+        ? null
+        : _sourceQuoteLine(selectedLine);
     return PageCanvas(
       title: _text(
         document,
@@ -376,24 +683,117 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
       eyebrow: 'Charge documents',
       subtitle:
           '${_text(document, 'source_object_type')} ${_text(document, 'source_object_id')}  |  Document date ${_text(document, 'document_date')}',
-      trailing: StatusPill(_text(document, 'status')),
+      trailing: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          StatusPill(statusValue),
+          OutlinedButton.icon(
+            onPressed: widget.live && !_busy && mutable
+                ? () => _setStatus(document)
+                : null,
+            icon: const Icon(Icons.edit_note_outlined),
+            label: const Text('Set status'),
+          ),
+          FilledButton.icon(
+            onPressed: canApprove ? () => _approve(document) : null,
+            icon: const Icon(Icons.approval_outlined),
+            label: const Text('Approve'),
+          ),
+          OutlinedButton.icon(
+            onPressed: canExport ? () => _export(document) : null,
+            icon: const Icon(Icons.outbox_outlined),
+            label: Text(statusValue == 'EXPORTED' ? 'View export' : 'Export'),
+          ),
+          OutlinedButton.icon(
+            onPressed: canReverse ? () => _reverse(document) : null,
+            icon: const Icon(Icons.undo_outlined),
+            label: const Text('Reverse'),
+          ),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: LedgerFlowDesign.danger,
+            ),
+            onPressed: widget.live && !_busy && mutable
+                ? () => _deleteDocument(document)
+                : null,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
+          ),
+        ],
+      ),
       children: [
-        _RecordPicker(
+        if (!widget.live) ...[
+          const SurfaceCard(
+            child: Text(
+              'Demo mode is read-only. Connect the API to approve, export, reverse, or change document status.',
+              style: TextStyle(color: LedgerFlowDesign.muted),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (_busy) const LinearProgressIndicator(minHeight: 2),
+        if (_busy) const SizedBox(height: 10),
+        TransactionRecordList(
           records: widget.documents,
           selectedIndex: index,
-          label: (item) =>
-              _text(item, 'document_number', fallback: '#${item['id']}'),
-          detail: (item) =>
-              '${_text(item, 'source_object_type')} ${_text(item, 'source_object_id')}',
-          onSelected: (value) => setState(() {
-            _selected = value;
-            _selectedLine = 0;
-          }),
+          searchHint: 'Search document, source, date, or status',
+          emptyMessage: 'No charge documents are available.',
+          searchText: (item) => [
+            _text(item, 'document_number'),
+            _text(item, 'source_object_type'),
+            _text(item, 'source_object_id'),
+            _text(item, 'document_date'),
+            _text(item, 'status'),
+          ].join(' '),
+          status: (item) => _text(item, 'status'),
+          columns: [
+            TransactionListColumn(
+              label: 'Document',
+              flex: 2,
+              value: (item) =>
+                  _text(item, 'document_number', fallback: '#${item['id']}'),
+            ),
+            TransactionListColumn(
+              label: 'Source',
+              flex: 2,
+              value: (item) =>
+                  '${_text(item, 'source_object_type')} ${_text(item, 'source_object_id')}',
+            ),
+            TransactionListColumn(
+              label: 'Document date',
+              value: (item) =>
+                  _text(item, 'document_date', fallback: 'Not set'),
+            ),
+            TransactionListColumn(
+              label: 'Payee total',
+              alignEnd: true,
+              value: (item) => _money(
+                _number(item['payee_total_amount']),
+                currency: _text(item, 'currency', fallback: 'USD'),
+              ),
+            ),
+            TransactionListColumn(
+              label: 'Status',
+              value: (item) => _text(item, 'status'),
+              isStatus: true,
+            ),
+          ],
+          onSelected: (value) {
+            setState(() {
+              _selected = value;
+              _selectedLine = 0;
+              _workspace = null;
+              _lastExport = null;
+            });
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _loadWorkspace(),
+            );
+          },
         ),
         const SizedBox(height: 16),
-        Wrap(
-          spacing: 14,
-          runSpacing: 14,
+        ResponsiveMetricGrid(
           children: [
             MetricCard(
               label: 'Payer total',
@@ -453,7 +853,10 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
               ),
               if (selectedLine != null) ...[
                 const SizedBox(height: 16),
-                _ProvenancePanel(line: selectedLine),
+                _ProvenancePanel(
+                  line: selectedLine,
+                  sourceQuoteLine: sourceLine,
+                ),
               ],
             ],
           ),
@@ -476,6 +879,11 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
                     ),
                     DetailRow(label: 'Currency', value: currency),
                     DetailRow(
+                      label: 'Company / customer',
+                      value:
+                          '${_text(document, 'company_id', fallback: '—')} / ${_text(document, 'customer_id', fallback: '—')}',
+                    ),
+                    DetailRow(
                       label: 'Quote request',
                       value: _text(
                         document,
@@ -483,6 +891,31 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
                         fallback: 'Not linked',
                       ),
                     ),
+                    DetailRow(
+                      label: 'Quote option',
+                      value: _text(
+                        document,
+                        'quote_option_id',
+                        fallback: 'Not linked',
+                      ),
+                    ),
+                    DetailRow(
+                      label: 'Approved',
+                      value: _text(document, 'approved_at', fallback: '—'),
+                    ),
+                    DetailRow(
+                      label: 'Exported',
+                      value: _text(document, 'exported_at', fallback: '—'),
+                    ),
+                    DetailRow(
+                      label: 'Reversed',
+                      value: _text(document, 'reversed_at', fallback: '—'),
+                    ),
+                    if (_text(document, 'reversal_reason').isNotEmpty)
+                      DetailRow(
+                        label: 'Reversal reason',
+                        value: _text(document, 'reversal_reason'),
+                      ),
                   ],
                 ),
               ),
@@ -493,27 +926,87 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
                   children: [
                     const SectionHeading(title: 'Approval checks'),
                     const SizedBox(height: 12),
-                    _CheckRow(
-                      label: 'All lines calculated',
-                      pass: lines.isNotEmpty,
-                    ),
-                    _CheckRow(
-                      label: 'FX rates resolved',
-                      pass: lines.every(
-                        (line) => _text(line, 'exchange_rate').isNotEmpty,
+                    for (final check in _approvalChecks)
+                      _CheckRow(
+                        label: _text(check, 'label'),
+                        detail: _text(check, 'detail'),
+                        pass: check['passed'] == true,
                       ),
-                    ),
-                    const _CheckRow(
-                      label: 'Required references present',
-                      pass: true,
-                    ),
-                    _CheckRow(
-                      label: 'Document is not reversed',
-                      pass: _text(document, 'status') != 'REVERSED',
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: widget.live && !_busy
+                            ? _loadWorkspace
+                            : null,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Refresh checks'),
+                      ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              SurfaceCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SectionHeading(title: 'Linked reconciliation'),
+                    const SizedBox(height: 12),
+                    DetailRow(label: 'Invoices', value: '${_invoices.length}'),
+                    DetailRow(
+                      label: 'Match results',
+                      value: '${_matchResults.length}',
+                    ),
+                    DetailRow(
+                      label: 'Source option',
+                      value: _sourceQuoteOption == null
+                          ? 'Direct / manual'
+                          : _text(
+                              _sourceQuoteOption!,
+                              'option_name',
+                              fallback: '#${_sourceQuoteOption!['id']}',
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_lastExport != null) ...[
+                const SizedBox(height: 16),
+                SurfaceCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SectionHeading(title: 'Last export result'),
+                      const SizedBox(height: 12),
+                      DetailRow(
+                        label: 'Batch',
+                        value: _text(_lastExport!, 'export_number'),
+                      ),
+                      DetailRow(
+                        label: 'Target',
+                        value: _text(_lastExport!, 'target_system'),
+                      ),
+                      DetailRow(
+                        label: 'Status',
+                        value: _text(_lastExport!, 'status'),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: () => showDialog<void>(
+                            context: context,
+                            builder: (_) =>
+                                _ExportResultDialog(export: _lastExport!),
+                          ),
+                          child: const Text('Inspect payload'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -523,9 +1016,18 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
 }
 
 class InvoiceWorkspace extends StatefulWidget {
-  const InvoiceWorkspace({required this.invoices, super.key});
+  const InvoiceWorkspace({
+    required this.invoices,
+    this.live = false,
+    this.client,
+    this.onReload,
+    super.key,
+  });
 
   final List<JsonMap> invoices;
+  final bool live;
+  final LedgerFlowApiClient? client;
+  final Future<void> Function()? onReload;
 
   @override
   State<InvoiceWorkspace> createState() => _InvoiceWorkspaceState();
@@ -533,6 +1035,45 @@ class InvoiceWorkspace extends StatefulWidget {
 
 class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
   int _selected = 0;
+  bool _busy = false;
+
+  Future<void> _deleteInvoice(JsonMap invoice) async {
+    final confirmed = await _confirmAction(
+      context,
+      title: 'Delete ${_text(invoice, 'invoice_number')}?',
+      message:
+          'This permanently deletes the invoice and its reconciliation results. The linked charge document is retained.',
+      action: 'Delete invoice',
+      destructive: true,
+    );
+    if (!confirmed) return;
+    final client = widget.client;
+    if (client == null) return;
+    setState(() => _busy = true);
+    try {
+      await client.requestJson(
+        'DELETE',
+        '/api/v1/charge-management/invoices/${invoice['id']}',
+      );
+      if (!mounted) return;
+      setState(() => _selected = math.max(0, _selected - 1));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invoice deleted.')));
+      await widget.onReload?.call();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invoice action failed: $error'),
+            backgroundColor: LedgerFlowDesign.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -563,6 +1104,15 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
     final exception = lines
         .where((line) => _number(line['variance_amount']).abs() > 0.001)
         .firstOrNull;
+    final documentStatus = _text(
+      invoice,
+      'charge_document_status',
+      fallback: '',
+    ).toUpperCase();
+    final canDelete =
+        widget.live &&
+        !_busy &&
+        !{'APPROVED', 'EXPORTED', 'REVERSED'}.contains(documentStatus);
     return PageCanvas(
       title: _text(
         invoice,
@@ -572,21 +1122,74 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
       eyebrow: 'Invoices',
       subtitle:
           '${_text(invoice, 'invoice_type')}  |  ${_text(invoice, 'invoice_date')}  |  $currency',
-      trailing: StatusPill(_text(invoice, 'status')),
+      trailing: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          StatusPill(_text(invoice, 'status')),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: LedgerFlowDesign.danger,
+            ),
+            onPressed: canDelete ? () => _deleteInvoice(invoice) : null,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
+          ),
+        ],
+      ),
       children: [
-        _RecordPicker(
+        if (_busy) const LinearProgressIndicator(minHeight: 2),
+        if (_busy) const SizedBox(height: 10),
+        TransactionRecordList(
           records: widget.invoices,
           selectedIndex: index,
-          label: (item) =>
-              _text(item, 'invoice_number', fallback: '#${item['id']}'),
-          detail: (item) =>
-              _text(item, 'charge_document_number', fallback: 'Unlinked'),
+          searchHint: 'Search invoice, document, date, or status',
+          emptyMessage: 'No invoices are available.',
+          searchText: (item) => [
+            _text(item, 'invoice_number'),
+            _text(item, 'charge_document_number'),
+            _text(item, 'invoice_type'),
+            _text(item, 'invoice_date'),
+            _text(item, 'currency'),
+            _text(item, 'status'),
+          ].join(' '),
+          status: (item) => _text(item, 'status'),
+          columns: [
+            TransactionListColumn(
+              label: 'Invoice',
+              flex: 2,
+              value: (item) =>
+                  _text(item, 'invoice_number', fallback: '#${item['id']}'),
+            ),
+            TransactionListColumn(
+              label: 'Charge document',
+              flex: 2,
+              value: (item) =>
+                  _text(item, 'charge_document_number', fallback: 'Unlinked'),
+            ),
+            TransactionListColumn(
+              label: 'Invoice date',
+              value: (item) => _text(item, 'invoice_date', fallback: 'Not set'),
+            ),
+            TransactionListColumn(
+              label: 'Total',
+              alignEnd: true,
+              value: (item) => _money(
+                _number(item['total_amount']),
+                currency: _text(item, 'currency', fallback: 'USD'),
+              ),
+            ),
+            TransactionListColumn(
+              label: 'Status',
+              value: (item) => _text(item, 'status'),
+              isStatus: true,
+            ),
+          ],
           onSelected: (value) => setState(() => _selected = value),
         ),
         const SizedBox(height: 16),
-        Wrap(
-          spacing: 14,
-          runSpacing: 14,
+        ResponsiveMetricGrid(
           children: [
             MetricCard(
               label: 'Invoice total',
@@ -729,6 +1332,7 @@ class RateBookWorkspace extends StatefulWidget {
   const RateBookWorkspace({
     required this.rateBooks,
     required this.components,
+    this.pricingDimensions = const [],
     this.calculationProfiles = const [],
     this.allocationProfiles = const [],
     required this.live,
@@ -738,6 +1342,7 @@ class RateBookWorkspace extends StatefulWidget {
 
   final List<JsonMap> rateBooks;
   final List<JsonMap> components;
+  final List<JsonMap> pricingDimensions;
   final List<JsonMap> calculationProfiles;
   final List<JsonMap> allocationProfiles;
   final bool live;
@@ -847,6 +1452,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
             _text(entry, 'equipment_type'),
             _text(entry, 'basis'),
             _text(entry, 'currency'),
+            ..._stringMap(entry['dimension_values']).values,
           ].any((value) => value.toLowerCase().contains(query)),
         )
         .toList(growable: false);
@@ -865,6 +1471,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
       builder: (context) => _RateBookDialog(
         mode: _RateBookDialogMode.create,
         components: widget.components,
+        pricingDimensions: widget.pricingDimensions,
         calculationProfiles: widget.calculationProfiles,
         allocationProfiles: widget.allocationProfiles,
       ),
@@ -885,6 +1492,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
         mode: _RateBookDialogMode.newVersion,
         book: source,
         components: widget.components,
+        pricingDimensions: widget.pricingDimensions,
         calculationProfiles: widget.calculationProfiles,
         allocationProfiles: widget.allocationProfiles,
       ),
@@ -905,6 +1513,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
         mode: _RateBookDialogMode.editDraft,
         book: book,
         components: widget.components,
+        pricingDimensions: widget.pricingDimensions,
         calculationProfiles: widget.calculationProfiles,
         allocationProfiles: widget.allocationProfiles,
       ),
@@ -966,6 +1575,18 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
         : math.min(_selectedRate, entries.length - 1);
     final selectedRate = entries.isEmpty ? null : entries[rateIndex];
     final rowAttributeKeys = _rateBookAttributeKeys(book);
+    final customDimensionCodes = _rateBookDimensionCodes(book);
+    final pricingDimensions = _pricingDimensionViews(widget.pricingDimensions);
+    final selectedCustomDimensions = _selectedPricingDimensions(
+      pricingDimensions,
+      customDimensionCodes,
+    );
+    final rowColumns = _rateBookColumns(
+      book,
+      widget.pricingDimensions,
+      builtInKeys: rowAttributeKeys,
+      customCodes: customDimensionCodes,
+    );
     final publishedVersion = family.publishedVersion;
     final subtitleParts = [
       '${_text(book, 'currency')} ${_versionLabel(book)}',
@@ -1018,27 +1639,81 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
       children: [
         if (!widget.live) const _RateBookModeNotice(),
         if (!widget.live) const SizedBox(height: 16),
-        _RecordPicker(
+        TransactionRecordList(
           records: families
-              .map(
-                (item) => JsonMap.from({
+              .map((item) {
+                final latest = item.versions.first;
+                return JsonMap.from({
                   'rate_book_code': item.code,
                   'rate_book_name': item.primaryName,
+                  'charge_component_code': latest['charge_component_code'],
+                  'currency': latest['currency'],
+                  'status': latest['status'],
+                  'version_number': latest['version_number'],
+                  'valid_from': latest['valid_from'],
+                  'valid_to': latest['valid_to'],
                   'published_version_number': item.publishedVersion,
                   'version_count': item.versions.length,
-                }),
-              )
+                });
+              })
               .toList(growable: false),
           selectedIndex: familyIndex,
-          label: (item) => _text(item, 'rate_book_name'),
-          detail: (item) {
-            final published = _asInt(item['published_version_number']);
-            final count = _asInt(item['version_count']) ?? 0;
-            final publishedText = published == null
-                ? 'No release'
-                : 'Published v$published';
-            return '${_text(item, 'rate_book_code')}  |  $count versions  |  $publishedText';
-          },
+          searchHint: 'Search rate book, component, currency, or validity',
+          emptyMessage: 'No rate books are available.',
+          searchText: (item) => [
+            _text(item, 'rate_book_code'),
+            _text(item, 'rate_book_name'),
+            _text(item, 'charge_component_code'),
+            _text(item, 'currency'),
+            _text(item, 'status'),
+            _text(item, 'valid_from'),
+            _text(item, 'valid_to'),
+          ].join(' '),
+          status: (item) => _text(item, 'status'),
+          columns: [
+            TransactionListColumn(
+              label: 'Rate book',
+              flex: 2,
+              value: (item) => _text(item, 'rate_book_code'),
+            ),
+            TransactionListColumn(
+              label: 'Name',
+              flex: 2,
+              value: (item) => _text(item, 'rate_book_name'),
+            ),
+            TransactionListColumn(
+              label: 'Component',
+              flex: 2,
+              value: (item) => _text(
+                item,
+                'charge_component_code',
+                fallback: 'Not assigned',
+              ),
+            ),
+            TransactionListColumn(
+              label: 'Currency',
+              value: (item) => _text(item, 'currency'),
+            ),
+            TransactionListColumn(
+              label: 'Version',
+              value: (item) {
+                final version = _asInt(item['version_number']) ?? 1;
+                final count = _asInt(item['version_count']) ?? 1;
+                return 'v$version of $count';
+              },
+            ),
+            TransactionListColumn(
+              label: 'Validity',
+              flex: 2,
+              value: (item) =>
+                  '${_text(item, 'valid_from')} to ${_text(item, 'valid_to')}',
+            ),
+            TransactionListColumn(
+              label: 'Status',
+              value: (item) => _text(item, 'status'),
+              isStatus: true,
+            ),
+          ],
           onSelected: (value) => setState(() {
             _selectedCode = families[value].code;
             _selectedBookId = _asInt(families[value].versions.first['id']);
@@ -1046,9 +1721,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
           }),
         ),
         const SizedBox(height: 16),
-        Wrap(
-          spacing: 14,
-          runSpacing: 14,
+        ResponsiveMetricGrid(
           children: [
             MetricCard(
               label: 'Entries',
@@ -1122,7 +1795,7 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
                 ),
                 _RateTable(
                   entries: entries,
-                  attributeKeys: rowAttributeKeys,
+                  columns: rowColumns,
                   selectedIndex: rateIndex,
                   onSelected: (value) => setState(() => _selectedRate = value),
                 ),
@@ -1185,6 +1858,25 @@ class _RateBookWorkspaceState extends State<RateBookWorkspace> {
                               fallback: 'Inherit',
                             ),
                           ),
+                          if (selectedCustomDimensions.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Custom dimensions',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            for (final dimension in selectedCustomDimensions)
+                              DetailRow(
+                                label: dimension.name,
+                                value: _dimensionEntryValue(
+                                  selectedRate,
+                                  dimension,
+                                ),
+                              ),
+                          ],
                           DetailRow(
                             label: 'Status',
                             value: selectedRate['is_active'] == false
@@ -1574,6 +2266,7 @@ class _CalculationTemplateWorkspacePageState
                       DataColumn(label: Text('Role')),
                       DataColumn(label: Text('Rate book')),
                       DataColumn(label: Text('Subtotal')),
+                      DataColumn(label: Text('Subtotal effect')),
                       DataColumn(label: Text('Condition')),
                       DataColumn(label: Text('Output')),
                     ],
@@ -1605,6 +2298,16 @@ class _CalculationTemplateWorkspacePageState
                               DataCell(
                                 Text(
                                   _text(step, 'subtotal_key', fallback: '-'),
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  _text(step, 'subtotal_key').isEmpty
+                                      ? '-'
+                                      : step['accumulate_result_in_subtotal'] ==
+                                            false
+                                      ? 'Read only'
+                                      : 'Read + add',
                                 ),
                               ),
                               DataCell(
@@ -1701,6 +2404,7 @@ class _CalculationTemplateStepDraft {
     this.relationshipRole = 'BOTH',
     this.rateBookId,
     this.subtotalKey = '',
+    this.accumulateResultInSubtotal = true,
     this.preconditionKey = '',
     this.isStatistical = false,
   });
@@ -1712,6 +2416,8 @@ class _CalculationTemplateStepDraft {
         relationshipRole: _text(step, 'relationship_role', fallback: 'BOTH'),
         rateBookId: _asInt(step['rate_book_id']),
         subtotalKey: _text(step, 'subtotal_key', fallback: ''),
+        accumulateResultInSubtotal:
+            step['accumulate_result_in_subtotal'] != false,
         preconditionKey: _text(step, 'precondition_key', fallback: ''),
         isStatistical: step['is_statistical'] == true,
       );
@@ -1721,6 +2427,7 @@ class _CalculationTemplateStepDraft {
   String relationshipRole;
   int? rateBookId;
   String subtotalKey;
+  bool accumulateResultInSubtotal;
   String preconditionKey;
   bool isStatistical;
 
@@ -1732,6 +2439,7 @@ class _CalculationTemplateStepDraft {
     'subtotal_key': subtotalKey.trim().isEmpty
         ? null
         : subtotalKey.trim().toUpperCase(),
+    'accumulate_result_in_subtotal': accumulateResultInSubtotal,
     'precondition_key': preconditionKey.trim().isEmpty
         ? null
         : preconditionKey.trim(),
@@ -1876,7 +2584,7 @@ class _CalculationTemplateDialogState
               SectionHeading(
                 title: 'Ordered steps',
                 subtitle:
-                    'A subtotal key both accumulates non-statistical output and can provide the percentage base for a later percentage step.',
+                    'A subtotal key provides the current percentage base. Use each step\'s switch to control whether its result is added back into that subtotal.',
                 action: TextButton.icon(
                   onPressed: () => setState(
                     () => _steps.add(
@@ -2003,6 +2711,7 @@ class _CalculationTemplateStepEditor extends StatelessWidget {
                     decoration: const InputDecoration(
                       labelText: 'Sequence',
                       helperText: 'Execution order.',
+                      helperMaxLines: 2,
                     ),
                     validator: (value) {
                       final number = _asInt(value);
@@ -2024,6 +2733,7 @@ class _CalculationTemplateStepEditor extends StatelessWidget {
                     decoration: const InputDecoration(
                       labelText: 'Charge component',
                       helperText: 'The charge produced by this step.',
+                      helperMaxLines: 2,
                     ),
                     items: _rateComponentOptions(components, step.componentCode)
                         .map(
@@ -2048,12 +2758,14 @@ class _CalculationTemplateStepEditor extends StatelessWidget {
                   ),
                 ),
                 SizedBox(
-                  width: 160,
+                  width: 270,
                   child: DropdownButtonFormField<String>(
                     initialValue: step.relationshipRole,
                     decoration: const InputDecoration(
                       labelText: 'Relationship role',
-                      helperText: 'Payer, payee, or both.',
+                      helperText:
+                          'PAYER = supplier cost; PAYEE = customer price; BOTH = either contract side.',
+                      helperMaxLines: 3,
                     ),
                     items: const ['BOTH', 'PAYER', 'PAYEE']
                         .map(
@@ -2077,6 +2789,7 @@ class _CalculationTemplateStepEditor extends StatelessWidget {
                       labelText: 'Rate book',
                       helperText:
                           'Only books for the selected component are listed.',
+                      helperMaxLines: 2,
                     ),
                     items: [
                       const DropdownMenuItem<int?>(
@@ -2097,28 +2810,48 @@ class _CalculationTemplateStepEditor extends StatelessWidget {
                   ),
                 ),
                 SizedBox(
-                  width: 190,
+                  width: 310,
                   child: TextFormField(
                     initialValue: step.subtotalKey,
                     decoration: const InputDecoration(
                       labelText: 'Subtotal key',
-                      helperText: 'Example: BASE_TRANSPORT.',
+                      helperText:
+                          'Free-text bucket, e.g. BASE_TRANSPORT. A percentage step reads its current amount as the base.',
+                      helperMaxLines: 3,
                     ),
-                    onChanged: (value) => step.subtotalKey = value,
+                    onChanged: (value) {
+                      step.subtotalKey = value;
+                      onChanged();
+                    },
                   ),
                 ),
                 SizedBox(
-                  width: 220,
+                  width: 340,
                   child: TextFormField(
                     initialValue: step.preconditionKey,
                     decoration: const InputDecoration(
                       labelText: 'Precondition context key',
-                      helperText: 'Blank means this step always runs.',
+                      helperText:
+                          'Optional quote context key, e.g. requires_tail_lift. The step runs only when its value is true.',
+                      helperMaxLines: 3,
                     ),
                     onChanged: (value) => step.preconditionKey = value,
                   ),
                 ),
               ],
+            ),
+            SwitchListTile.adaptive(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              value: step.accumulateResultInSubtotal,
+              onChanged: (value) {
+                step.accumulateResultInSubtotal = value;
+                onChanged();
+              },
+              title: const Text('Add result to subtotal'),
+              subtitle: const Text(
+                'Turn off for a commercial percentage charge that reads the subtotal but must not change the base used by later percentage steps.',
+              ),
             ),
             SwitchListTile.adaptive(
               dense: true,
@@ -2316,11 +3049,14 @@ class PageCanvas extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 760;
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 26, 24, 40),
+      padding: compact
+          ? const EdgeInsets.fromLTRB(13, 18, 13, 28)
+          : const EdgeInsets.fromLTRB(26, 23, 26, 36),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1380),
+          constraints: const BoxConstraints(maxWidth: 1660),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2329,10 +3065,12 @@ class PageCanvas extends StatelessWidget {
                   eyebrow!,
                   style: const TextStyle(
                     color: LedgerFlowDesign.teal,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.7,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
               ],
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -2342,15 +3080,17 @@ class PageCanvas extends StatelessWidget {
                       Text(
                         title,
                         style: const TextStyle(
-                          fontSize: 30,
-                          height: 1.1,
+                          fontSize: 28,
+                          height: 1.15,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: -0.7,
                         ),
                       ),
-                      const SizedBox(height: 7),
+                      const SizedBox(height: 4),
                       Text(
                         subtitle,
                         style: const TextStyle(
+                          fontSize: 11,
                           color: LedgerFlowDesign.muted,
                           height: 1.45,
                         ),
@@ -2372,7 +3112,7 @@ class PageCanvas extends StatelessWidget {
                     );
                   }
                   return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(child: heading),
                       const SizedBox(width: 16),
@@ -2381,12 +3121,40 @@ class PageCanvas extends StatelessWidget {
                   );
                 },
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               ...children,
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class ResponsiveMetricGrid extends StatelessWidget {
+  const ResponsiveMetricGrid({required this.children, super.key});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 1080
+            ? 4
+            : constraints.maxWidth >= 560
+            ? 2
+            : 1;
+        const gap = 12.0;
+        final width = (constraints.maxWidth - (gap * (columns - 1))) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final child in children) SizedBox(width: width, child: child),
+          ],
+        );
+      },
     );
   }
 }
@@ -2409,55 +3177,57 @@ class MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 258,
-      child: SurfaceCard(
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.11),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color),
+    return SurfaceCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.11),
+              shape: BoxShape.circle,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            child: Icon(icon, size: 19, color: color),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: LedgerFlowDesign.muted,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 21,
+                    height: 1.1,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.35,
+                  ),
+                ),
+                if (detail != null) ...[
+                  const SizedBox(height: 3),
                   Text(
-                    label,
+                    detail!,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: 11,
                       color: LedgerFlowDesign.muted,
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    value,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (detail != null)
-                    Text(
-                      detail!,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: LedgerFlowDesign.muted,
-                      ),
-                    ),
                 ],
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -2496,7 +3266,7 @@ class SectionHeading extends StatelessWidget {
                 Text(
                   subtitle!,
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     color: LedgerFlowDesign.muted,
                   ),
                 ),
@@ -2528,14 +3298,14 @@ class ResponsiveColumns extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 1080) {
-          return Column(children: [left, const SizedBox(height: 16), right]);
+        if (constraints.maxWidth < 1040) {
+          return Column(children: [left, const SizedBox(height: 12), right]);
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(flex: leftFlex, child: left),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(flex: rightFlex, child: right),
           ],
         );
@@ -3030,6 +3800,8 @@ class _ChargeLineTable extends StatelessWidget {
           DataColumn(label: Text('Source amount')),
           DataColumn(label: Text('FX')),
           DataColumn(label: Text('Expected')),
+          DataColumn(label: Text('Actual')),
+          DataColumn(label: Text('Approved')),
           DataColumn(label: Text('Status')),
         ],
         rows: List.generate(lines.length, (index) {
@@ -3059,6 +3831,8 @@ class _ChargeLineTable extends StatelessWidget {
               ),
               DataCell(Text(_text(line, 'exchange_rate'))),
               DataCell(Text(_text(line, 'expected_amount'))),
+              DataCell(Text(_text(line, 'actual_amount', fallback: '—'))),
+              DataCell(Text(_text(line, 'approved_amount', fallback: '—'))),
               DataCell(StatusPill(_text(line, 'status'))),
             ],
           );
@@ -3069,9 +3843,10 @@ class _ChargeLineTable extends StatelessWidget {
 }
 
 class _ProvenancePanel extends StatelessWidget {
-  const _ProvenancePanel({required this.line});
+  const _ProvenancePanel({required this.line, this.sourceQuoteLine});
 
   final JsonMap line;
+  final JsonMap? sourceQuoteLine;
 
   @override
   Widget build(BuildContext context) {
@@ -3084,7 +3859,14 @@ class _ProvenancePanel extends StatelessWidget {
               icon: Icons.calculate_outlined,
               rows: {
                 'Mode': _text(line, 'calculation_mode'),
+                'Status': _text(line, 'calculation_status'),
                 'Basis': _text(line, 'basis'),
+                'Profile version': _text(
+                  line,
+                  'calculation_profile_version_id',
+                  fallback: 'Direct / none',
+                ),
+                'Rate': _text(line, 'rate_amount', fallback: '—'),
                 'Rate result':
                     '${_text(line, 'source_currency')} ${_text(line, 'source_amount')}',
               },
@@ -3094,11 +3876,16 @@ class _ProvenancePanel extends StatelessWidget {
               icon: Icons.call_split_outlined,
               rows: {
                 'Mode': _text(line, 'allocation_mode'),
+                'Status': _text(line, 'allocation_status'),
                 'Target': _text(line, 'target_level'),
-                'Profile': _text(
+                'Profile / version':
+                    '${_text(line, 'allocation_profile_id', fallback: '—')} / ${_text(line, 'allocation_profile_version_id', fallback: '—')}',
+                'Basis': _text(line, 'allocation_basis', fallback: '—'),
+                'Ratio': _text(line, 'allocation_ratio', fallback: '—'),
+                'Driver value': _text(
                   line,
-                  'allocation_profile_version_id',
-                  fallback: 'Inherited',
+                  'allocation_driver_value',
+                  fallback: '—',
                 ),
               },
             ),
@@ -3106,25 +3893,82 @@ class _ProvenancePanel extends StatelessWidget {
               title: 'Date & FX',
               icon: Icons.currency_exchange_outlined,
               rows: {
+                'Charge date': _text(line, 'charge_date', fallback: '—'),
                 'Date basis': _text(line, 'charge_date_basis'),
+                'Source amount':
+                    '${_text(line, 'source_currency')} ${_text(line, 'source_amount')}',
                 'FX source': _text(line, 'exchange_rate_source_code'),
+                'FX rate ID': _text(line, 'fx_rate_id', fallback: '—'),
+                'Type / method':
+                    '${_text(line, 'exchange_rate_type', fallback: '—')} / ${_text(line, 'exchange_rate_method', fallback: '—')}',
+                'FX date': _text(line, 'exchange_rate_date', fallback: '—'),
                 'Rate': _text(line, 'exchange_rate'),
               },
             ),
+            _ProvenanceBlock(
+              title: 'Commercial source',
+              icon: Icons.account_tree_outlined,
+              rows: {
+                'Quote option line': _text(
+                  line,
+                  'source_quote_option_line_id',
+                  fallback: 'Direct / manual',
+                ),
+                'Contract / source': sourceQuoteLine == null
+                    ? '—'
+                    : sourceQuoteLine!['source_contract_template_route_id'] !=
+                          null
+                    ? '${_text(sourceQuoteLine!, 'source_contract_id', fallback: '-')} / route ${_text(sourceQuoteLine!, 'source_contract_template_route_id')}'
+                    : sourceQuoteLine!['source_contract_line_id'] != null
+                    ? '${_text(sourceQuoteLine!, 'source_contract_id', fallback: '-')} / line ${_text(sourceQuoteLine!, 'source_contract_line_id')}'
+                    : '${_text(sourceQuoteLine!, 'source_contract_id', fallback: '-')} / header template',
+                'Rate book / row': sourceQuoteLine == null
+                    ? '—'
+                    : '${_text(sourceQuoteLine!, 'source_rate_book_id', fallback: '—')} / ${_text(sourceQuoteLine!, 'source_rate_book_entry_id', fallback: '—')}',
+                'Template / step': sourceQuoteLine == null
+                    ? '—'
+                    : '${_text(sourceQuoteLine!, 'source_calculation_template_id', fallback: '—')} / ${_text(sourceQuoteLine!, 'source_calculation_template_step_id', fallback: '—')}',
+              },
+            ),
           ];
-          if (constraints.maxWidth < 700) {
-            return Column(
-              children: [
-                for (final card in cards) ...[card, const SizedBox(height: 14)],
-              ],
-            );
-          }
-          return Row(
+          final cardWidth = constraints.maxWidth < 760
+              ? constraints.maxWidth
+              : (constraints.maxWidth - 14) / 2;
+          final snapshots = <String, dynamic>{
+            'Calculation configuration':
+                line['calculation_config_snapshot_json'],
+            'Calculation inputs': line['calculation_input_snapshot_json'],
+            'Calculation audit': line['calculation_audit_json'],
+            'Allocation configuration': line['allocation_config_snapshot_json'],
+            'Pinned allocation': line['pinned_allocation_snapshot_json'],
+            'Effective allocation': line['effective_allocation_snapshot_json'],
+            'Target reference': line['target_reference_snapshot_json'],
+          }..removeWhere((_, value) => value == null);
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (var index = 0; index < cards.length; index++) ...[
-                Expanded(child: cards[index]),
-                if (index < cards.length - 1) const VerticalDivider(width: 28),
+              Wrap(
+                spacing: 14,
+                runSpacing: 14,
+                children: [
+                  for (final card in cards)
+                    SizedBox(width: cardWidth, child: card),
+                ],
+              ),
+              if (snapshots.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const Divider(),
+                const SizedBox(height: 8),
+                const Text(
+                  'Immutable snapshots',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                for (final snapshot in snapshots.entries)
+                  _SnapshotInspector(
+                    label: snapshot.key,
+                    value: snapshot.value,
+                  ),
               ],
             ],
           );
@@ -3164,10 +4008,11 @@ class _ProvenanceBlock extends StatelessWidget {
 }
 
 class _CheckRow extends StatelessWidget {
-  const _CheckRow({required this.label, required this.pass});
+  const _CheckRow({required this.label, required this.pass, this.detail = ''});
 
   final String label;
   final bool pass;
+  final String detail;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -3180,9 +4025,221 @@ class _CheckRow extends StatelessWidget {
           size: 18,
         ),
         const SizedBox(width: 9),
-        Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 12)),
+              if (detail.isNotEmpty)
+                Text(
+                  detail,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: LedgerFlowDesign.muted,
+                  ),
+                ),
+            ],
+          ),
+        ),
       ],
     ),
+  );
+}
+
+class _SnapshotInspector extends StatelessWidget {
+  const _SnapshotInspector({required this.label, required this.value});
+
+  final String label;
+  final dynamic value;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 8),
+    decoration: BoxDecoration(
+      border: Border.all(color: LedgerFlowDesign.border),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: ExpansionTile(
+      dense: true,
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: SelectableText(
+            const JsonEncoder.withIndent('  ').convert(value),
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DocumentStatusDialog extends StatefulWidget {
+  const _DocumentStatusDialog({required this.currentStatus});
+
+  final String currentStatus;
+
+  @override
+  State<_DocumentStatusDialog> createState() => _DocumentStatusDialogState();
+}
+
+class _DocumentStatusDialogState extends State<_DocumentStatusDialog> {
+  late String _status = widget.currentStatus;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Set document status'),
+    content: SizedBox(
+      width: 460,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Mutable statuses describe the operational stage before approval. DISPUTED blocks approval until the document is moved back to an eligible status.',
+            style: TextStyle(color: LedgerFlowDesign.muted),
+          ),
+          const SizedBox(height: 18),
+          DropdownButtonFormField<String>(
+            initialValue: _status,
+            decoration: const InputDecoration(labelText: 'Status'),
+            items: const [
+              DropdownMenuItem(value: 'ESTIMATED', child: Text('ESTIMATED')),
+              DropdownMenuItem(value: 'ACCRUED', child: Text('ACCRUED')),
+              DropdownMenuItem(value: 'ACTUAL', child: Text('ACTUAL')),
+              DropdownMenuItem(value: 'DISPUTED', child: Text('DISPUTED')),
+            ],
+            onChanged: (value) => setState(() => _status = value ?? _status),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, _status),
+        child: const Text('Save status'),
+      ),
+    ],
+  );
+}
+
+class _DocumentReversalDialog extends StatefulWidget {
+  const _DocumentReversalDialog({required this.documentNumber});
+
+  final String documentNumber;
+
+  @override
+  State<_DocumentReversalDialog> createState() =>
+      _DocumentReversalDialogState();
+}
+
+class _DocumentReversalDialogState extends State<_DocumentReversalDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _reason = TextEditingController();
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('Reverse ${widget.documentNumber}?'),
+    content: SizedBox(
+      width: 500,
+      child: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _reason,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Reversal reason',
+            helperText: 'Stored permanently with the financial document',
+          ),
+          validator: (value) => value == null || value.trim().isEmpty
+              ? 'A reversal reason is required.'
+              : null,
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (!_formKey.currentState!.validate()) return;
+          Navigator.pop(context, _reason.text.trim());
+        },
+        child: const Text('Reverse document'),
+      ),
+    ],
+  );
+}
+
+class _ExportResultDialog extends StatelessWidget {
+  const _ExportResultDialog({required this.export});
+
+  final JsonMap export;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      _text(export, 'export_number', fallback: 'Charge document export'),
+    ),
+    content: SizedBox(
+      width: 760,
+      height: 560,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 24,
+            runSpacing: 8,
+            children: [
+              Text('Target: ${_text(export, 'target_system')}'),
+              Text('Status: ${_text(export, 'status')}'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'The default service stores this INTERNAL_LEDGER payload. Delivery to an ERP or ledger requires an adopter-provided export adapter.',
+            style: TextStyle(color: LedgerFlowDesign.muted),
+          ),
+          const SizedBox(height: 14),
+          const Divider(),
+          const SizedBox(height: 8),
+          const Text('Payload', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              child: SelectableText(
+                const JsonEncoder.withIndent(
+                  '  ',
+                ).convert(export['payload_json'] ?? const {}),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      FilledButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Close'),
+      ),
+    ],
   );
 }
 
@@ -3375,13 +4432,13 @@ class _MatchHealth extends StatelessWidget {
 class _RateTable extends StatelessWidget {
   const _RateTable({
     required this.entries,
-    required this.attributeKeys,
+    required this.columns,
     required this.selectedIndex,
     required this.onSelected,
   });
 
   final List<JsonMap> entries;
-  final Set<String> attributeKeys;
+  final List<_RateBookColumnDefinition> columns;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
@@ -3390,9 +4447,6 @@ class _RateTable extends StatelessWidget {
     if (entries.isEmpty) {
       return const EmptyState(message: 'This rate book has no entries.');
     }
-    final definitions = _rateAttributeDefinitions
-        .where((definition) => attributeKeys.contains(definition.key))
-        .toList(growable: false);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
@@ -3400,7 +4454,7 @@ class _RateTable extends StatelessWidget {
         columns: [
           const DataColumn(label: Text('Rate')),
           const DataColumn(label: Text('Currency')),
-          ...definitions.map(
+          ...columns.map(
             (definition) => DataColumn(
               label: Tooltip(
                 message: definition.help,
@@ -3425,17 +4479,16 @@ class _RateTable extends StatelessWidget {
                 ),
               ),
               DataCell(Text(_text(entry, 'currency'))),
-              ...definitions.map(
-                (definition) => DataCell(
+              ...columns.map((definition) {
+                final fallback = definition.key == 'priority' ? '100' : 'Any';
+                return DataCell(
                   Text(
-                    _text(
-                      entry,
-                      definition.key,
-                      fallback: definition.key == 'priority' ? '100' : 'Any',
-                    ),
+                    definition.isCustom
+                        ? _dimensionEntryValue(entry, definition.dimension!)
+                        : _text(entry, definition.key, fallback: fallback),
                   ),
-                ),
-              ),
+                );
+              }),
               DataCell(
                 StatusPill(entry['is_active'] == false ? 'INACTIVE' : 'ACTIVE'),
               ),
@@ -3445,6 +4498,22 @@ class _RateTable extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RateBookColumnDefinition {
+  const _RateBookColumnDefinition({
+    required this.key,
+    required this.label,
+    required this.help,
+    this.dimension,
+  });
+
+  final String key;
+  final String label;
+  final String help;
+  final _PricingDimensionView? dimension;
+
+  bool get isCustom => dimension != null;
 }
 
 enum _RateBookDialogMode { create, editDraft, newVersion }
@@ -3603,6 +4672,317 @@ class _RateAttributeDefinition {
   final String help;
 }
 
+class _PricingDimensionView {
+  const _PricingDimensionView({
+    required this.code,
+    required this.name,
+    required this.dataType,
+    required this.description,
+    required this.allowedValues,
+    required this.builtInField,
+    required this.caseSensitive,
+    required this.isSystem,
+    required this.isActive,
+  });
+
+  factory _PricingDimensionView.fromJson(JsonMap dimension) =>
+      _PricingDimensionView(
+        code: _text(dimension, 'dimension_code', fallback: '').toUpperCase(),
+        name: _text(dimension, 'dimension_name', fallback: ''),
+        dataType: _text(
+          dimension,
+          'data_type',
+          fallback: 'STRING',
+        ).toUpperCase(),
+        description: _text(dimension, 'description', fallback: ''),
+        allowedValues: _stringList(dimension['allowed_values']),
+        builtInField:
+            dimension['built_in_field']?.toString().trim().isNotEmpty == true,
+        caseSensitive: dimension['case_sensitive'] == true,
+        isSystem: dimension['is_system'] == true,
+        isActive: dimension['is_active'] != false,
+      );
+
+  final String code;
+  final String name;
+  final String dataType;
+  final String description;
+  final List<String> allowedValues;
+  final bool builtInField;
+  final bool caseSensitive;
+  final bool isSystem;
+  final bool isActive;
+
+  String get label => name.isEmpty ? code : '$name ($code)';
+}
+
+List<_PricingDimensionView> _pricingDimensionViews(List<JsonMap> dimensions) =>
+    dimensions.map(_PricingDimensionView.fromJson).toList(growable: false);
+
+List<_PricingDimensionView> _customDimensionOptions(List<JsonMap> dimensions) =>
+    _pricingDimensionViews(dimensions)
+        .where((dimension) => !dimension.builtInField && dimension.isActive)
+        .toList(growable: false);
+
+List<_PricingDimensionView> _selectedPricingDimensions(
+  List<_PricingDimensionView> dimensions,
+  Set<String> selectedCodes,
+) {
+  if (selectedCodes.isEmpty) return const [];
+  final byCode = {
+    for (final dimension in dimensions) dimension.code.toUpperCase(): dimension,
+  };
+  return [
+    for (final code in selectedCodes)
+      if (byCode.containsKey(code.toUpperCase())) byCode[code.toUpperCase()]!,
+  ];
+}
+
+String _pricingDimensionCode(_PricingDimensionView dimension) => dimension.code;
+
+String _pricingDimensionLabel(_PricingDimensionView dimension) =>
+    dimension.label;
+
+String _pricingDimensionTooltip(_PricingDimensionView dimension) {
+  final details = [
+    dimension.dataType,
+    if (dimension.allowedValues.isNotEmpty)
+      'Allowed: ${dimension.allowedValues.join(', ')}',
+    if (dimension.description.isNotEmpty) dimension.description,
+  ];
+  return details.join(' / ');
+}
+
+String _dimensionEntryValue(JsonMap entry, _PricingDimensionView dimension) {
+  final values = entry['dimension_values'];
+  if (values is Map && values.containsKey(dimension.code)) {
+    return _dimensionValueText(values[dimension.code], dimension);
+  }
+  if (entry.containsKey(dimension.code)) {
+    return _dimensionValueText(entry[dimension.code], dimension);
+  }
+  return 'Any';
+}
+
+String _dimensionValueText(dynamic value, _PricingDimensionView dimension) {
+  if (value == null || value.toString().trim().isEmpty) return 'Any';
+  return value.toString();
+}
+
+dynamic _typedDimensionValue(String raw, _PricingDimensionView dimension) {
+  final text = raw.trim();
+  if (text.isEmpty) return null;
+  switch (dimension.dataType) {
+    case 'DECIMAL':
+      return double.tryParse(text);
+    case 'INTEGER':
+      return int.tryParse(text);
+    case 'BOOLEAN':
+      return text.toLowerCase() == 'true' || text == '1';
+    case 'DATE':
+      return text;
+    case 'STRING':
+    default:
+      return text;
+  }
+}
+
+double _customDimensionWidth(_PricingDimensionView dimension) {
+  switch (dimension.dataType) {
+    case 'BOOLEAN':
+      return 160;
+    case 'DATE':
+      return 180;
+    case 'INTEGER':
+      return 130;
+    case 'DECIMAL':
+      return 150;
+    case 'STRING':
+    default:
+      return dimension.allowedValues.isNotEmpty ? 230 : 190;
+  }
+}
+
+Widget _customDimensionField({
+  required _RateEntryDraft entry,
+  required _PricingDimensionView dimension,
+  required VoidCallback onChanged,
+  required double width,
+}) {
+  final key = dimension.code;
+  final value = entry.dimensionValues[key] ?? '';
+  Widget field;
+  switch (dimension.dataType) {
+    case 'BOOLEAN':
+      field = DropdownButtonFormField<String>(
+        initialValue: value.isEmpty ? null : value,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: dimension.name.isEmpty ? dimension.code : dimension.name,
+          helperText: dimension.description.isEmpty
+              ? null
+              : dimension.description,
+        ),
+        items: const [
+          DropdownMenuItem(value: '', child: Text('Any / not restricted')),
+          DropdownMenuItem(value: 'true', child: Text('Yes')),
+          DropdownMenuItem(value: 'false', child: Text('No')),
+        ],
+        onChanged: (next) {
+          entry.dimensionValues[key] = next ?? '';
+          onChanged();
+        },
+      );
+      break;
+    case 'DATE':
+      field = _DatePickerValueField(
+        initialValue: value,
+        label: dimension.name.isEmpty ? dimension.code : dimension.name,
+        help: dimension.description.isEmpty ? null : dimension.description,
+        validator: (candidate) =>
+            _isoDimensionValue(candidate, required: false),
+        onChanged: (next) {
+          entry.dimensionValues[key] = next;
+          onChanged();
+        },
+      );
+      break;
+    case 'INTEGER':
+    case 'DECIMAL':
+      field = TextFormField(
+        initialValue: value,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: dimension.name.isEmpty ? dimension.code : dimension.name,
+          helperText: dimension.description.isEmpty
+              ? null
+              : dimension.description,
+        ),
+        validator: (candidate) => _numericDimensionValue(candidate, dimension),
+        onChanged: (next) {
+          entry.dimensionValues[key] = next;
+          onChanged();
+        },
+      );
+      break;
+    default:
+      if (dimension.allowedValues.isNotEmpty) {
+        field = DropdownButtonFormField<String>(
+          initialValue: value.isEmpty ? null : value,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: dimension.name.isEmpty ? dimension.code : dimension.name,
+            helperText: dimension.description.isEmpty
+                ? null
+                : dimension.description,
+          ),
+          items: [
+            const DropdownMenuItem(
+              value: '',
+              child: Text('Any / not restricted'),
+            ),
+            ...dimension.allowedValues.map(
+              (candidate) =>
+                  DropdownMenuItem(value: candidate, child: Text(candidate)),
+            ),
+          ],
+          onChanged: (next) {
+            entry.dimensionValues[key] = next ?? '';
+            onChanged();
+          },
+        );
+      } else {
+        field = TextFormField(
+          initialValue: value,
+          decoration: InputDecoration(
+            labelText: dimension.name.isEmpty ? dimension.code : dimension.name,
+            helperText: dimension.description.isEmpty
+                ? null
+                : dimension.description,
+          ),
+          onChanged: (next) {
+            entry.dimensionValues[key] = next;
+            onChanged();
+          },
+        );
+      }
+      break;
+  }
+  return SizedBox(width: width, child: field);
+}
+
+String? _numericDimensionValue(String? value, _PricingDimensionView dimension) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return null;
+  final parsed = dimension.dataType == 'INTEGER'
+      ? int.tryParse(text)
+      : double.tryParse(text);
+  return parsed == null
+      ? 'Enter a valid ${dimension.dataType.toLowerCase()}'
+      : null;
+}
+
+String? _isoDimensionValue(String? value, {bool required = false}) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return required ? 'Date is required' : null;
+  return DateTime.tryParse(text) == null ? 'Use YYYY-MM-DD' : null;
+}
+
+List<_RateBookColumnDefinition> _rateBookColumns(
+  JsonMap? book,
+  List<JsonMap> pricingDimensions, {
+  required Set<String> builtInKeys,
+  required Set<String> customCodes,
+}) {
+  final columns = <_RateBookColumnDefinition>[
+    for (final definition in _rateAttributeDefinitions)
+      if (builtInKeys.contains(definition.key))
+        _RateBookColumnDefinition(
+          key: definition.key,
+          label: definition.label,
+          help: definition.help,
+        ),
+  ];
+  final dimensionsByCode = {
+    for (final dimension in _pricingDimensionViews(pricingDimensions))
+      dimension.code.toUpperCase(): dimension,
+  };
+  for (final code in customCodes) {
+    final dimension = dimensionsByCode[code.toUpperCase()];
+    if (dimension == null) continue;
+    columns.add(
+      _RateBookColumnDefinition(
+        key: dimension.code,
+        label: dimension.name.isEmpty ? dimension.code : dimension.name,
+        help: _pricingDimensionTooltip(dimension),
+        dimension: dimension,
+      ),
+    );
+  }
+  return columns;
+}
+
+Set<String> _rateBookDimensionCodes(JsonMap? book) {
+  final configured = (book?['dimension_codes'] as List?)
+      ?.map((value) => value.toString())
+      .where((value) => value.isNotEmpty)
+      .toSet();
+  if (configured != null) {
+    return configured.map((value) => value.toUpperCase()).toSet();
+  }
+  final inferred = <String>{};
+  for (final entry in _rows(book ?? const <String, dynamic>{}, 'entries')) {
+    final values = entry['dimension_values'];
+    if (values is Map) {
+      for (final key in values.keys) {
+        final code = key.toString().trim();
+        if (code.isNotEmpty) inferred.add(code.toUpperCase());
+      }
+    }
+  }
+  return inferred;
+}
+
 const _rateAttributeDefinitions = <_RateAttributeDefinition>[
   _RateAttributeDefinition(
     'origin_code',
@@ -3734,6 +5114,7 @@ class _RateEntryDraft {
     this.allocationProfileId = '',
     this.priority = '100',
     this.isActive = true,
+    this.dimensionValues = const <String, String>{},
   });
 
   factory _RateEntryDraft.fromJson(JsonMap entry) => _RateEntryDraft(
@@ -3764,6 +5145,7 @@ class _RateEntryDraft {
     allocationProfileId: _text(entry, 'allocation_profile_id', fallback: ''),
     priority: _text(entry, 'priority', fallback: '100'),
     isActive: entry['is_active'] != false,
+    dimensionValues: _stringMap(entry['dimension_values']),
   );
 
   final JsonMap original;
@@ -3789,12 +5171,14 @@ class _RateEntryDraft {
   String allocationProfileId;
   String priority;
   bool isActive;
+  Map<String, String> dimensionValues;
 
   JsonMap toJson(
     List<JsonMap> components, {
     required String componentCode,
     required String bookCurrency,
     required Set<String> attributeKeys,
+    required List<_PricingDimensionView> customDimensions,
   }) {
     final component = _rateComponent(components, componentCode);
     final effectiveBasis = basis.trim().isNotEmpty
@@ -3876,6 +5260,18 @@ class _RateEntryDraft {
     if (attributeKeys.contains('priority') && priorityValue != null) {
       payload['priority'] = priorityValue;
     }
+    final customValues = <String, dynamic>{};
+    for (final dimension in customDimensions) {
+      final code = dimension.code;
+      final raw = dimensionValues[code] ?? '';
+      final typed = _typedDimensionValue(raw, dimension);
+      if (typed != null) {
+        customValues[code] = typed;
+      }
+    }
+    if (customValues.isNotEmpty) {
+      payload['dimension_values'] = customValues;
+    }
     if (isPercentage) {
       payload.remove('rate_amount');
       payload['rate_percent'] = ratePercent.trim();
@@ -3891,6 +5287,7 @@ class _RateBookDialog extends StatefulWidget {
   const _RateBookDialog({
     required this.mode,
     required this.components,
+    required this.pricingDimensions,
     required this.calculationProfiles,
     required this.allocationProfiles,
     this.book,
@@ -3898,6 +5295,7 @@ class _RateBookDialog extends StatefulWidget {
 
   final _RateBookDialogMode mode;
   final List<JsonMap> components;
+  final List<JsonMap> pricingDimensions;
   final List<JsonMap> calculationProfiles;
   final List<JsonMap> allocationProfiles;
   final JsonMap? book;
@@ -3917,6 +5315,7 @@ class _RateBookDialogState extends State<_RateBookDialog> {
   late final TextEditingController _calculationBasis;
   late String _componentCode;
   late Set<String> _attributeKeys;
+  late Set<String> _dimensionCodes;
   late bool _isActive;
   late List<_RateEntryDraft> _entries;
 
@@ -4007,6 +5406,7 @@ class _RateBookDialogState extends State<_RateBookDialog> {
         'validity_to',
       };
     }
+    _dimensionCodes = _rateBookDimensionCodes(book);
     _isActive = book == null || book['is_active'] != false;
     _entries = _rows(
       book ?? const <String, dynamic>{},
@@ -4031,6 +5431,7 @@ class _RateBookDialogState extends State<_RateBookDialog> {
       _RateEntryDraft(
         componentCode: _componentCode,
         currency: _currency.text.trim().toUpperCase(),
+        dimensionValues: <String, String>{},
       ),
     ),
   );
@@ -4071,6 +5472,7 @@ class _RateBookDialogState extends State<_RateBookDialog> {
       'rate_book_name': _name.text.trim(),
       'charge_component_code': _componentCode,
       'row_attribute_keys': _attributeKeys.toList(growable: false)..sort(),
+      'dimension_codes': _dimensionCodes.toList(growable: false)..sort(),
       'description': _description.text.trim().isEmpty
           ? null
           : _description.text.trim(),
@@ -4089,6 +5491,10 @@ class _RateBookDialogState extends State<_RateBookDialog> {
               componentCode: _componentCode,
               bookCurrency: _currency.text,
               attributeKeys: _attributeKeys,
+              customDimensions: _selectedPricingDimensions(
+                _pricingDimensionViews(widget.pricingDimensions),
+                _dimensionCodes,
+              ),
             ),
           )
           .toList(growable: false),
@@ -4116,7 +5522,7 @@ class _RateBookDialogState extends State<_RateBookDialog> {
                 Text(
                   widget.mode == _RateBookDialogMode.newVersion
                       ? 'The new version keeps the selected rate-book code and starts in DRAFT status.'
-                      : 'Capture the commercial header and any draft rate rows you want in this workspace.',
+                      : 'Capture the commercial header, built-in row columns, and active custom canonical dimensions in this workspace.',
                   style: const TextStyle(
                     fontSize: 12,
                     color: LedgerFlowDesign.muted,
@@ -4282,6 +5688,38 @@ class _RateBookDialogState extends State<_RateBookDialog> {
                       .toList(growable: false),
                 ),
                 const SizedBox(height: 12),
+                SectionHeading(
+                  title: 'Custom canonical dimensions',
+                  subtitle:
+                      'These active custom dimensions are written into dimension_values for each row.',
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _customDimensionOptions(widget.pricingDimensions)
+                      .map(
+                        (dimension) => Tooltip(
+                          message: _pricingDimensionTooltip(dimension),
+                          child: FilterChip(
+                            label: Text(_pricingDimensionLabel(dimension)),
+                            selected: _dimensionCodes.contains(
+                              _pricingDimensionCode(dimension),
+                            ),
+                            onSelected: (selected) => setState(() {
+                              final code = _pricingDimensionCode(dimension);
+                              if (selected) {
+                                _dimensionCodes.add(code);
+                              } else {
+                                _dimensionCodes.remove(code);
+                              }
+                            }),
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+                const SizedBox(height: 12),
                 SwitchListTile.adaptive(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
@@ -4334,6 +5772,10 @@ class _RateBookDialogState extends State<_RateBookDialog> {
                           componentCode: _componentCode,
                           bookCurrency: _currency.text,
                           attributeKeys: _attributeKeys,
+                          customDimensions: _selectedPricingDimensions(
+                            _pricingDimensionViews(widget.pricingDimensions),
+                            _dimensionCodes,
+                          ),
                           calculationProfiles: widget.calculationProfiles,
                           allocationProfiles: widget.allocationProfiles,
                           onRemove: () => _removeEntry(index),
@@ -4474,6 +5916,7 @@ class _RateEntryEditor extends StatelessWidget {
     required this.componentCode,
     required this.bookCurrency,
     required this.attributeKeys,
+    required this.customDimensions,
     required this.calculationProfiles,
     required this.allocationProfiles,
     required this.onRemove,
@@ -4489,6 +5932,7 @@ class _RateEntryEditor extends StatelessWidget {
   final String componentCode;
   final String bookCurrency;
   final Set<String> attributeKeys;
+  final List<_PricingDimensionView> customDimensions;
   final List<JsonMap> calculationProfiles;
   final List<JsonMap> allocationProfiles;
   final VoidCallback onRemove;
@@ -4889,6 +6333,14 @@ class _RateEntryEditor extends StatelessWidget {
                         : null,
                     onValue: (value) => entry.priority = value,
                   ),
+                ...customDimensions.map(
+                  (dimension) => _customDimensionField(
+                    dimension: dimension,
+                    entry: entry,
+                    width: _customDimensionWidth(dimension),
+                    onChanged: onChanged,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -5252,6 +6704,22 @@ List<JsonMap> _rows(JsonMap record, String key) {
       .toList(growable: false);
 }
 
+Map<String, String> _stringMap(dynamic value) {
+  if (value is! Map) return const {};
+  return {
+    for (final entry in value.entries)
+      entry.key.toString().trim().toUpperCase(): entry.value?.toString() ?? '',
+  };
+}
+
+List<String> _stringList(dynamic value) {
+  if (value is! List) return const [];
+  return value
+      .map((item) => item.toString().trim())
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
+}
+
 String _text(JsonMap record, String key, {String fallback = '-'}) {
   final value = record[key];
   if (value == null || value.toString().trim().isEmpty) return fallback;
@@ -5299,11 +6767,64 @@ String _label(String key) => key
     )
     .join(' ');
 
+String? _localProcessingBlocker(List<JsonMap> lines) {
+  for (final line in lines) {
+    final lineReference = _text(
+      line,
+      'line_number',
+      fallback: _text(line, 'id'),
+    );
+    for (final field in const ['calculation_status', 'allocation_status']) {
+      final stateValue = _text(line, field).toUpperCase();
+      final label = field.startsWith('calculation')
+          ? 'calculation'
+          : 'allocation';
+      if ({'PENDING', 'PENDING_CONTEXT'}.contains(stateValue)) {
+        return 'Line $lineReference still has pending $label.';
+      }
+      if (stateValue == 'FAILED') {
+        return 'Line $lineReference has failed $label.';
+      }
+    }
+    for (final entry in const {
+      'calculation_audit_json': 'calculation',
+      'effective_allocation_snapshot_json': 'allocation',
+      'pinned_allocation_snapshot_json': 'allocation',
+    }.entries) {
+      final snapshot = line[entry.key];
+      if (snapshot is! Map) continue;
+      final stateValue = _snapshotProcessingState(snapshot);
+      if (stateValue == null) continue;
+      if ({'PENDING', 'PENDING_CONTEXT'}.contains(stateValue)) {
+        return 'Line $lineReference still has pending ${entry.value}.';
+      }
+      return 'Line $lineReference has failed ${entry.value}.';
+    }
+  }
+  return null;
+}
+
+String? _snapshotProcessingState(Map<dynamic, dynamic> snapshot) {
+  for (final key in const [
+    'status',
+    'state',
+    'calculation_status',
+    'allocation_status',
+  ]) {
+    final stateValue = snapshot[key]?.toString().trim().toUpperCase();
+    if ({'PENDING', 'PENDING_CONTEXT', 'FAILED'}.contains(stateValue)) {
+      return stateValue;
+    }
+  }
+  return null;
+}
+
 Future<bool> _confirmAction(
   BuildContext context, {
   required String title,
   required String message,
   required String action,
+  bool destructive = false,
 }) async {
   final confirmed = await showDialog<bool>(
     context: context,
@@ -5316,6 +6837,9 @@ Future<bool> _confirmAction(
           child: const Text('Cancel'),
         ),
         FilledButton(
+          style: destructive
+              ? FilledButton.styleFrom(backgroundColor: LedgerFlowDesign.danger)
+              : null,
           onPressed: () => Navigator.pop(context, true),
           child: Text(action),
         ),

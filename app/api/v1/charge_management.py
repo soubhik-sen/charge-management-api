@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal, get_db
+from app.domain.dimension_service import PricingDimensionService
 from app.domain.fx_service import FxRateService
 
 from app.domain.models import (
@@ -48,6 +49,11 @@ from app.domain.models import (
     ChargeDocumentWorkspaceUpdate,
     ChargeExportResponse,
     ChargeInitializationData,
+    CallerMappingPreviewRequest,
+    CallerMappingPreviewResponse,
+    CallerMappingProfile,
+    CallerMappingProfileListResponse,
+    CallerMappingProfilePayload,
     ChargeInvoice,
     ChargeInvoiceCreate,
     ChargeInvoiceListResponse,
@@ -78,6 +84,9 @@ from app.domain.models import (
     QuoteRequestListResponse,
     QuoteRequestWorkspace,
     QuoteRequestWorkspaceUpdate,
+    PricingDimension,
+    PricingDimensionListResponse,
+    PricingDimensionPayload,
     RankResponse,
     RateBook,
     RateBookListResponse,
@@ -128,6 +137,120 @@ def get_initialization_data(
 ) -> ChargeInitializationData:
     _allow(principal, "charge.initialization_data")
     return service.initialization_data()
+
+
+@router.get("/pricing-dimensions", response_model=PricingDimensionListResponse)
+def list_pricing_dimensions(
+    q: str | None = Query(default=None),
+    active_only: bool | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> PricingDimensionListResponse:
+    _allow(principal, "charge.pricing_dimensions.list")
+    return PricingDimensionService(db).list_dimensions(
+        search=q,
+        active_only=active_only,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/pricing-dimensions", response_model=PricingDimension, status_code=201)
+def create_pricing_dimension(
+    payload: PricingDimensionPayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> PricingDimension:
+    _allow(principal, "charge.pricing_dimensions.create")
+    return PricingDimensionService(db).create_dimension(payload)
+
+
+@router.put("/pricing-dimensions/{dimension_id}", response_model=PricingDimension)
+def update_pricing_dimension(
+    dimension_id: int,
+    payload: PricingDimensionPayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> PricingDimension:
+    _allow(principal, "charge.pricing_dimensions.update")
+    return PricingDimensionService(db).update_dimension(dimension_id, payload)
+
+
+@router.delete("/pricing-dimensions/{dimension_id}", response_model=PricingDimension)
+def deactivate_pricing_dimension(
+    dimension_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> PricingDimension:
+    _allow(principal, "charge.pricing_dimensions.delete")
+    return PricingDimensionService(db).deactivate_dimension(dimension_id)
+
+
+@router.get("/caller-mapping-profiles", response_model=CallerMappingProfileListResponse)
+def list_caller_mapping_profiles(
+    caller_system_code: str | None = Query(default=None),
+    schema_version: str | None = Query(default=None),
+    active_only: bool | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> CallerMappingProfileListResponse:
+    _allow(principal, "charge.caller_mapping_profiles.list")
+    return PricingDimensionService(db).list_profiles(
+        caller_system_code=caller_system_code,
+        schema_version=schema_version,
+        active_only=active_only,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/caller-mapping-profiles", response_model=CallerMappingProfile, status_code=201)
+def create_caller_mapping_profile(
+    payload: CallerMappingProfilePayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> CallerMappingProfile:
+    _allow(principal, "charge.caller_mapping_profiles.create")
+    return PricingDimensionService(db).create_profile(payload)
+
+
+@router.put("/caller-mapping-profiles/{profile_id}", response_model=CallerMappingProfile)
+def update_caller_mapping_profile(
+    profile_id: int,
+    payload: CallerMappingProfilePayload,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> CallerMappingProfile:
+    _allow(principal, "charge.caller_mapping_profiles.update")
+    return PricingDimensionService(db).update_profile(profile_id, payload)
+
+
+@router.delete("/caller-mapping-profiles/{profile_id}", response_model=CallerMappingProfile)
+def deactivate_caller_mapping_profile(
+    profile_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> CallerMappingProfile:
+    _allow(principal, "charge.caller_mapping_profiles.delete")
+    return PricingDimensionService(db).deactivate_profile(profile_id)
+
+
+@router.post(
+    "/caller-mapping-profiles/{profile_id}/preview",
+    response_model=CallerMappingPreviewResponse,
+)
+def preview_caller_mapping_profile(
+    profile_id: int,
+    payload: CallerMappingPreviewRequest,
+    principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
+) -> CallerMappingPreviewResponse:
+    _allow(principal, "charge.caller_mapping_profiles.preview")
+    return PricingDimensionService(db).preview_profile(profile_id, payload.caller_attributes)
 
 
 @router.post("/calculations/preview", response_model=ChargeCalculationPreviewResponse)
@@ -687,9 +810,11 @@ def delete_component_alias(
 def create_rate_book(
     payload: RateBookPayload,
     principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
 ) -> RateBook:
     _allow(principal, "charge.rate_books.create")
-    return service.create_rate_book(payload)
+    normalized = PricingDimensionService(db).normalize_rate_book_payload(payload)
+    return service.create_rate_book(normalized)
 
 
 @router.get("/rate-books", response_model=RateBookListResponse)
@@ -742,9 +867,11 @@ def create_rate_book_version(
     rate_book_id: int,
     payload: RateBookPayload,
     principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
 ) -> RateBookWorkspace:
     _allow(principal, "charge.rate_books.versions.create")
-    return service.create_rate_book_version(rate_book_id, payload)
+    normalized = PricingDimensionService(db).normalize_rate_book_payload(payload)
+    return service.create_rate_book_version(rate_book_id, normalized)
 
 
 @router.post("/rate-books/{rate_book_id}/publish", response_model=RateBookWorkspace)
@@ -761,9 +888,11 @@ def update_rate_book_workspace(
     rate_book_id: int,
     payload: RateBookPayload,
     principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
 ) -> RateBookWorkspace:
     _allow(principal, "charge.rate_books.workspace.update")
-    return service.update_rate_book_workspace(rate_book_id, payload)
+    normalized = PricingDimensionService(db).normalize_rate_book_payload(payload)
+    return service.update_rate_book_workspace(rate_book_id, normalized)
 
 
 @router.post("/calculation-templates", response_model=CalculationTemplate, status_code=201)
@@ -876,7 +1005,9 @@ def create_contract(
 def list_contracts(
     contract_role: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    company_id: int | None = Query(default=None),
     customer_id: int | None = Query(default=None),
+    vendor_id: int | None = Query(default=None),
     forwarder_id: int | None = Query(default=None),
     carrier_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
@@ -887,7 +1018,9 @@ def list_contracts(
     return service.list_contracts(
         contract_role=contract_role,
         status_filter=status_filter,
+        company_id=company_id,
         customer_id=customer_id,
+        vendor_id=vendor_id,
         forwarder_id=forwarder_id,
         carrier_id=carrier_id,
         limit=limit,
@@ -899,9 +1032,11 @@ def list_contracts(
 def create_quote_request(
     payload: QuoteRequestCreate,
     principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
 ) -> QuoteRequest:
     _allow(principal, "charge.quote_requests.create", _scope_from_payload(payload))
-    return service.create_quote_request(payload)
+    normalized = PricingDimensionService(db).normalize_quote_payload(payload)
+    return service.create_quote_request(normalized)
 
 
 @router.post("/quote-requests/{quote_request_id}/offers", response_model=QuoteOffer, status_code=201)
@@ -946,9 +1081,13 @@ def withdraw_quote_offer(
 @router.get("/quote-requests", response_model=QuoteRequestListResponse)
 def list_quote_requests(
     status_filter: str | None = Query(default=None, alias="status"),
+    request_number: str | None = Query(default=None),
     mode: str | None = Query(default=None),
+    company_id: int | None = Query(default=None),
     customer_id: int | None = Query(default=None),
+    vendor_id: int | None = Query(default=None),
     forwarder_id: int | None = Query(default=None),
+    carrier_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(require_bearer_principal),
@@ -956,12 +1095,25 @@ def list_quote_requests(
     _allow(principal, "charge.quote_requests.list")
     return service.list_quote_requests(
         status_filter=status_filter,
+        request_number=request_number,
         mode=mode,
+        company_id=company_id,
         customer_id=customer_id,
+        vendor_id=vendor_id,
         forwarder_id=forwarder_id,
+        carrier_id=carrier_id,
         limit=limit,
         offset=offset,
     )
+
+
+@router.delete("/quote-requests/{quote_request_id}", response_model=QuoteRequest)
+def delete_quote_request(
+    quote_request_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> QuoteRequest:
+    _allow(principal, "charge.quote_requests.delete")
+    return service.delete_quote_request(quote_request_id)
 
 
 @router.get("/quote-requests/{quote_request_id}/workspace", response_model=QuoteRequestWorkspace)
@@ -978,9 +1130,14 @@ def update_quote_request_workspace(
     quote_request_id: int,
     payload: QuoteRequestWorkspaceUpdate,
     principal: Principal = Depends(require_bearer_principal),
+    db: Session = Depends(get_db),
 ) -> QuoteRequestWorkspace:
     _allow(principal, "charge.quote_requests.workspace.update", _scope_from_payload(payload))
-    return service.update_quote_request_workspace(quote_request_id, payload)
+    normalized = PricingDimensionService(db).normalize_quote_payload(
+        payload,
+        quote_request_id=quote_request_id,
+    )
+    return service.update_quote_request_workspace(quote_request_id, normalized)
 
 
 @router.post(
@@ -1179,6 +1336,15 @@ def list_invoices(
         limit=limit,
         offset=offset,
     )
+
+
+@router.delete("/invoices/{invoice_id}", response_model=ChargeInvoice)
+def delete_invoice(
+    invoice_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeInvoice:
+    _allow(principal, "charge.invoices.delete")
+    return service.delete_invoice(invoice_id)
 
 
 @router.get("/invoices/{invoice_id}/workspace", response_model=ChargeInvoiceWorkspace)

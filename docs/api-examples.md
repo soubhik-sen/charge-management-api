@@ -206,6 +206,8 @@ The result is side-effect free. It returns source and target amounts, calculatio
 
 Create an effective-dated rate book. Overlapping rows are allowed; the engine selects one winner by applicability, specificity, priority, and scale floor.
 
+For caller-specific fields, first define a canonical pricing dimension and a per-caller mapping profile, then use `dimension_codes` on the book and `dimension_values` on its rows. See [Caller attribute mapping](caller-attribute-mapping.md) for complete requests and matching rules. The standard fields in this example remain valid without a mapping profile.
+
 ```bash
 curl -sS -X POST "$BASE_URL/rate-books" \
   -H "Authorization: Bearer $TOKEN" \
@@ -281,15 +283,32 @@ curl -sS -X POST "$BASE_URL/quote-requests" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
+    "request_number": "ROAD-QUOTE-001",
+    "caller_system_code": "TRANSPORT_COCKPIT",
+    "caller_schema_version": "1",
     "company_id": 10,
     "customer_id": 20,
     "origin_code": "ESBCN",
     "destination_code": "USNYC",
     "mode": "OCEAN",
+    "source_object_type": "SHIPMENT",
+    "source_object_id": "SHIPMENT-10042",
     "container_count": "2",
     "chargeable_weight": "18000",
     "requested_service_date": "2026-08-15",
-    "currency": "USD"
+    "currency": "USD",
+    "calculation_inputs": {
+      "DISTANCE_KM": "620"
+    },
+    "component_calculation_inputs": {
+      "BASE_FREIGHT": {
+        "BOOKING_FACTOR": "1"
+      }
+    },
+    "date_values": [{
+      "date_type": "DOCUMENT_DATE",
+      "date_value": "2026-08-10"
+    }]
   }'
 
 QUOTE_ID=replace_with_returned_quote_id
@@ -300,9 +319,64 @@ curl -sS -X PUT "$BASE_URL/quote-requests/$QUOTE_ID/workspace" \
 
 curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
   "$BASE_URL/quote-requests/$QUOTE_ID/rate"
+
+# Resume an integration request without scanning paginated results.
+curl -sS -G -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "request_number=ROAD-QUOTE-001" \
+  "$BASE_URL/quote-requests"
+
+# Delete an unawarded test quote and its offers/options.
+curl -sS -X DELETE -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/quote-requests/$QUOTE_ID"
 ```
 
-The final response contains one option line for `BASE_FREIGHT` with amount `5000.00`.
+The final response contains one option line for `BASE_FREIGHT` with amount `5000.00`. Each generated line records the exact source contract plus the selected direct contract line or template route, rate book/row, and calculation template/step when applicable.
+
+`calculation_inputs` are global factor values. A key under `component_calculation_inputs` takes precedence for that component. `date_values` contains typed dates supplied by the caller; business-date profiles select among those values in configured order. `requested_service_date` remains the explicit pricing-date override when present. See the generated OpenAPI schema for the controlled `date_type` values, or import `examples/road-quote-request.json` in the Quotes workspace for a complete road example.
+
+Award an option, inspect approval readiness and provenance, then execute the document lifecycle:
+
+```bash
+QUOTE_OPTION_ID=replace_with_rated_option_id
+curl -sS -X POST "$BASE_URL/quote-requests/$QUOTE_ID/award" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"quote_option_id\": $QUOTE_OPTION_ID, \"execution_source_system\": \"ROUTEWISE\", \"execution_plan_id\": \"PLAN-A\", \"execution_route_id\": \"ROUTE-001\", \"execution_source_id\": \"plan:PLAN-A:route:ROUTE-001\", \"execution_request_number\": \"PLAN-A-ROUTE-001\"}"
+
+DOCUMENT_ID=replace_with_returned_charge_document_id
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/charge-documents/$DOCUMENT_ID/workspace"
+
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/charge-documents/$DOCUMENT_ID/approve"
+
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/charge-documents/$DOCUMENT_ID/post-export"
+
+curl -sS -X POST "$BASE_URL/charge-documents/$DOCUMENT_ID/reverse" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"Customer cancelled movement"}'
+```
+
+The award call is safe to retry with the same executable plan/route/request identity: it returns the existing charge document and commitment. A second route such as `ROUTE-002` may use the same customer, lane, equipment, service, and pricing date and still creates its own document. Reusing `PLAN-A` / `ROUTE-001` with a different `execution_request_number`, awarding a different option on an already-awarded request, or attempting to rank after award returns `409`.
+
+The workspace returns `approval_ready`, authoritative `approval_checks`, linked invoices/matches, and the awarded `source_quote_option`. Match each document line's `source_quote_option_line_id` to that option's lines to recover exact contract, rate-book row, and calculation-template provenance. The default export stores an idempotent `INTERNAL_LEDGER` JSON batch; an adopter must wire external delivery separately.
+
+Delete an incorrectly captured invoice while its linked charge document is still editable:
+
+```bash
+INVOICE_ID=replace_with_invoice_id
+curl -sS -X DELETE -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/invoices/$INVOICE_ID"
+```
+
+Delete an editable direct/manual charge document only after its invoices have been removed. Quote-derived documents and documents linked to downstream lifecycle records are retained for audit:
+
+```bash
+curl -sS -X DELETE -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/charge-documents/$DOCUMENT_ID"
+```
 
 To change published pricing, create a new draft version rather than mutating the published row:
 
@@ -353,6 +427,7 @@ curl -sS -X POST "$BASE_URL/calculation-templates" \
       \"charge_component_code\": \"BASE_FREIGHT\",
       \"relationship_role\": \"BOTH\",
       \"subtotal_key\": \"BASE_TRANSPORT\",
+      \"accumulate_result_in_subtotal\": true,
       \"rate_book_id\": $RATE_BOOK_ID
     }]
   }"
@@ -361,6 +436,30 @@ TEMPLATE_ID=replace_with_returned_template_id
 curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
   "$BASE_URL/calculation-templates/$TEMPLATE_ID/publish"
 ```
+
+The common template-based contract needs no component lines. Bind the published template at the header:
+
+```bash
+curl -sS -X POST "$BASE_URL/contracts" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"contract_number\": \"CUSTOMER-EU-STANDARD\",
+    \"contract_name\": \"Customer EU standard pricing\",
+    \"contract_role\": \"PAYEE\",
+    \"company_id\": 10,
+    \"customer_id\": 20,
+    \"currency\": \"USD\",
+    \"selection_priority\": 100,
+    \"default_calculation_template_id\": $TEMPLATE_ID,
+    \"template_routes\": [],
+    \"lines\": []
+  }"
+```
+
+When one contract must choose different templates for different conditions, add `template_routes`. A route contains applicability fields and `calculation_template_id`, but no charge component. The lowest route priority wins, then the most specific applicability; an unresolved tie returns `409`. Contract matching uses the same lowest-priority/most-specific rule and resolves at most one payer and one payee contract.
+
+For a later percentage step that reads `BASE_TRANSPORT` but must not increase that base for subsequent percentage steps, use the same `subtotal_key` with `"accumulate_result_in_subtotal": false`. The resulting line still contributes to its payer/payee commercial total. This differs from `"is_statistical": true`, which excludes the line from commercial totals and subtotal accumulation.
 
 ## Discover The Remaining API
 

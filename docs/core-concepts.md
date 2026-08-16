@@ -157,11 +157,13 @@ Create a separate `EU_DOCUMENTATION_2026` rate book for `DOCUMENTATION_FEE`. A c
 
 ### Row Schema
 
-`row_attribute_keys` is the controlled table schema shared by every row in a rate-book version. Supported optional columns are:
+`row_attribute_keys` is the controlled built-in table schema shared by every row in a rate-book version. Supported optional columns are:
 
 `origin_code`, `destination_code`, `mode`, `equipment_type`, `commodity_code`, `service_level`, `scale_from`, `scale_to`, `minimum_amount`, `maximum_amount`, `validity_from`, `validity_to`, `basis_override`, `charge_context_override`, `calculation_profile_id`, `allocation_profile_id`, and `priority`.
 
 Rate value, currency, component, and active state are core row fields and do not need to appear in `row_attribute_keys`. The API rejects row values outside the selected schema so a hidden stale value cannot affect matching unexpectedly. Legacy books with one component are inferred on read; new books must send `charge_component_code` explicitly.
+
+`dimension_codes` extends that schema with canonical custom pricing dimensions maintained by LedgerFlow. Each row stores its selected values in `dimension_values`; each quote carries its normalized values under the same canonical codes. Caller-specific field names never become rate-book columns directly. Use a caller mapping profile to translate each caller/schema contract into this shared vocabulary. See [Caller attribute mapping](caller-attribute-mapping.md) for the two supported calling modes and lifecycle rules.
 
 ### How To Use It
 
@@ -224,6 +226,7 @@ A step can define:
 - Payer/payee relationship role.
 - Optional rate book.
 - Optional subtotal key.
+- Whether the calculated result is added to that subtotal.
 - Statistical-only behavior.
 - Optional precondition key resolved from boolean-like quote context.
 
@@ -246,7 +249,7 @@ A step can define:
 
 Every step that pins a rate book must use the same charge component as that book. Draft templates may be edited; published and retired versions are immutable. Contract release and runtime rating accept published templates only.
 
-The built-in contract rater expands template steps in order, filters them by relationship role and precondition, resolves each step's rate book, and carries named subtotals into later percentage steps. Statistical steps remain visible for provenance but do not contribute to payer/payee totals. Every resulting option line records the source contract, rate-book version, and exact rate-book entry.
+The built-in contract rater expands template steps in order, filters them by relationship role and precondition, resolves each step's rate book, and carries named subtotals into later percentage steps. Multiple steps may share a subtotal key; each percentage step reads the subtotal's current accumulated amount. Set `accumulate_result_in_subtotal` to `false` when a commercial percentage line should read that base without changing it for later percentage steps. The flag defaults to `true`, so existing templates retain their behavior. Statistical steps are different: they remain visible for provenance but do not contribute to payer/payee totals or named subtotals. Every resulting option line records the source contract, rate-book version, and exact rate-book entry.
 
 ## Rate Contract
 
@@ -263,23 +266,26 @@ The names describe the line relationship in the charge model, not hardcoded acco
 
 - Party references and optional neutral scope IDs.
 - Currency and validity period.
-- Default rate book and calculation template.
-- Contract lines that narrow applicability by lane, mode, equipment, commodity, service level, or dates.
-- Optional line-level overrides for rate book, template, and allocation profile.
-- Optional line-level calculation-profile override.
-- Line number, active state, priority, charge context, and an independent validity window.
+- Contract selection priority. Lower numbers win before specificity is compared.
+- A default calculation template that runs once for every matching request.
+- Optional component-free template routes that select a different template by lane, mode, equipment, commodity, service level, charge context, or dates.
+- Legacy direct component lines for contracts that do not use calculation templates.
 
 ### Lifecycle And Use
 
 1. Create a draft with `POST /contracts`.
 2. Find it with `GET /contracts`.
 3. Inspect and edit it through `/contracts/{id}/workspace`.
-4. Add at least one contract line.
-5. Ensure a header or line references a rate book or calculation template.
+4. Select one published calculation template on the contract header. No contract rows are required for this common case.
+5. Add template routes only when conditions must select different templates. Use direct component lines only for legacy direct pricing.
 6. Release with `POST /contracts/{id}/release`.
-7. Released matching contracts become candidates during quote contract determination and rating.
+7. Released matching contracts are resolved independently for payer and payee roles.
 
-Contract header validity and line validity use the quote pricing date: `requested_service_date`, then quote `valid_from`, then the current date. A scoped contract value must equal the quote value; a missing quote value does not act as a wildcard. Empty contracts and contracts whose lines produce no applicable rate row do not create zero-value quote options.
+Released contracts are immutable so an awarded charge can always be traced to unchanged commercial terms. To revise an agreement, create and release a new contract/version rather than editing the released record.
+
+Contract validity and route validity use the quote pricing date: `requested_service_date`, then the resolved business date, quote `valid_from`, and finally the current date. A scoped contract value must equal the quote value; a missing quote value does not act as a wildcard. Rate-book rows remain responsible for price applicability and the template steps generate charge lines.
+
+Contract determination returns at most one payer and one payee contract. Candidates are ordered by the lowest `selection_priority`, then the highest number of matching party and applicability dimensions. If multiple best candidates remain equal, the API returns `409` rather than silently choosing one. The response retains payer/payee arrays for backward compatibility. Comparing different carriers is a separate sourcing workflow; a quote with one `carrier_id` cannot compare contracts belonging to other carriers.
 
 Use contracts for negotiated applicability and party context. Do not place customer-specific scope directly in a shared rate book unless that rate book is intentionally customer-specific.
 
@@ -411,8 +417,9 @@ A quote request is the demand or RFQ context to price. It can carry a caller-sup
 ### Lifecycle And Use
 
 1. Create a `DRAFT` with `POST /quote-requests`.
-2. Find it later with `GET /quote-requests`.
+2. Find it later with `GET /quote-requests`; integrations can use the exact, case-insensitive `request_number` query parameter instead of paging through results.
 3. Edit the draft through `PUT /quote-requests/{id}/workspace`.
+4. Permanently delete an unawarded request with `DELETE /quote-requests/{id}`. Its offers, options, and option lines are deleted with it. Awarded requests and requests linked to commitments or charge documents are retained as audit provenance.
 4. Submit it by changing status from `DRAFT` to `REQUESTED` through that workspace endpoint.
 5. Determine matching released contracts, submit provider offers, or rate from contracts.
 6. Rank generated options.
@@ -438,11 +445,15 @@ An option contains payer/payee totals, margin, service information, score, rank,
 
 Award creates a charge document and, when applicable, a quote commitment. `quotation_policy` controls whether quotation is required, optional, or disabled in favor of direct charge documents.
 
+Award is idempotent for the same quote option. Integrations that award executable routes should also send `execution_source_system`, `execution_plan_id`, `execution_route_id` (or `execution_source_id`), and `execution_request_number`. A safe retry of that same plan/route/request identity returns the original charge document and commitment. Reusing the executable route identity with a different request number returns `409`.
+
 ## Quote Commitment
 
 ### What It Is
 
 A quote commitment is the reusable awarded capacity and value that can later be consumed by execution objects such as bookings or shipments.
+
+Customer, lane, equipment type, service, and date are pricing and matching context. They are deliberately not a duplicate key: multiple routes can share that context and still create separate commitments and charge documents. When an award carries executable identity, LedgerFlow prevents duplicates by the normalized source-system plus accepted-plan plus route/source identity instead.
 
 It tracks committed, consumed, and remaining:
 
@@ -460,7 +471,7 @@ It tracks committed, consumed, and remaining:
 4. Reverse an incorrect/cancelled consumption with `POST /quote-commitment-consumptions/{id}/reverse`.
 5. Inspect consumption history through the quote request workspace.
 
-The API stores neutral source-object type/ID references; it does not prescribe the host application's booking or shipment schema.
+The API stores neutral source-object type/ID references; it does not prescribe the host application's booking or shipment schema. Every consume call must include `source_object_id` or `reference_number` as its idempotency identity. Repeating the same identity and values returns the existing consumption without reducing capacity again; reusing the identity with different values returns `409`.
 
 ## Charge Document And Charge Line
 
@@ -494,7 +505,9 @@ A charge line records one component amount and its audit context:
 7. Export with `POST /charge-documents/{id}/post-export`.
 8. Reverse an approved/exported document with `POST /charge-documents/{id}/reverse`.
 
-Quote-controlled lines remain tied to the awarded outcome. Direct-document lines can be replaced while the document remains editable and before downstream lifecycle locks apply. Child posting/allocation rows cannot be deleted independently; delete the root conceptual line instead.
+An editable direct/manual document can be permanently deleted with `DELETE /charge-documents/{id}`. Deletion is rejected for quote-controlled or derived documents and when invoices, matches, commitments, approvals, exports, or reversals exist. Quote-controlled lines remain tied to the awarded outcome. Direct-document lines can be replaced while the document remains editable and before downstream lifecycle locks apply. Child posting/allocation rows cannot be deleted independently; delete the root conceptual line instead.
+
+For a foreign-currency direct line, either set the line `currency` to the source currency and use `expected_amount` as the source amount, or keep the line in document currency and send both `source_currency` and `source_amount`. An exchange-rate date is required. Either let LedgerFlow resolve the maintained rate or send `exchange_rate`; when `fx_rate_id` is also supplied, its active source, pair, date, type, method, and effective rate must agree with the explicit rate. LedgerFlow rejects a target-currency line that names a different source currency without a separate source amount.
 
 ## Invoice And Matching
 
@@ -516,8 +529,9 @@ An invoice records actual supplier or customer charges against a charge document
 3. Inspect or correct it through `/invoices/{id}/workspace`.
 4. Run `POST /invoices/{id}/match`.
 5. Review per-component expected, invoice, variance amount, variance percentage, and status.
+6. If the invoice was captured in error, delete it with `DELETE /invoices/{id}` before the linked charge document is approved, exported, or reversed.
 
-Updating an invoice clears stale match results and returns it to `CAPTURED` so it can be matched again.
+Updating an invoice clears stale match results and returns it to `CAPTURED` so it can be matched again. Deleting an invoice removes only that invoice and its reconciliation results; the linked charge document is retained.
 
 ## Approval, Export, And Reversal
 

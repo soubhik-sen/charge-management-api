@@ -100,6 +100,38 @@ BusinessDateType = Literal[
 ]
 
 
+def _normalize_quote_component_inputs(
+    value: Any,
+) -> dict[str, dict[str, Any]]:
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("component_calculation_inputs must be an object keyed by component code")
+    normalized: dict[str, dict[str, Any]] = {}
+    for raw_key, raw_inputs in value.items():
+        key = str(raw_key).strip().upper()
+        if not key:
+            raise ValueError("component_calculation_inputs keys must be non-empty component codes")
+        if key in normalized and str(raw_key) != key:
+            raise ValueError(f"Duplicate component_calculation_inputs key after normalization: {raw_key}")
+        if raw_inputs in (None, ""):
+            normalized[key] = {}
+            continue
+        if not isinstance(raw_inputs, dict):
+            raise ValueError(f"component_calculation_inputs[{raw_key!r}] must be an object")
+        normalized[key] = dict(raw_inputs)
+    return normalized
+
+
+def _validate_quote_date_values(values: list["BusinessDateValue"] | None) -> list["BusinessDateValue"] | None:
+    if values is None:
+        return None
+    date_types = [item.date_type for item in values]
+    if len(date_types) != len(set(date_types)):
+        raise ValueError("date_values must contain at most one value for each date_type")
+    return values
+
+
 class ChargeComponent(ApiModel):
     id: int
     component_code: str
@@ -698,6 +730,78 @@ class FxRateResolution(ApiModel):
     inverse_applied: bool = False
 
 
+PricingDimensionDataType = Literal["STRING", "DECIMAL", "INTEGER", "BOOLEAN", "DATE"]
+
+
+class PricingDimensionPayload(ApiModel):
+    dimension_code: str
+    dimension_name: str
+    description: str | None = None
+    data_type: PricingDimensionDataType = "STRING"
+    allowed_values: list[str] = Field(default_factory=list)
+    case_sensitive: bool = False
+    is_active: bool = True
+
+
+class PricingDimension(PricingDimensionPayload):
+    id: int
+    built_in_field: str | None = None
+    is_system: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class PricingDimensionListResponse(ApiModel):
+    items: list[PricingDimension]
+    total: int
+    limit: int
+    offset: int
+
+
+class CallerAttributeMapping(ApiModel):
+    source_attribute: str
+    dimension_code: str
+    required: bool = False
+    default_value: Any | None = None
+    value_map: dict[str, Any] = Field(default_factory=dict)
+
+
+class CallerMappingProfilePayload(ApiModel):
+    profile_code: str
+    profile_name: str
+    caller_system_code: str
+    schema_version: str = "1"
+    description: str | None = None
+    mappings: list[CallerAttributeMapping] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class CallerMappingProfile(CallerMappingProfilePayload):
+    id: int
+    canonical_dimension_codes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class CallerMappingProfileListResponse(ApiModel):
+    items: list[CallerMappingProfile]
+    total: int
+    limit: int
+    offset: int
+
+
+class CallerMappingPreviewRequest(ApiModel):
+    caller_attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class CallerMappingPreviewResponse(ApiModel):
+    profile_code: str
+    caller_system_code: str
+    schema_version: str
+    dimension_values: dict[str, Any] = Field(default_factory=dict)
+    standard_fields: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChargeAllocationTargetInput(ApiModel):
     target_level: Literal["HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
     target_object_type: str
@@ -903,6 +1007,7 @@ class RateBookEntryPayload(ApiModel):
     equipment_type: str | None = None
     commodity_code: str | None = None
     service_level: str | None = None
+    dimension_values: dict[str, Any] = Field(default_factory=dict)
     scale_from: Decimal | None = None
     scale_to: Decimal | None = None
     minimum_amount: Decimal | None = None
@@ -943,6 +1048,13 @@ class RateBookPayload(ApiModel):
         description=(
             "Controlled applicability and override columns shared by every row in this "
             "rate-book version. Rate value, currency, component, and active state are core fields."
+        ),
+    )
+    dimension_codes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Canonical applicability dimensions shared by every row. Values are supplied "
+            "in each entry's dimension_values object."
         ),
     )
     description: str | None = None
@@ -1025,6 +1137,28 @@ class RateBookPayload(ApiModel):
                     )
         self.charge_component_code = component_code
         self.row_attribute_keys = normalized_keys
+        normalized_dimension_codes: list[str] = []
+        for raw_code in self.dimension_codes:
+            code = raw_code.strip().upper()
+            if not code:
+                raise ValueError("Rate-book dimension codes must not be blank")
+            if code not in normalized_dimension_codes:
+                normalized_dimension_codes.append(code)
+        selected_dimensions = set(normalized_dimension_codes)
+        for entry in self.entries:
+            normalized_values = {
+                str(raw_code).strip().upper(): value
+                for raw_code, value in entry.dimension_values.items()
+                if str(raw_code).strip()
+            }
+            outside_dimensions = sorted(set(normalized_values) - selected_dimensions)
+            if outside_dimensions:
+                raise ValueError(
+                    "Rate row contains dimension values outside dimension_codes: "
+                    + ", ".join(outside_dimensions)
+                )
+            entry.dimension_values = normalized_values
+        self.dimension_codes = normalized_dimension_codes
         return self
 
 
@@ -1039,6 +1173,7 @@ class RateBook(ApiModel):
     rate_book_name: str
     charge_component_code: str | None = None
     row_attribute_keys: list[RateBookRowAttributeKey] = Field(default_factory=list)
+    dimension_codes: list[str] = Field(default_factory=list)
     description: str | None = None
     currency: str = "USD"
     valid_from: date | None = None
@@ -1071,6 +1206,7 @@ class CalculationTemplateStepPayload(ApiModel):
     charge_component_code: str
     relationship_role: Literal["PAYER", "PAYEE", "BOTH"] = "BOTH"
     subtotal_key: str | None = None
+    accumulate_result_in_subtotal: bool = True
     is_statistical: bool = False
     precondition_key: str | None = None
     rate_book_id: int | None = None
@@ -1156,6 +1292,28 @@ class ContractLinePayload(ApiModel):
         return self
 
 
+class ContractTemplateRoutePayload(ApiModel):
+    route_number: int | None = Field(default=None, ge=1)
+    calculation_template_id: int
+    origin_code: str | None = None
+    destination_code: str | None = None
+    mode: str | None = None
+    equipment_type: str | None = None
+    commodity_code: str | None = None
+    service_level: str | None = None
+    charge_context: str | None = None
+    priority: int = 100
+    is_active: bool = True
+    valid_from: date | None = None
+    valid_to: date | None = None
+
+    @model_validator(mode="after")
+    def validate_validity(self) -> "ContractTemplateRoutePayload":
+        if self.valid_from is not None and self.valid_to is not None and self.valid_from > self.valid_to:
+            raise ValueError("valid_from must be less than or equal to valid_to")
+        return self
+
+
 class RateContractPayload(ApiModel):
     contract_number: str
     contract_name: str
@@ -1173,6 +1331,7 @@ class RateContractPayload(ApiModel):
     currency: str = "USD"
     valid_from: date | None = None
     valid_to: date | None = None
+    selection_priority: int = 100
     default_rate_book_id: int | None = None
     default_calculation_template_id: int | None = None
     margin_type: str | None = None
@@ -1180,6 +1339,7 @@ class RateContractPayload(ApiModel):
     minimum_margin_amount: Decimal | None = None
     minimum_margin_percent: Decimal | None = None
     external_reference: str | None = None
+    template_routes: list[ContractTemplateRoutePayload] = Field(default_factory=list)
     lines: list[ContractLinePayload] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -1194,9 +1354,15 @@ class ContractLine(ContractLinePayload):
     contract_id: int
 
 
+class ContractTemplateRoute(ContractTemplateRoutePayload):
+    id: int
+    contract_id: int
+
+
 class RateContract(RateContractPayload):
     id: int
     status: str = "DRAFT"
+    template_routes: list[ContractTemplateRoute] = Field(default_factory=list)
     lines: list[ContractLine] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -1232,6 +1398,7 @@ class RateContractUpdate(ApiModel):
     currency: str | None = None
     valid_from: date | None = None
     valid_to: date | None = None
+    selection_priority: int | None = None
     default_rate_book_id: int | None = None
     default_calculation_template_id: int | None = None
     margin_type: str | None = None
@@ -1239,6 +1406,7 @@ class RateContractUpdate(ApiModel):
     minimum_margin_amount: Decimal | None = None
     minimum_margin_percent: Decimal | None = None
     external_reference: str | None = None
+    template_routes: list[ContractTemplateRoutePayload] | None = None
     lines: list[ContractLinePayload] | None = None
 
 
@@ -1246,6 +1414,11 @@ class QuoteRequestCreate(ApiModel):
     request_number: str | None = None
     source_object_type: str = "MANUAL"
     source_object_id: str | None = None
+    caller_system_code: str | None = None
+    caller_schema_version: str | None = None
+    caller_mapping_profile_code: str | None = None
+    caller_attributes: dict[str, Any] = Field(default_factory=dict)
+    dimension_values: dict[str, Any] = Field(default_factory=dict)
     company_id: int | None = None
     customer_id: int | None = None
     vendor_id: int | None = None
@@ -1258,12 +1431,12 @@ class QuoteRequestCreate(ApiModel):
     commodity_code: str | None = None
     service_level: str | None = None
     currency: str = "USD"
-    quantity: Decimal = Decimal("1")
-    gross_weight: Decimal | None = None
-    chargeable_weight: Decimal | None = None
-    gross_volume_cbm: Decimal | None = None
-    container_count: Decimal | None = None
-    package_count: Decimal | None = None
+    quantity: Decimal = Field(default=Decimal("1"), gt=0)
+    gross_weight: Decimal | None = Field(default=None, ge=0)
+    chargeable_weight: Decimal | None = Field(default=None, ge=0)
+    gross_volume_cbm: Decimal | None = Field(default=None, ge=0)
+    container_count: Decimal | None = Field(default=None, ge=0)
+    package_count: Decimal | None = Field(default=None, ge=0)
     package_type: str | None = None
     requested_service_date: date | None = None
     valid_from: date | None = None
@@ -1272,6 +1445,21 @@ class QuoteRequestCreate(ApiModel):
     margin_rules: dict[str, Any] = Field(default_factory=dict)
     charge_context: str | None = "TRANSPORT"
     context: dict[str, Any] = Field(default_factory=dict)
+    calculation_inputs: dict[str, Any] = Field(default_factory=dict)
+    component_calculation_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    date_values: list[BusinessDateValue] = Field(default_factory=list)
+
+    @field_validator("component_calculation_inputs", mode="before")
+    @classmethod
+    def normalize_component_calculation_inputs(cls, value: Any) -> dict[str, dict[str, Any]]:
+        return _normalize_quote_component_inputs(value)
+
+    @model_validator(mode="after")
+    def validate_date_values(self) -> "QuoteRequestCreate":
+        _validate_quote_date_values(self.date_values)
+        if self.valid_from is not None and self.valid_to is not None and self.valid_from > self.valid_to:
+            raise ValueError("valid_from must be less than or equal to valid_to")
+        return self
 
 
 class QuoteRequestWorkspaceUpdate(ApiModel):
@@ -1279,6 +1467,11 @@ class QuoteRequestWorkspaceUpdate(ApiModel):
     status: str | None = None
     source_object_type: str | None = None
     source_object_id: str | None = None
+    caller_system_code: str | None = None
+    caller_schema_version: str | None = None
+    caller_mapping_profile_code: str | None = None
+    caller_attributes: dict[str, Any] | None = None
+    dimension_values: dict[str, Any] | None = None
     company_id: int | None = None
     customer_id: int | None = None
     vendor_id: int | None = None
@@ -1291,12 +1484,12 @@ class QuoteRequestWorkspaceUpdate(ApiModel):
     commodity_code: str | None = None
     service_level: str | None = None
     currency: str | None = None
-    quantity: Decimal | None = None
-    gross_weight: Decimal | None = None
-    chargeable_weight: Decimal | None = None
-    gross_volume_cbm: Decimal | None = None
-    container_count: Decimal | None = None
-    package_count: Decimal | None = None
+    quantity: Decimal | None = Field(default=None, gt=0)
+    gross_weight: Decimal | None = Field(default=None, ge=0)
+    chargeable_weight: Decimal | None = Field(default=None, ge=0)
+    gross_volume_cbm: Decimal | None = Field(default=None, ge=0)
+    container_count: Decimal | None = Field(default=None, ge=0)
+    package_count: Decimal | None = Field(default=None, ge=0)
     package_type: str | None = None
     requested_service_date: date | None = None
     valid_from: date | None = None
@@ -1305,6 +1498,21 @@ class QuoteRequestWorkspaceUpdate(ApiModel):
     margin_rules: dict[str, Any] | None = None
     charge_context: str | None = None
     context: dict[str, Any] | None = None
+    calculation_inputs: dict[str, Any] | None = None
+    component_calculation_inputs: dict[str, dict[str, Any]] | None = None
+    date_values: list[BusinessDateValue] | None = None
+
+    @field_validator("component_calculation_inputs", mode="before")
+    @classmethod
+    def normalize_component_calculation_inputs(cls, value: Any) -> dict[str, dict[str, Any]] | None:
+        if value is None:
+            return None
+        return _normalize_quote_component_inputs(value)
+
+    @model_validator(mode="after")
+    def validate_date_values(self) -> "QuoteRequestWorkspaceUpdate":
+        _validate_quote_date_values(self.date_values)
+        return self
 
 
 class QuoteRequest(QuoteRequestCreate):
@@ -1394,8 +1602,12 @@ class QuoteOptionLine(ApiModel):
     pinned_allocation_snapshot_json: dict[str, Any] | None = None
     effective_allocation_snapshot_json: dict[str, Any] | None = None
     source_contract_id: int | None = None
+    source_contract_line_id: int | None = None
+    source_contract_template_route_id: int | None = None
     source_rate_book_id: int | None = None
     source_rate_book_entry_id: int | None = None
+    source_calculation_template_id: int | None = None
+    source_calculation_template_step_id: int | None = None
     is_statistical: bool = False
     is_margin_line: bool = False
 
@@ -1444,6 +1656,30 @@ class RankResponse(ApiModel):
 
 class QuoteAwardRequest(ApiModel):
     quote_option_id: int
+    execution_source_system: str | None = None
+    execution_plan_id: str | None = None
+    execution_route_id: str | None = None
+    execution_source_id: str | None = None
+    execution_request_number: str | None = None
+
+    @model_validator(mode="after")
+    def validate_execution_identity(self) -> "QuoteAwardRequest":
+        identity_values = (
+            self.execution_source_system,
+            self.execution_plan_id,
+            self.execution_route_id,
+            self.execution_source_id,
+            self.execution_request_number,
+        )
+        if not any(value and value.strip() for value in identity_values):
+            return self
+        if not (self.execution_source_system or "").strip():
+            raise ValueError("execution_source_system is required with execution identity")
+        if not (self.execution_plan_id or "").strip():
+            raise ValueError("execution_plan_id is required with execution identity")
+        if not ((self.execution_route_id or "").strip() or (self.execution_source_id or "").strip()):
+            raise ValueError("execution_route_id or execution_source_id is required")
+        return self
 
 
 class ChargeTargetReferenceSelection(ApiModel):
@@ -1636,10 +1872,20 @@ class ChargeDocumentListResponse(ApiModel):
     offset: int
 
 
+class ChargeDocumentApprovalCheck(ApiModel):
+    code: str
+    label: str
+    passed: bool
+    detail: str | None = None
+
+
 class ChargeDocumentWorkspace(ApiModel):
     document: ChargeDocument
     invoices: list["ChargeInvoice"] = Field(default_factory=list)
     match_results: list["ChargeMatchResult"] = Field(default_factory=list)
+    source_quote_option: QuoteOption | None = None
+    approval_ready: bool = False
+    approval_checks: list[ChargeDocumentApprovalCheck] = Field(default_factory=list)
 
 
 class ChargeDocumentWorkspaceUpdate(ApiModel):
@@ -1670,6 +1916,12 @@ class QuoteCommitment(ApiModel):
     quote_request_id: int
     quote_option_id: int
     charge_document_id: int
+    execution_identity: str | None = None
+    execution_source_system: str | None = None
+    execution_plan_id: str | None = None
+    execution_route_id: str | None = None
+    execution_source_id: str | None = None
+    execution_request_number: str | None = None
     company_id: int | None = None
     customer_id: int | None = None
     vendor_id: int | None = None
@@ -1737,11 +1989,19 @@ class QuoteCommitmentConsumeRequest(ApiModel):
     source_object_type: str
     source_object_id: str | None = None
     reference_number: str | None = None
-    container_count: Decimal | None = None
-    package_count: Decimal | None = None
-    chargeable_weight: Decimal | None = None
-    quantity: Decimal | None = None
-    amount: Decimal | None = None
+    container_count: Decimal | None = Field(default=None, gt=0)
+    package_count: Decimal | None = Field(default=None, gt=0)
+    chargeable_weight: Decimal | None = Field(default=None, gt=0)
+    quantity: Decimal | None = Field(default=None, gt=0)
+    amount: Decimal | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_idempotency_identity(self) -> "QuoteCommitmentConsumeRequest":
+        if not self.source_object_type.strip():
+            raise ValueError("source_object_type must not be blank")
+        if not (self.source_object_id or "").strip() and not (self.reference_number or "").strip():
+            raise ValueError("source_object_id or reference_number is required for idempotent consumption")
+        return self
 
 
 class QuoteCommitmentConsumeResponse(ApiModel):

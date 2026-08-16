@@ -14,7 +14,7 @@ from app.main import app
 def main() -> int:
     target = PROJECT_ROOT / "app" / "contracts" / "charge-management-api.openapi.json"
     target.write_text(
-        json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n",
+        json.dumps(app.openapi(), indent=2) + "\n",
         encoding="utf-8",
     )
     print(target)

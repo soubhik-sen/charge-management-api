@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import unicodedata
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, DecimalException, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
-import unicodedata
 
 from fastapi import HTTPException, status
 
@@ -45,6 +46,7 @@ from app.domain.models import (
     ChargeComponentAliasPayload,
     ChargeComponentListResponse,
     ChargeComponentPayload,
+    ChargeDocumentApprovalCheck,
     ChargeDocument,
     ChargeDocumentCreate,
     ChargeDocumentListResponse,
@@ -67,6 +69,7 @@ from app.domain.models import (
     CalculationTemplateWorkspace,
     ContractDeterminationResponse,
     ContractLine,
+    ContractTemplateRoute,
     ContractWorkspace,
     FxRate,
     FxRateResolution,
@@ -1901,6 +1904,7 @@ class ChargeManagementService:
         row.rate_book_name = payload.rate_book_name
         row.charge_component_code = payload.charge_component_code
         row.row_attribute_keys = list(payload.row_attribute_keys)
+        row.dimension_codes = list(payload.dimension_codes)
         row.description = payload.description
         row.currency = payload.currency.strip().upper()
         row.valid_from = payload.valid_from
@@ -2248,8 +2252,14 @@ class ChargeManagementService:
         return self.get_calculation_template_workspace(calculation_template_id)
 
     def create_contract(self, payload: RateContractPayload) -> RateContract:
+        contract_number = payload.contract_number.strip().upper()
+        if not contract_number:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="contract_number must not be blank",
+            )
         if any(
-            row.contract_number.upper() == payload.contract_number.upper()
+            row.contract_number.strip().upper() == contract_number
             for row in self.repository.contracts.values()
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contract number already exists")
@@ -2266,16 +2276,30 @@ class ChargeManagementService:
             )
             for index, line in enumerate(payload.lines, start=1)
         ]
+        template_routes = [
+            self._contract_template_route_from_payload(
+                contract_id=contract_id,
+                route_payload=route,
+                default_route_number=index,
+            )
+            for index, route in enumerate(payload.template_routes, start=1)
+        ]
         self._validate_contract_line_numbers(lines)
+        self._validate_contract_template_route_numbers(template_routes)
         for line in lines:
             self._require_component(line.charge_component_code)
             if line.rate_book_id is not None:
                 self._require_rate_book(line.rate_book_id)
             if line.calculation_template_id is not None:
                 self._require_calculation_template(line.calculation_template_id)
+        for route in template_routes:
+            self._require_calculation_template(route.calculation_template_id)
         row = RateContract(
-            **payload.model_dump(exclude={"lines"}),
+            **payload.model_dump(exclude={"contract_number", "currency", "lines", "template_routes"}),
             id=contract_id,
+            contract_number=contract_number,
+            currency=self._currency(payload.currency),
+            template_routes=template_routes,
             lines=lines,
         )
         self.repository.contracts[row.id] = row
@@ -2286,7 +2310,9 @@ class ChargeManagementService:
         *,
         contract_role: str | None = None,
         status_filter: str | None = None,
+        company_id: int | None = None,
         customer_id: int | None = None,
+        vendor_id: int | None = None,
         forwarder_id: int | None = None,
         carrier_id: int | None = None,
         limit: int = 100,
@@ -2305,8 +2331,12 @@ class ChargeManagementService:
                 for row in rows
                 if row.status.upper() == status_filter.upper()
             ]
+        if company_id is not None:
+            rows = [row for row in rows if row.company_id == company_id]
         if customer_id is not None:
             rows = [row for row in rows if row.customer_id == customer_id]
+        if vendor_id is not None:
+            rows = [row for row in rows if row.vendor_id == vendor_id]
         if forwarder_id is not None:
             rows = [row for row in rows if row.forwarder_id == forwarder_id]
         if carrier_id is not None:
@@ -2337,9 +2367,25 @@ class ChargeManagementService:
         payload: RateContractUpdate,
     ) -> ContractWorkspace:
         contract = self._require_contract(contract_id)
+        if contract.status.upper() != "DRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Released contracts are immutable; create a new contract version instead.",
+            )
         updates = payload.model_dump(exclude_unset=True)
-        if payload.contract_number is not None and any(
-            other.id != contract.id and other.contract_number.upper() == payload.contract_number.upper()
+        next_contract_number = (
+            payload.contract_number.strip().upper()
+            if payload.contract_number is not None
+            else None
+        )
+        if payload.contract_number is not None and not next_contract_number:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="contract_number must not be blank",
+            )
+        if next_contract_number is not None and any(
+            other.id != contract.id
+            and other.contract_number.strip().upper() == next_contract_number
             for other in self.repository.contracts.values()
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contract number already exists")
@@ -2348,9 +2394,15 @@ class ChargeManagementService:
         if payload.default_calculation_template_id is not None:
             self._require_calculation_template(payload.default_calculation_template_id)
         line_payloads = updates.pop("lines", None)
+        route_payloads = updates.pop("template_routes", None)
         for key, value in updates.items():
             if key in {"contract_number", "currency", "status"} and value is not None:
                 value = str(value).strip().upper()
+            if key == "status" and value != "DRAFT":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Use the release endpoint to change a contract from DRAFT to RELEASED.",
+                )
             setattr(contract, key, value)
         if line_payloads is not None:
             next_lines = [
@@ -2369,6 +2421,19 @@ class ChargeManagementService:
                 if line.calculation_template_id is not None:
                     self._require_calculation_template(line.calculation_template_id)
             contract.lines = next_lines
+        if route_payloads is not None:
+            next_routes = [
+                self._contract_template_route_from_payload(
+                    contract_id=contract.id,
+                    route_payload=route,
+                    default_route_number=index,
+                )
+                for index, route in enumerate(payload.template_routes or [], start=1)
+            ]
+            self._validate_contract_template_route_numbers(next_routes)
+            for route in next_routes:
+                self._require_calculation_template(route.calculation_template_id)
+            contract.template_routes = next_routes
         if contract.valid_from is not None and contract.valid_to is not None and contract.valid_from > contract.valid_to:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -2379,22 +2444,28 @@ class ChargeManagementService:
 
     def release_contract(self, contract_id: int) -> RateContract:
         contract = self._require_contract(contract_id)
-        if not contract.lines:
+        if not contract.lines and not contract.template_routes and contract.default_calculation_template_id is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="At least one contract line is required before release.",
+                detail=(
+                    "A contract requires a default calculation template, a conditional template route, "
+                    "or a legacy direct component line before release."
+                ),
             )
-        has_rate_source = any(
-            line.rate_book_id is not None
-            or line.calculation_template_id is not None
-            or contract.default_rate_book_id is not None
-            or contract.default_calculation_template_id is not None
-            for line in contract.lines
+        has_rate_source = (
+            contract.default_calculation_template_id is not None
+            or bool(contract.template_routes)
+            or any(
+                line.rate_book_id is not None
+                or line.calculation_template_id is not None
+                or contract.default_rate_book_id is not None
+                for line in contract.lines
+            )
         )
         if not has_rate_source:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="At least one contract line must reference a rate book or calculation template before release.",
+                detail="The contract must reference a rate book or calculation template before release.",
             )
         rate_book_ids = {
             rate_book_id
@@ -2408,6 +2479,7 @@ class ChargeManagementService:
             template_id
             for template_id in (
                 [contract.default_calculation_template_id]
+                + [route.calculation_template_id for route in contract.template_routes]
                 + [line.calculation_template_id for line in contract.lines]
             )
             if template_id is not None
@@ -2447,17 +2519,46 @@ class ChargeManagementService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Quotation is disabled by charge management setup; create a direct charge document instead.",
             )
-        if payload.request_number and any(
-            row.request_number
-            and row.request_number.upper() == payload.request_number.upper()
-            for row in self.repository.quote_requests.values()
-        ):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote request number already exists")
+        request_number = (
+            payload.request_number.strip().upper()
+            if payload.request_number and payload.request_number.strip()
+            else None
+        )
+        existing = next(
+            (
+                row
+                for row in self.repository.quote_requests.values()
+                if request_number
+                and row.request_number
+                and row.request_number.strip().upper() == request_number
+            ),
+            None,
+        )
+        if existing is not None:
+            source_type = (payload.source_object_type or "MANUAL").strip().upper()
+            source_id = (payload.source_object_id or "").strip()
+            if (
+                source_id
+                and (existing.source_object_type or "MANUAL").strip().upper() == source_type
+                and (existing.source_object_id or "").strip() == source_id
+            ):
+                return existing
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "QUOTE_REQUEST_IDENTITY_CONFLICT",
+                    "message": "Quote request number already exists for another source identity.",
+                    "quote_request_id": existing.id,
+                    "request_number": existing.request_number,
+                    "source_object_type": existing.source_object_type,
+                    "source_object_id": existing.source_object_id,
+                },
+            )
         quote_request_id = self.repository.next_id("quote_request")
         row = QuoteRequest(
             **payload.model_dump(exclude={"request_number", "currency"}),
             id=quote_request_id,
-            request_number=(payload.request_number.strip().upper() if payload.request_number else f"Q-{quote_request_id:08d}"),
+            request_number=request_number or f"Q-{quote_request_id:08d}",
             currency=self._currency(payload.currency),
             quotation_policy_snapshot=self.repository.quotation_policy,  # type: ignore[arg-type]
         )
@@ -2539,21 +2640,38 @@ class ChargeManagementService:
         self,
         *,
         status_filter: str | None = None,
+        request_number: str | None = None,
         mode: str | None = None,
+        company_id: int | None = None,
         customer_id: int | None = None,
+        vendor_id: int | None = None,
         forwarder_id: int | None = None,
+        carrier_id: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> QuoteRequestListResponse:
         rows = list(self.repository.quote_requests.values())
+        if request_number:
+            normalized_request_number = request_number.strip().upper()
+            rows = [
+                row
+                for row in rows
+                if (row.request_number or "").strip().upper() == normalized_request_number
+            ]
         if status_filter:
             rows = [row for row in rows if row.status.upper() == status_filter.upper()]
         if mode:
             rows = [row for row in rows if (row.mode or "").upper() == mode.upper()]
+        if company_id is not None:
+            rows = [row for row in rows if row.company_id == company_id]
         if customer_id is not None:
             rows = [row for row in rows if row.customer_id == customer_id]
+        if vendor_id is not None:
+            rows = [row for row in rows if row.vendor_id == vendor_id]
         if forwarder_id is not None:
             rows = [row for row in rows if row.forwarder_id == forwarder_id]
+        if carrier_id is not None:
+            rows = [row for row in rows if row.carrier_id == carrier_id]
         rows.sort(key=lambda row: (row.created_at, row.id), reverse=True)
         safe_offset = max(int(offset), 0)
         safe_limit = min(max(int(limit), 1), 200)
@@ -2593,6 +2711,40 @@ class ChargeManagementService:
             charge_documents=documents,
         )
 
+    def delete_quote_request(self, quote_request_id: int) -> QuoteRequest:
+        quote = self._require_quote_request(quote_request_id)
+        has_commitments = any(
+            commitment.quote_request_id == quote.id
+            for commitment in self.repository.quote_commitments.values()
+        )
+        has_documents = any(
+            document.quote_request_id == quote.id
+            for document in self.repository.documents.values()
+        )
+        if (
+            quote.status.upper() == "AWARDED"
+            or quote.awarded_option_id is not None
+            or has_commitments
+            or has_documents
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Awarded quote requests cannot be deleted because their charge "
+                    "documents and commitments must retain quote provenance."
+                ),
+            )
+
+        deleted = quote.model_copy(deep=True)
+        for option_id, option in list(self.repository.quote_options.items()):
+            if option.quote_request_id == quote.id:
+                del self.repository.quote_options[option_id]
+        for offer_id, offer in list(self.repository.quote_offers.items()):
+            if offer.quote_request_id == quote.id:
+                del self.repository.quote_offers[offer_id]
+        self.repository.quote_requests.pop(quote.id, None)
+        return deleted
+
     def update_quote_request_workspace(
         self,
         quote_request_id: int,
@@ -2614,6 +2766,13 @@ class ChargeManagementService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Quote request cannot be updated after offers, rated options, commitments, or charge documents exist.",
             )
+        next_valid_from = payload.valid_from if "valid_from" in payload.model_fields_set else quote.valid_from
+        next_valid_to = payload.valid_to if "valid_to" in payload.model_fields_set else quote.valid_to
+        if next_valid_from is not None and next_valid_to is not None and next_valid_from > next_valid_to:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="valid_from must be less than or equal to valid_to",
+            )
         for field in payload.model_fields_set:
             value = getattr(payload, field)
             if field == "status":
@@ -2627,10 +2786,15 @@ class ChargeManagementService:
                 value = self._currency(str(value))
             if field == "request_number" and value is not None:
                 value = str(value).strip().upper()
+                if not value:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="request_number must not be blank",
+                    )
                 if any(
                     other.id != quote.id
                     and other.request_number
-                    and other.request_number.upper() == value
+                    and other.request_number.strip().upper() == value
                     for other in self.repository.quote_requests.values()
                 ):
                     raise HTTPException(
@@ -2727,6 +2891,11 @@ class ChargeManagementService:
 
     def rank_quote_request(self, quote_request_id: int) -> RankResponse:
         quote = self._require_quote_request(quote_request_id)
+        if quote.status.upper() == "AWARDED" or quote.awarded_option_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An awarded quote request cannot be ranked again.",
+            )
         options = self._quote_options_for_request(quote.id)
         if not options:
             options = self.rate_quote_request(quote_request_id).options
@@ -2752,6 +2921,59 @@ class ChargeManagementService:
         option = self._require_quote_option(payload.quote_option_id)
         if option.quote_request_id != quote.id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Option does not belong to quote")
+        execution = self._award_execution_identity(payload)
+        existing_execution = next(
+            (
+                row
+                for row in self.repository.quote_commitments.values()
+                if execution["execution_identity"] is not None
+                and row.execution_identity == execution["execution_identity"]
+            ),
+            None,
+        )
+        if existing_execution is not None:
+            existing_request = (existing_execution.execution_request_number or "").strip().upper()
+            requested_request = (execution["execution_request_number"] or "").strip().upper()
+            if existing_request and requested_request and existing_request != requested_request:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "EXECUTION_IDENTITY_CONFLICT",
+                        "message": "Executable route identity is already linked to a different request number.",
+                        "commitment_id": existing_execution.id,
+                        "charge_document_id": existing_execution.charge_document_id,
+                        "existing_request_number": existing_execution.execution_request_number,
+                    },
+                )
+            return self._award_response_for_commitment(existing_execution)
+        if quote.status.upper() == "AWARDED" or quote.awarded_option_id is not None:
+            if quote.awarded_option_id != option.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Quote request has already been awarded to another option.",
+                )
+            documents = [
+                row
+                for row in self.repository.documents.values()
+                if row.quote_request_id == quote.id and row.quote_option_id == option.id
+            ]
+            commitments = [
+                row
+                for row in self.repository.quote_commitments.values()
+                if row.quote_request_id == quote.id and row.quote_option_id == option.id
+            ]
+            if len(documents) != 1 or len(commitments) != 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Awarded quote provenance is incomplete or ambiguous.",
+                )
+            self._apply_execution_identity(commitments[0], execution)
+            return QuoteAwardResponse(
+                quote_request=quote,
+                awarded_option=option,
+                charge_document=documents[0],
+                quote_commitment=self._with_commitment_remaining(commitments[0]),
+            )
         if not self._quote_option_is_available(option):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2831,6 +3053,7 @@ class ChargeManagementService:
             quote=quote,
             option=option,
             document=document,
+            execution=execution,
         )
         return QuoteAwardResponse(
             quote_request=quote,
@@ -2865,6 +3088,44 @@ class ChargeManagementService:
         payload: QuoteCommitmentConsumeRequest,
     ) -> QuoteCommitmentConsumeResponse:
         commitment = self._require_quote_commitment(commitment_id)
+        source_object_type = payload.source_object_type.strip().upper()
+        source_object_id = (payload.source_object_id or "").strip() or None
+        reference_number = (payload.reference_number or "").strip() or None
+        existing_consumption = next(
+            (
+                row
+                for row in self.repository.quote_commitment_consumptions.values()
+                if row.commitment_id == commitment.id
+                and row.source_object_type.strip().upper() == source_object_type
+                and (
+                    row.source_object_id == source_object_id
+                    if source_object_id is not None
+                    else row.source_object_id is None and row.reference_number == reference_number
+                )
+            ),
+            None,
+        )
+        if existing_consumption is not None:
+            same_payload = (
+                existing_consumption.source_object_id == source_object_id
+                and existing_consumption.reference_number == reference_number
+                and all(
+                    getattr(existing_consumption, field) == getattr(payload, field)
+                    for field in ("container_count", "package_count", "chargeable_weight", "quantity")
+                )
+                and (payload.amount is None or existing_consumption.amount == money(payload.amount))
+            )
+            if existing_consumption.status == "ACTIVE" and same_payload:
+                return QuoteCommitmentConsumeResponse(
+                    commitment=self._with_commitment_remaining(commitment),
+                    consumption=existing_consumption,
+                )
+            detail = (
+                "A reversed consumption cannot be retried with the same source identity."
+                if existing_consumption.status == "REVERSED"
+                else "The consumption source identity has already been used with different values."
+            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
         if commitment.status != "ACTIVE":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Quote commitment is not active")
         if not self._payload_has_consumption(payload):
@@ -2886,9 +3147,9 @@ class ChargeManagementService:
         consumption = QuoteCommitmentConsumption(
             id=self.repository.next_id("quote_commitment_consumption"),
             commitment_id=commitment.id,
-            source_object_type=payload.source_object_type,
-            source_object_id=payload.source_object_id,
-            reference_number=payload.reference_number,
+            source_object_type=source_object_type,
+            source_object_id=source_object_id,
+            reference_number=reference_number,
             container_count=payload.container_count,
             package_count=payload.package_count,
             chargeable_weight=payload.chargeable_weight,
@@ -3030,6 +3291,18 @@ class ChargeManagementService:
             target_currency = self._currency(document.currency)
             declared_currency = self._currency(line_payload.currency or document.currency)
             source_currency = self._currency(line_payload.source_currency or declared_currency)
+            if (
+                source_currency != target_currency
+                and declared_currency == target_currency
+                and line_payload.source_amount is None
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"source_amount is required when converting {source_currency} "
+                        f"to {target_currency} for {line_payload.charge_component_code}."
+                    ),
+                )
             source_amount = (
                 money(line_payload.source_amount)
                 if line_payload.source_amount is not None
@@ -3069,6 +3342,17 @@ class ChargeManagementService:
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="exchange_rate must be positive.",
                         )
+                    if fx_rate_id is not None:
+                        self._validate_explicit_fx_rate(
+                            fx_rate_id=fx_rate_id,
+                            source_currency=source_currency,
+                            target_currency=target_currency,
+                            rate_date=exchange_rate_date,
+                            exchange_rate=exchange_rate,
+                            source_code=exchange_rate_source_code,
+                            rate_type=exchange_rate_type or "MID",
+                            conversion_method=exchange_rate_method or "DIRECT",
+                        )
                     expected_amount = money(source_amount * exchange_rate)
                 else:
                     fx_resolution = self._resolve_fx(
@@ -3107,6 +3391,11 @@ class ChargeManagementService:
                         "line currency must equal document currency when source_currency already "
                         "identifies the document currency."
                     ),
+                )
+            elif fx_rate_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="fx_rate_id is not allowed when source and target currency are equal.",
                 )
             if (
                 target_scope_mode == "SELECTED_TARGETS"
@@ -3258,7 +3547,20 @@ class ChargeManagementService:
             for result in self.repository.match_results.values()
             if result.charge_document_id == document.id
         ]
-        return ChargeDocumentWorkspace(document=document, invoices=invoices, match_results=matches)
+        source_quote_option = (
+            self.repository.quote_options.get(document.quote_option_id)
+            if document.quote_option_id is not None
+            else None
+        )
+        approval_checks = self._document_approval_checks(document)
+        return ChargeDocumentWorkspace(
+            document=document,
+            invoices=invoices,
+            match_results=matches,
+            source_quote_option=source_quote_option,
+            approval_ready=all(check.passed for check in approval_checks),
+            approval_checks=approval_checks,
+        )
 
     def delete_charge_document(self, charge_document_id: int) -> ChargeActionResponse:
         document = self._require_document(charge_document_id)
@@ -3349,6 +3651,12 @@ class ChargeManagementService:
 
     def create_invoice(self, payload: ChargeInvoiceCreate) -> ChargeInvoice:
         document = self._require_document(payload.charge_document_id)
+        invoice_number = payload.invoice_number.strip()
+        if not invoice_number:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="invoice_number must not be blank",
+            )
         invoice_currency = self._currency(payload.currency or document.currency)
         if invoice_currency != document.currency.upper():
             raise HTTPException(
@@ -3360,14 +3668,15 @@ class ChargeManagementService:
             )
         if any(
             row.charge_document_id == payload.charge_document_id
-            and row.invoice_number.upper() == payload.invoice_number.upper()
+            and row.invoice_number.strip().upper() == invoice_number.upper()
             for row in self.repository.invoices.values()
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice already exists")
-        total = money(sum((Decimal(str(line.get("amount", "0"))) for line in payload.lines), Decimal("0")))
+        total = self._invoice_total(payload.lines)
         invoice = ChargeInvoice(
-            **payload.model_dump(exclude={"currency"}),
+            **payload.model_dump(exclude={"currency", "invoice_number"}),
             id=self.repository.next_id("invoice"),
+            invoice_number=invoice_number,
             currency=invoice_currency,
             charge_document_number=document.document_number,
             charge_document_status=document.status,
@@ -3375,6 +3684,21 @@ class ChargeManagementService:
         )
         self.repository.invoices[invoice.id] = invoice
         return invoice
+
+    @staticmethod
+    def _invoice_total(lines: list[dict[str, Any]]) -> Decimal:
+        try:
+            return money(
+                sum(
+                    (Decimal(str(line.get("amount", "0"))) for line in lines),
+                    Decimal("0"),
+                )
+            )
+        except (DecimalException, ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Every invoice line amount must be numeric.",
+            ) from exc
 
     def list_invoices(
         self,
@@ -3430,6 +3754,24 @@ class ChargeManagementService:
             match_results=matches,
         )
 
+    def delete_invoice(self, invoice_id: int) -> ChargeInvoice:
+        invoice = self._require_invoice(invoice_id)
+        document = self._require_document(invoice.charge_document_id)
+        if document.status.upper() in CHARGE_DOCUMENT_LOCKED_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Invoice cannot be deleted after its charge document is "
+                    "approved, exported, or reversed."
+                ),
+            )
+        deleted = invoice.model_copy(deep=True)
+        for result_id, result in list(self.repository.match_results.items()):
+            if result.invoice_id == invoice.id:
+                del self.repository.match_results[result_id]
+        self.repository.invoices.pop(invoice.id, None)
+        return deleted
+
     def update_invoice_workspace(
         self,
         invoice_id: int,
@@ -3442,16 +3784,25 @@ class ChargeManagementService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Invoice cannot be updated after its charge document is approved, exported, or reversed.",
             )
-        next_number = payload.invoice_number or invoice.invoice_number
+        next_number = (
+            payload.invoice_number.strip()
+            if payload.invoice_number is not None
+            else invoice.invoice_number
+        )
+        if not next_number:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="invoice_number must not be blank",
+            )
         if any(
             row.id != invoice.id
             and row.charge_document_id == invoice.charge_document_id
-            and row.invoice_number.upper() == next_number.upper()
+            and row.invoice_number.strip().upper() == next_number.upper()
             for row in self.repository.invoices.values()
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice already exists")
         if payload.invoice_number is not None:
-            invoice.invoice_number = payload.invoice_number
+            invoice.invoice_number = next_number
         if payload.invoice_type is not None:
             invoice.invoice_type = payload.invoice_type
         if payload.invoice_date is not None:
@@ -3468,10 +3819,9 @@ class ChargeManagementService:
                 )
             invoice.currency = invoice_currency
         if payload.lines is not None:
+            next_total = self._invoice_total(payload.lines)
             invoice.lines = payload.lines
-            invoice.total_amount = money(
-                sum((Decimal(str(line.get("amount", "0"))) for line in invoice.lines), Decimal("0"))
-            )
+            invoice.total_amount = next_total
         for result_id, result in list(self.repository.match_results.items()):
             if result.invoice_id == invoice.id:
                 del self.repository.match_results[result_id]
@@ -3607,11 +3957,12 @@ class ChargeManagementService:
         quote: QuoteRequest,
         option: QuoteOption,
         document: ChargeDocument,
+        execution: dict[str, str | None],
     ) -> QuoteCommitment:
         for existing in self.repository.quote_commitments.values():
             if existing.quote_option_id == option.id:
+                self._apply_execution_identity(existing, execution)
                 return self._with_commitment_remaining(existing)
-        self._assert_no_overlapping_commitment(quote=quote, option=option)
         commitment_id = self.repository.next_id("quote_commitment")
         committed_amount = money(option.payee_total_amount or option.payer_total_amount)
         commitment = QuoteCommitment(
@@ -3620,6 +3971,7 @@ class ChargeManagementService:
             quote_request_id=quote.id,
             quote_option_id=option.id,
             charge_document_id=document.id,
+            **execution,
             company_id=quote.company_id,
             customer_id=quote.customer_id,
             vendor_id=quote.vendor_id,
@@ -3646,61 +3998,63 @@ class ChargeManagementService:
         self.repository.quote_commitments[commitment.id] = commitment
         return self._with_commitment_remaining(commitment)
 
-    def _assert_no_overlapping_commitment(
-        self,
-        *,
-        quote: QuoteRequest,
-        option: QuoteOption,
-    ) -> None:
-        target_valid_from = quote.valid_from or quote.requested_service_date or date.today()
-        target_valid_to = quote.valid_to or (quote.expires_at.date() if quote.expires_at else None)
-        for existing in self.repository.quote_commitments.values():
-            if existing.status != "ACTIVE" or existing.quote_option_id == option.id:
-                continue
-            if not self._same_commitment_scope(existing, quote):
-                continue
-            if not self._validity_overlaps(
-                existing.valid_from,
-                existing.valid_to,
-                target_valid_from,
-                target_valid_to,
-            ):
-                continue
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Active quote commitment already exists for the same commercial "
-                    f"scope and overlapping validity: {existing.commitment_number}"
-                ),
-            )
+    def _award_execution_identity(self, payload: QuoteAwardRequest) -> dict[str, str | None]:
+        source_system = (payload.execution_source_system or "").strip().upper() or None
+        plan_id = (payload.execution_plan_id or "").strip() or None
+        route_id = (payload.execution_route_id or "").strip() or None
+        source_id = (payload.execution_source_id or "").strip() or None
+        request_number = (payload.execution_request_number or "").strip().upper() or None
+        identity = None
+        if source_system and plan_id and (route_id or source_id):
+            raw = "\x1f".join((source_system, plan_id, route_id or source_id or ""))
+            identity = hashlib.sha256(raw.encode()).hexdigest()
+        return {
+            "execution_identity": identity,
+            "execution_source_system": source_system,
+            "execution_plan_id": plan_id,
+            "execution_route_id": route_id,
+            "execution_source_id": source_id,
+            "execution_request_number": request_number,
+        }
 
-    def _same_commitment_scope(
+    def _apply_execution_identity(
         self,
         commitment: QuoteCommitment,
-        quote: QuoteRequest,
-    ) -> bool:
-        for field in ("company_id", "customer_id", "vendor_id", "forwarder_id", "carrier_id"):
-            if getattr(commitment, field, None) != getattr(quote, field, None):
-                return False
-        for field in ("origin_code", "destination_code", "mode", "equipment_type", "commodity_code", "service_level", "package_type"):
-            left = getattr(commitment, field, None)
-            right = getattr(quote, field, None)
-            if (str(left).strip().upper() if left else None) != (str(right).strip().upper() if right else None):
-                return False
-        return True
+        execution: dict[str, str | None],
+    ) -> None:
+        if execution["execution_identity"] is None:
+            return
+        if commitment.execution_identity not in (None, execution["execution_identity"]):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "QUOTE_OPTION_EXECUTION_IDENTITY_CONFLICT",
+                    "message": "The awarded quote option is already linked to another executable route.",
+                    "commitment_id": commitment.id,
+                    "charge_document_id": commitment.charge_document_id,
+                },
+            )
+        for field, value in execution.items():
+            setattr(commitment, field, value)
 
-    def _validity_overlaps(
+    def _award_response_for_commitment(
         self,
-        start_a: date | None,
-        end_a: date | None,
-        start_b: date | None,
-        end_b: date | None,
-    ) -> bool:
-        left_start = start_a or date.min
-        left_end = end_a or date.max
-        right_start = start_b or date.min
-        right_end = end_b or date.max
-        return left_start <= right_end and right_start <= left_end
+        commitment: QuoteCommitment,
+    ) -> QuoteAwardResponse:
+        quote = self._require_quote_request(commitment.quote_request_id)
+        option = self._require_quote_option(commitment.quote_option_id)
+        document = self.repository.documents.get(commitment.charge_document_id)
+        if document is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Awarded executable-route provenance is incomplete.",
+            )
+        return QuoteAwardResponse(
+            quote_request=quote,
+            awarded_option=option,
+            charge_document=document,
+            quote_commitment=self._with_commitment_remaining(commitment),
+        )
 
     def _with_commitment_remaining(self, row: QuoteCommitment) -> QuoteCommitment:
         row.remaining_container_count = self._remaining(row.committed_container_count, row.consumed_container_count)
@@ -4062,46 +4416,58 @@ class ChargeManagementService:
         relationship_role: str,
     ) -> list[QuoteOptionLine]:
         lines: list[QuoteOptionLine] = []
-        pricing_date = self._quote_pricing_date(quote)
-        expanded_lines: list[tuple[ContractLine, CalculationTemplateStep | None]] = []
-        for contract_line in sorted(
-            contract.lines,
-            key=lambda item: (item.line_number if item.line_number is not None else 999999, item.priority, item.id),
-        ):
-            template_id = contract_line.calculation_template_id or contract.default_calculation_template_id
-            if template_id is None:
-                expanded_lines.append((contract_line, None))
-                continue
-            template = self._require_calculation_template(template_id)
-            if not template.is_active or template.status.upper() != "PUBLISHED":
-                continue
-            for step in sorted(template.steps, key=lambda item: (item.step_number, item.id)):
-                if step.relationship_role not in {"BOTH", relationship_role}:
+        expanded_lines: list[tuple[ContractLine, CalculationTemplateStep | None, int | None]] = []
+        selected_route = self._select_contract_template_route(contract, quote)
+        if contract.template_routes:
+            template_id = (
+                selected_route.calculation_template_id
+                if selected_route is not None
+                else contract.default_calculation_template_id
+            )
+            if template_id is not None:
+                anchor = self._contract_template_execution_anchor(contract, selected_route)
+                self._expand_contract_template(
+                    expanded_lines,
+                    contract=contract,
+                    anchor=anchor,
+                    template_id=template_id,
+                    relationship_role=relationship_role,
+                    quote=quote,
+                    source_route_id=selected_route.id if selected_route is not None else None,
+                )
+        elif contract.default_calculation_template_id is not None and not contract.lines:
+            self._expand_contract_template(
+                expanded_lines,
+                contract=contract,
+                anchor=self._contract_template_execution_anchor(contract, None),
+                template_id=contract.default_calculation_template_id,
+                relationship_role=relationship_role,
+                quote=quote,
+                source_route_id=None,
+            )
+        else:
+            for contract_line in sorted(
+                contract.lines,
+                key=lambda item: (item.line_number if item.line_number is not None else 999999, item.priority, item.id),
+            ):
+                template_id = contract_line.calculation_template_id or contract.default_calculation_template_id
+                if template_id is None:
+                    expanded_lines.append((contract_line, None, None))
                     continue
-                if step.precondition_key and not self._quote_precondition_is_true(
-                    quote,
-                    step.precondition_key,
-                ):
-                    continue
-                expanded_lines.append(
-                    (
-                        contract_line.model_copy(
-                            update={
-                                "charge_component_code": step.charge_component_code,
-                                "rate_book_id": (
-                                    step.rate_book_id
-                                    or contract_line.rate_book_id
-                                    or contract.default_rate_book_id
-                                ),
-                                "calculation_template_id": None,
-                            }
-                        ),
-                        step,
-                    )
+                self._expand_contract_template(
+                    expanded_lines,
+                    contract=contract,
+                    anchor=contract_line,
+                    template_id=template_id,
+                    relationship_role=relationship_role,
+                    quote=quote,
+                    source_route_id=None,
                 )
 
         subtotals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-        for contract_line, template_step in expanded_lines:
+        for contract_line, template_step, source_route_id in expanded_lines:
+            component = self._require_component(contract_line.charge_component_code)
+            pricing_date = self._quote_pricing_date(quote, component=component)
             if not contract_line.is_active or not self._date_is_valid(
                 contract_line.valid_from,
                 contract_line.valid_to,
@@ -4120,7 +4486,12 @@ class ChargeManagementService:
                 or not self._date_is_valid(rate_book.valid_from, rate_book.valid_to, pricing_date)
             ):
                 continue
-            entry = self._best_rate_entry(rate_book, contract_line, quote)
+            entry = self._best_rate_entry(
+                rate_book,
+                contract_line,
+                quote,
+                pricing_date=pricing_date,
+            )
             if entry is None:
                 continue
             entry_basis = self._rate_entry_basis(entry)
@@ -4140,7 +4511,6 @@ class ChargeManagementService:
                         ),
                     )
                 percentage_base_amount = subtotals[subtotal_key]
-            component = self._require_component(entry.charge_component_code)
             (
                 allocation_profile_id,
                 allocation_profile_version_id,
@@ -4244,14 +4614,119 @@ class ChargeManagementService:
                     pinned_allocation_snapshot_json=pinned_allocation_snapshot_json,
                     effective_allocation_snapshot_json=effective_allocation_snapshot_json,
                     source_contract_id=contract.id,
+                    source_contract_line_id=contract_line.id or None,
+                    source_contract_template_route_id=source_route_id,
                     source_rate_book_id=rate_book.id,
                     source_rate_book_entry_id=entry.id,
+                    source_calculation_template_id=template_step.template_id if template_step else None,
+                    source_calculation_template_step_id=template_step.id if template_step else None,
                     is_statistical=template_step.is_statistical if template_step else False,
                 )
             lines.append(line)
-            if template_step is not None and template_step.subtotal_key and not template_step.is_statistical:
+            if (
+                template_step is not None
+                and template_step.subtotal_key
+                and template_step.accumulate_result_in_subtotal
+                and not template_step.is_statistical
+            ):
                 subtotals[template_step.subtotal_key.strip().upper()] += amount
         return lines
+
+    def _expand_contract_template(
+        self,
+        expanded_lines: list[tuple[ContractLine, CalculationTemplateStep | None, int | None]],
+        *,
+        contract: RateContract,
+        anchor: ContractLine,
+        template_id: int,
+        relationship_role: str,
+        quote: QuoteRequest,
+        source_route_id: int | None,
+    ) -> None:
+        template = self._require_calculation_template(template_id)
+        if not template.is_active or template.status.upper() != "PUBLISHED":
+            return
+        for step in sorted(template.steps, key=lambda item: (item.step_number, item.id)):
+            if step.relationship_role not in {"BOTH", relationship_role}:
+                continue
+            if step.precondition_key and not self._quote_precondition_is_true(quote, step.precondition_key):
+                continue
+            expanded_lines.append(
+                (
+                    anchor.model_copy(
+                        update={
+                            "charge_component_code": step.charge_component_code,
+                            "rate_book_id": step.rate_book_id or anchor.rate_book_id or contract.default_rate_book_id,
+                            "calculation_template_id": None,
+                        }
+                    ),
+                    step,
+                    source_route_id,
+                )
+            )
+
+    @staticmethod
+    def _contract_template_execution_anchor(
+        contract: RateContract,
+        route: ContractTemplateRoute | None,
+    ) -> ContractLine:
+        return ContractLine(
+            id=0,
+            contract_id=contract.id,
+            charge_component_code="__TEMPLATE_ROUTE__",
+            line_number=route.route_number if route is not None else 1,
+            rate_book_id=contract.default_rate_book_id,
+            origin_code=route.origin_code if route is not None else None,
+            destination_code=route.destination_code if route is not None else None,
+            mode=route.mode if route is not None else None,
+            equipment_type=route.equipment_type if route is not None else None,
+            commodity_code=route.commodity_code if route is not None else None,
+            service_level=route.service_level if route is not None else None,
+            charge_context=route.charge_context if route is not None else None,
+            priority=route.priority if route is not None else contract.selection_priority,
+            is_active=route.is_active if route is not None else True,
+            valid_from=route.valid_from if route is not None else None,
+            valid_to=route.valid_to if route is not None else None,
+        )
+
+    def _select_contract_template_route(
+        self,
+        contract: RateContract,
+        quote: QuoteRequest,
+    ) -> ContractTemplateRoute | None:
+        if not contract.template_routes:
+            return None
+        pricing_date = self._quote_pricing_date(quote)
+        candidates = [
+            route
+            for route in contract.template_routes
+            if route.is_active
+            and self._date_is_valid(route.valid_from, route.valid_to, pricing_date)
+            and self._entry_matches_quote(route.model_dump(), quote)
+        ]
+        if not candidates:
+            return None
+        ranked = sorted(
+            candidates,
+            key=lambda route: (route.priority, -self._applicability_specificity(route.model_dump())),
+        )
+        best = ranked[0]
+        best_key = (best.priority, self._applicability_specificity(best.model_dump()))
+        tied = [
+            route
+            for route in ranked
+            if (route.priority, self._applicability_specificity(route.model_dump())) == best_key
+        ]
+        if len(tied) > 1:
+            route_numbers = ", ".join(str(route.route_number) for route in tied)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Contract {contract.contract_number} has ambiguous matching template routes: "
+                    f"{route_numbers}. Assign distinct priorities or applicability."
+                ),
+            )
+        return best
 
     def _quote_precondition_is_true(self, quote: QuoteRequest, key: str) -> bool:
         value = quote.context.get(key)
@@ -4339,11 +4814,45 @@ class ChargeManagementService:
         elif basis in {"PACKAGE", "QUANTITY"}:
             amount = rate_amount * max(dec(quote.package_count or quote.quantity), Decimal("1"))
         elif basis in {"DAY", "PER_DAY"}:
-            duration = quote.context.get("duration_days", quote.quantity)
+            duration = self._calculation_decimal(
+                quote.calculation_inputs.get(
+                    "DURATION_DAYS",
+                    quote.context.get("duration_days", quote.quantity),
+                )
+            )
             amount = rate_amount * max(dec(duration), Decimal("1"))
-        elif basis == "DISTANCE":
-            distance = quote.context.get("distance", quote.quantity)
+        elif basis in {"DISTANCE", "PER_KILOMETER"}:
+            distance = self._calculation_decimal(
+                quote.calculation_inputs.get(
+                    "DISTANCE_KM",
+                    quote.context.get("distance_km", quote.context.get("distance", quote.quantity)),
+                )
+            )
             amount = rate_amount * max(dec(distance), Decimal("1"))
+        elif basis in {"HOUR", "PER_HOUR"}:
+            duration = self._calculation_decimal(
+                quote.calculation_inputs.get(
+                    "DURATION_HOURS",
+                    quote.context.get("duration_hours", quote.quantity),
+                )
+            )
+            amount = rate_amount * max(dec(duration), Decimal("1"))
+        elif basis in {"STOP", "PER_STOP"}:
+            stops = self._calculation_decimal(
+                quote.calculation_inputs.get(
+                    "STOP_COUNT",
+                    quote.context.get("stop_count", quote.quantity),
+                )
+            )
+            amount = rate_amount * max(dec(stops), Decimal("1"))
+        elif basis in {"PALLET", "PER_PALLET"}:
+            pallets = self._calculation_decimal(
+                quote.calculation_inputs.get(
+                    "PALLET_COUNT",
+                    quote.context.get("pallet_count", quote.package_count or quote.quantity),
+                )
+            )
+            amount = rate_amount * max(dec(pallets), Decimal("1"))
         else:
             amount = rate_amount
         if entry.minimum_amount is not None:
@@ -4402,6 +4911,10 @@ class ChargeManagementService:
         result = self._evaluate_calculation_profile(
             version,
             rate_amount=entry.rate_amount if entry.rate_amount is not None else entry.rate_percent,
+            inputs=self._merged_quote_calculation_inputs(
+                quote,
+                component_code=component.component_code,
+            ),
             context=self._calculation_context_for_quote(quote, version.application_level),
         )
         return (
@@ -4576,6 +5089,20 @@ class ChargeManagementService:
                     return dec(value)
         return Decimal("0")
 
+    def _merged_quote_calculation_inputs(
+        self,
+        quote: QuoteRequest,
+        *,
+        component_code: str,
+    ) -> dict[str, Any]:
+        merged = dict(quote.calculation_inputs or {})
+        component_inputs = (quote.component_calculation_inputs or {}).get(
+            component_code.strip().upper(),
+            {},
+        )
+        merged.update(component_inputs or {})
+        return merged
+
     def _evaluate_calculation_profile(
         self,
         version: ChargeCalculationProfileVersion,
@@ -4672,7 +5199,13 @@ class ChargeManagementService:
             value = value.get("value")
         if value is None or str(value).strip() == "":
             return None
-        return Decimal(str(value))
+        try:
+            return Decimal(str(value))
+        except (DecimalException, ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Calculation input value must be numeric: {value!r}.",
+            ) from exc
 
     def _calculation_input_value(self, value: Any) -> Decimal | None:
         if value is None:
@@ -4733,7 +5266,7 @@ class ChargeManagementService:
 
     def _matching_contracts(self, quote: QuoteRequest, *, contract_role: str) -> list[RateContract]:
         pricing_date = self._quote_pricing_date(quote)
-        return [
+        candidates = [
             contract
             for contract in self.repository.contracts.values()
             if contract.contract_role == contract_role
@@ -4741,6 +5274,32 @@ class ChargeManagementService:
             and self._date_is_valid(contract.valid_from, contract.valid_to, pricing_date)
             and self._contract_matches_quote(contract, quote)
         ]
+        if not candidates:
+            return []
+        ranked = sorted(
+            candidates,
+            key=lambda contract: (
+                contract.selection_priority,
+                -self._contract_match_specificity(contract, quote),
+            ),
+        )
+        best = ranked[0]
+        best_key = (best.selection_priority, self._contract_match_specificity(best, quote))
+        tied = [
+            contract
+            for contract in ranked
+            if (contract.selection_priority, self._contract_match_specificity(contract, quote)) == best_key
+        ]
+        if len(tied) > 1:
+            contract_numbers = ", ".join(contract.contract_number for contract in tied)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Ambiguous {contract_role.lower()} contracts matched the quote: {contract_numbers}. "
+                    "Assign distinct selection priorities or more specific party/applicability scope."
+                ),
+            )
+        return [best]
 
     def _contract_matches_quote(self, contract: RateContract, quote: QuoteRequest) -> bool:
         for field in ("company_id", "customer_id", "vendor_id", "forwarder_id", "carrier_id"):
@@ -4749,11 +5308,58 @@ class ChargeManagementService:
             if expected is not None and expected != actual:
                 return False
         pricing_date = self._quote_pricing_date(quote)
+        if contract.template_routes:
+            return (
+                self._select_contract_template_route(contract, quote) is not None
+                or contract.default_calculation_template_id is not None
+            )
+        if not contract.lines:
+            return contract.default_calculation_template_id is not None
         return any(
             line.is_active
             and self._date_is_valid(line.valid_from, line.valid_to, pricing_date)
             and self._entry_matches_quote(line.model_dump(), quote)
             for line in contract.lines
+        )
+
+    def _contract_match_specificity(self, contract: RateContract, quote: QuoteRequest) -> int:
+        party_specificity = sum(
+            getattr(contract, field) is not None
+            for field in ("company_id", "customer_id", "vendor_id", "forwarder_id", "carrier_id")
+        )
+        if contract.template_routes:
+            route = self._select_contract_template_route(contract, quote)
+            route_specificity = (
+                self._applicability_specificity(route.model_dump()) if route is not None else 0
+            )
+            return party_specificity + route_specificity
+        pricing_date = self._quote_pricing_date(quote)
+        matching_lines = [
+            line
+            for line in contract.lines
+            if line.is_active
+            and self._date_is_valid(line.valid_from, line.valid_to, pricing_date)
+            and self._entry_matches_quote(line.model_dump(), quote)
+        ]
+        line_specificity = max(
+            (self._applicability_specificity(line.model_dump()) for line in matching_lines),
+            default=0,
+        )
+        return party_specificity + line_specificity
+
+    @staticmethod
+    def _applicability_specificity(row: dict[str, Any]) -> int:
+        return sum(
+            row.get(field) not in (None, "")
+            for field in (
+                "origin_code",
+                "destination_code",
+                "mode",
+                "equipment_type",
+                "commodity_code",
+                "service_level",
+                "charge_context",
+            )
         )
 
     def _entry_matches_quote(self, row: dict[str, Any], quote: QuoteRequest) -> bool:
@@ -4768,11 +5374,32 @@ class ChargeManagementService:
             or str(expected_context).upper() != quote.charge_context.upper()
         ):
             return False
+        expected_dimensions = dict(row.get("dimension_values") or {})
+        actual_dimensions = dict(quote.dimension_values or {})
+        for raw_code, expected in expected_dimensions.items():
+            code = str(raw_code).strip().upper()
+            if code not in actual_dimensions:
+                return False
+            actual = actual_dimensions[code]
+            if isinstance(expected, str) and isinstance(actual, str):
+                if expected.strip().upper() != actual.strip().upper():
+                    return False
+            elif expected != actual:
+                return False
         return True
 
-    @staticmethod
-    def _quote_pricing_date(quote: QuoteRequest) -> date:
-        return quote.requested_service_date or quote.valid_from or date.today()
+    def _quote_pricing_date(
+        self,
+        quote: QuoteRequest,
+        *,
+        component: ChargeComponent | None = None,
+    ) -> date:
+        if quote.requested_service_date is not None:
+            return quote.requested_service_date
+        resolved = self._resolve_quote_business_date(quote, component=component)
+        if resolved is not None:
+            return resolved
+        return quote.valid_from or date.today()
 
     @staticmethod
     def _date_is_valid(valid_from: date | None, valid_to: date | None, value: date) -> bool:
@@ -4783,8 +5410,10 @@ class ChargeManagementService:
         rate_book: RateBook,
         contract_line: ContractLine,
         quote: QuoteRequest,
+        *,
+        pricing_date: date | None = None,
     ) -> RateBookEntry | None:
-        pricing_date = self._quote_pricing_date(quote)
+        effective_pricing_date = pricing_date or self._quote_pricing_date(quote)
         scale_value = (
             dec(quote.chargeable_weight)
             or dec(quote.gross_weight)
@@ -4797,7 +5426,7 @@ class ChargeManagementService:
             for entry in rate_book.entries
             if entry.is_active
             and entry.charge_component_code == contract_line.charge_component_code
-            and self._date_is_valid(entry.validity_from, entry.validity_to, pricing_date)
+            and self._date_is_valid(entry.validity_from, entry.validity_to, effective_pricing_date)
             and (entry.scale_from is None or scale_value >= entry.scale_from)
             and (entry.scale_to is None or scale_value <= entry.scale_to)
             and self._entry_matches_quote(entry.model_dump(), quote)
@@ -5022,6 +5651,69 @@ class ChargeManagementService:
             )
         return result, allocation_snapshot
 
+    def _validate_explicit_fx_rate(
+        self,
+        *,
+        fx_rate_id: int,
+        source_currency: str,
+        target_currency: str,
+        rate_date: date,
+        exchange_rate: Decimal,
+        source_code: str | None,
+        rate_type: str,
+        conversion_method: str,
+    ) -> None:
+        rates: dict[int, FxRate] = getattr(self.repository, "_fx_rates", {})
+        sources: dict[int, FxRateSource] = getattr(self.repository, "_fx_sources", {})
+        fx_rate = rates.get(fx_rate_id)
+        if fx_rate is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="fx_rate_id was not found.")
+        source = sources.get(fx_rate.source_id)
+        if not fx_rate.is_active or source is None or not source.is_active:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="fx_rate_id is not active.")
+        direct_pair = (
+            fx_rate.source_currency.upper() == source_currency
+            and fx_rate.target_currency.upper() == target_currency
+        )
+        inverse_pair = (
+            fx_rate.source_currency.upper() == target_currency
+            and fx_rate.target_currency.upper() == source_currency
+        )
+        if not direct_pair and not inverse_pair:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="fx_rate_id currency pair does not match the line.",
+            )
+        if fx_rate.rate_date > rate_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="fx_rate_id is dated after exchange_rate_date.",
+            )
+        if source_code is not None and source.source_code.upper() != source_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="fx_rate_id source does not match exchange_rate_source_code.",
+            )
+        if (
+            fx_rate.rate_type.upper() != rate_type.upper()
+            or fx_rate.conversion_method.upper() != conversion_method.strip().upper()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="fx_rate_id type or conversion method does not match the line.",
+            )
+        stored_rate = dec(fx_rate.rate)
+        effective_rate = stored_rate if direct_pair else Decimal("1") / stored_rate
+        precision = Decimal("0.00000001")
+        if effective_rate.quantize(precision, rounding=ROUND_HALF_UP) != exchange_rate.quantize(
+            precision,
+            rounding=ROUND_HALF_UP,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="exchange_rate does not match fx_rate_id.",
+            )
+
     def _resolve_fx(
         self,
         payload: FxRateResolveRequest,
@@ -5132,6 +5824,17 @@ class ChargeManagementService:
                 entry.scale_from,
                 entry.scale_to,
             )
+        ) + sum(
+            code not in {
+                "ORIGIN_CODE",
+                "DESTINATION_CODE",
+                "TRANSPORT_MODE",
+                "EQUIPMENT_TYPE",
+                "COMMODITY_CODE",
+                "SERVICE_LEVEL",
+                "CHARGE_CONTEXT",
+            }
+            for code in entry.dimension_values
         )
 
     def _ranking_key(self, option: QuoteOption) -> tuple[int, Decimal, Decimal, int]:
@@ -5376,6 +6079,20 @@ class ChargeManagementService:
             allocation_profile_version_id=allocation_profile_version_id,
         )
 
+    def _contract_template_route_from_payload(
+        self,
+        *,
+        contract_id: int,
+        route_payload: Any,
+        default_route_number: int,
+    ) -> ContractTemplateRoute:
+        return ContractTemplateRoute(
+            **route_payload.model_dump(exclude={"route_number"}),
+            id=self.repository.next_id("contract_template_route"),
+            contract_id=contract_id,
+            route_number=route_payload.route_number or default_route_number,
+        )
+
     @staticmethod
     def _validate_contract_line_numbers(lines: list[ContractLine]) -> None:
         line_numbers = [line.line_number for line in lines]
@@ -5383,6 +6100,15 @@ class ChargeManagementService:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Contract line numbers must be unique within a contract",
+            )
+
+    @staticmethod
+    def _validate_contract_template_route_numbers(routes: list[ContractTemplateRoute]) -> None:
+        route_numbers = [route.route_number for route in routes]
+        if len(route_numbers) != len(set(route_numbers)):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Template route numbers must be unique within a contract",
             )
 
     def _resolve_effective_allocation(
@@ -5439,6 +6165,28 @@ class ChargeManagementService:
             str(key).strip().lower(): value
             for key, value in self._flatten_json_paths(context).items()
         }
+
+    def _quote_date_values(self, quote: QuoteRequest) -> dict[str, date]:
+        return {
+            str(item.date_type): item.date_value
+            for item in quote.date_values
+        }
+
+    def _quote_business_date_context(self, quote: QuoteRequest) -> dict[str, Any]:
+        context: dict[str, Any] = {}
+        if quote.valid_from is not None:
+            context["valid_from"] = quote.valid_from
+        if quote.valid_to is not None:
+            context["valid_to"] = quote.valid_to
+        context.update(self._flatten_json_paths(quote.context or {}))
+        return context
+
+    def _quote_shipment_scope(self, quote: QuoteRequest) -> str | None:
+        return {
+            "ROAD": "ROAD_SHIPMENT",
+            "AIR": "AIR_HOUSE",
+            "OCEAN": "OCEAN_HOUSE",
+        }.get((quote.mode or "").strip().upper())
 
     def _business_date_context(self, document: ChargeDocument, line_payload: Any) -> dict[str, Any]:
         context: dict[str, Any] = {}
@@ -5545,6 +6293,103 @@ class ChargeManagementService:
             if matches:
                 return sorted(matches, key=lambda row: (row.priority, row.id))[0]
         return None
+
+    def _resolve_business_date_profile_assignment_for_quote(
+        self,
+        quote: QuoteRequest,
+        *,
+        business_purpose: str = "EXCHANGE_RATE_DATE",
+    ) -> BusinessDateProfileAssignment | None:
+        shipment_scope = self._quote_shipment_scope(quote)
+        if shipment_scope is None:
+            return None
+        candidates: list[tuple[str, int | None]] = []
+        if quote.customer_id is not None:
+            candidates.append(("CUSTOMER", quote.customer_id))
+        if quote.company_id is not None:
+            candidates.append(("COMPANY", quote.company_id))
+        if quote.forwarder_id is not None:
+            candidates.append(("FORWARDER", quote.forwarder_id))
+        if quote.carrier_id is not None:
+            candidates.append(("CARRIER", quote.carrier_id))
+        if quote.vendor_id is not None:
+            candidates.append(("VENDOR", quote.vendor_id))
+        candidates.append(("GLOBAL", None))
+        for scope_type, scope_id in candidates:
+            matches = [
+                assignment
+                for assignment in self.repository.business_date_profile_assignments.values()
+                if assignment.is_active
+                and assignment.scope_type == scope_type
+                and assignment.scope_id == scope_id
+                and assignment.shipment_scope == shipment_scope
+                and assignment.business_purpose == business_purpose
+            ]
+            if matches:
+                return sorted(matches, key=lambda row: (row.priority, row.id))[0]
+        return None
+
+    def _default_quote_business_date_keys(self, quote: QuoteRequest) -> list[str]:
+        mode = (quote.mode or "").strip().upper()
+        if mode == "ROAD":
+            return [
+                "ROAD_ACTUAL_PICKUP_DATE",
+                "ROAD_PLANNED_PICKUP_DATE",
+                "CMR_ISSUE_DATE",
+                "DOCUMENT_DATE",
+            ]
+        if mode == "AIR":
+            return [
+                "ACTUAL_FLIGHT_DEPARTURE_DATE",
+                "ESTIMATED_FLIGHT_DEPARTURE_DATE",
+                "AWB_EXECUTION_DATE",
+                "DOCUMENT_DATE",
+            ]
+        if mode == "OCEAN":
+            return [
+                "SHIPPED_ON_BOARD_DATE",
+                "SHIPMENT_ACTUAL_DEPARTURE_DATE",
+                "SHIPMENT_PLANNED_DEPARTURE_DATE",
+                "DOCUMENT_DATE",
+            ]
+        return ["DOCUMENT_DATE", "MANUAL_LINE_DATE"]
+
+    def _resolve_quote_business_date(
+        self,
+        quote: QuoteRequest,
+        *,
+        component: ChargeComponent | None = None,
+    ) -> date | None:
+        context = self._quote_business_date_context(quote)
+        date_values = self._quote_date_values(quote)
+        candidate_keys: list[str] = []
+        if component is not None:
+            if (
+                component.business_date_policy_mode == "PROFILE_OVERRIDE"
+                and component.business_date_profile_id is not None
+            ):
+                profile = self._require_business_date_profile(component.business_date_profile_id)
+                version = self._require_published_business_date_profile_version(profile)
+                candidate_keys.extend(step.date_key for step in version.steps)
+            elif component.business_date_policy_mode == "INHERIT_PROFILE":
+                assignment = self._resolve_business_date_profile_assignment_for_quote(quote)
+                if assignment is not None:
+                    profile = self._require_business_date_profile(assignment.profile_id)
+                    version = self._require_published_business_date_profile_version(profile)
+                    candidate_keys.extend(step.date_key for step in version.steps)
+            else:
+                candidate_keys.extend(LEGACY_BASIS_TO_BUSINESS_KEYS.get(component.charge_date_basis, ()))
+        if not candidate_keys:
+            candidate_keys.extend(self._default_quote_business_date_keys(quote))
+        for candidate_key in candidate_keys:
+            resolved = self._resolve_business_date_value(
+                candidate_key,
+                context,
+                date_values=date_values,
+            )
+            if resolved is not None:
+                return resolved
+        return quote.valid_from
 
     def _resolve_business_date_date(
         self,
@@ -6368,6 +7213,34 @@ class ChargeManagementService:
             if blocker is not None:
                 return f"Charge document cannot be approved while {blocker.lower()}"
         return None
+
+    def _document_approval_checks(self, document: ChargeDocument) -> list[ChargeDocumentApprovalCheck]:
+        status_value = document.status.upper()
+        status_eligible = status_value not in {"DISPUTED", "EXPORTED", "REVERSED"}
+        status_detail = (
+            "Approval is idempotent for an already approved document."
+            if status_value == "APPROVED"
+            else (
+                f"Status {status_value} cannot be approved."
+                if not status_eligible
+                else f"Status {status_value} is eligible for approval."
+            )
+        )
+        processing_blocker = self._document_processing_blocker(document)
+        return [
+            ChargeDocumentApprovalCheck(
+                code="STATUS_ELIGIBLE",
+                label="Document status permits approval",
+                passed=status_eligible,
+                detail=status_detail,
+            ),
+            ChargeDocumentApprovalCheck(
+                code="LINE_PROCESSING_COMPLETE",
+                label="Calculations and allocations are complete",
+                passed=processing_blocker is None,
+                detail=processing_blocker or "No line has pending or failed processing.",
+            ),
+        ]
 
     def _require_invoice(self, invoice_id: int) -> ChargeInvoice:
         row = self.repository.invoices.get(invoice_id)

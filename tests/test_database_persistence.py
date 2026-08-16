@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import create_engine, event, update
+from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.charge_management import repository
+from app.db.base import Base
 from app.db.models import ChargeIdSequenceRow
 from app.db.session import SessionLocal
 from app.domain.fx_service import FxRateService
@@ -37,6 +39,35 @@ def test_next_id_recovers_when_persisted_sequence_trails_seeded_rows() -> None:
 
     assert next_profile_id == max(existing_ids) + 1
     assert next_profile_id not in existing_ids
+
+
+def test_fresh_repository_populates_manual_fx_source_cache_immediately(tmp_path) -> None:
+    database_path = tmp_path / "charge_management_fx_cache.sqlite"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    engine = create_engine(database_url)
+
+    @event.listens_for(engine, "connect")
+    def enable_sqlite_foreign_keys(connection, _connection_record) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    try:
+        with factory() as db:
+            fresh_repository = SqlAlchemyChargeRepository(db)
+
+            assert 1 in fresh_repository._fx_sources
+            assert fresh_repository._fx_sources[1].source_code == "MANUAL"
+            assert fresh_repository._fx_sources[1].source_name == "Manual Rate Maintenance"
+
+            fresh_repository.reset()
+
+            assert 1 in fresh_repository._fx_sources
+            assert fresh_repository._fx_sources[1].source_code == "MANUAL"
+            assert fresh_repository._fx_sources[1].source_name == "Manual Rate Maintenance"
+    finally:
+        engine.dispose()
 
 
 def test_master_data_survives_fresh_repository_and_service_instances() -> None:
@@ -193,6 +224,8 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
                     "step_number": 10,
                     "charge_component_code": "RESTART_COMPONENT",
                     "relationship_role": "BOTH",
+                    "subtotal_key": "RESTART_BASE",
+                    "accumulate_result_in_subtotal": False,
                     "rate_book_id": rate_book_id,
                 }
             ],
@@ -204,6 +237,28 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
         headers=AUTH,
     )
     assert published_template.status_code == 200, published_template.text
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": "RESTART_CONTRACT",
+            "contract_name": "Restart contract",
+            "contract_role": "PAYEE",
+            "customer_id": 20,
+            "selection_priority": 15,
+            "default_calculation_template_id": template.json()["id"],
+            "template_routes": [
+                {
+                    "route_number": 10,
+                    "calculation_template_id": template.json()["id"],
+                    "mode": "ROAD",
+                    "priority": 5,
+                }
+            ],
+            "lines": [],
+        },
+    )
+    assert contract.status_code == 201, contract.text
 
     # A fresh session and fresh services simulate process reconstruction: no
     # in-memory state from the API calls is available to these instances.
@@ -219,6 +274,7 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
         reloaded_template = domain_service.repository.calculation_templates[
             template.json()["id"]
         ]
+        reloaded_contract = domain_service.repository.contracts[contract.json()["id"]]
         reloaded_rate = FxRateService(db).get_rate(rate.json()["id"])
 
     assert reloaded_allocation.profile_name == "Restart Weight Allocation Updated"
@@ -246,5 +302,139 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
     assert reloaded_template.version_number == 1
     assert reloaded_template.lock_version == 2
     assert reloaded_template.steps[0].rate_book_id == rate_book_id
+    assert reloaded_template.steps[0].subtotal_key == "RESTART_BASE"
+    assert reloaded_template.steps[0].accumulate_result_in_subtotal is False
+    assert reloaded_contract.selection_priority == 15
+    assert reloaded_contract.lines == []
+    assert reloaded_contract.template_routes[0].route_number == 10
+    assert reloaded_contract.template_routes[0].calculation_template_id == template.json()["id"]
+    assert reloaded_contract.template_routes[0].mode == "ROAD"
     assert reloaded_rate.source_code == "RESTART_BANK"
     assert str(reloaded_rate.rate) == "0.8600000000"
+
+
+def test_quote_request_inputs_and_date_values_reload_from_database() -> None:
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "request_number": "Q-PERSIST-001",
+            "company_id": 10,
+            "customer_id": 20,
+            "mode": "ROAD",
+            "currency": "USD",
+            "calculation_inputs": {"DISTANCE_KM": "480", "STOP_COUNT": "3"},
+            "component_calculation_inputs": {
+                "road_toll": {"DISTANCE_KM": "500"},
+                "WAITING_TIME": {"DURATION_HOURS": "2.5"},
+            },
+            "date_values": [
+                {"date_type": "ROAD_ACTUAL_PICKUP_DATE", "date_value": "2026-07-21"},
+                {"date_type": "DOCUMENT_DATE", "date_value": "2026-07-20"},
+            ],
+        },
+    )
+    assert quote.status_code == 201, quote.text
+
+    with SessionLocal() as db:
+        reloaded_repository = SqlAlchemyChargeRepository(db)
+        reloaded_quote = reloaded_repository.quote_requests[quote.json()["id"]]
+
+    assert reloaded_quote.calculation_inputs == {
+        "DISTANCE_KM": "480",
+        "STOP_COUNT": "3",
+    }
+    assert reloaded_quote.component_calculation_inputs == {
+        "ROAD_TOLL": {"DISTANCE_KM": "500"},
+        "WAITING_TIME": {"DURATION_HOURS": "2.5"},
+    }
+    assert [value.date_type for value in reloaded_quote.date_values] == [
+        "ROAD_ACTUAL_PICKUP_DATE",
+        "DOCUMENT_DATE",
+    ]
+    assert [str(value.date_value) for value in reloaded_quote.date_values] == [
+        "2026-07-21",
+        "2026-07-20",
+    ]
+
+
+def test_invoice_delete_is_removed_from_database() -> None:
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT",
+            "source_object_id": "SHP-PERSIST-INVOICE-DELETE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+        },
+    )
+    assert document.status_code == 201, document.text
+    invoice = client.post(
+        "/api/v1/charge-management/invoices",
+        headers=AUTH,
+        json={
+            "charge_document_id": document.json()["id"],
+            "invoice_number": "INV-PERSIST-DELETE",
+            "invoice_type": "SUPPLIER",
+            "currency": "USD",
+            "lines": [],
+        },
+    )
+    assert invoice.status_code == 201, invoice.text
+    invoice_id = invoice.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/charge-management/invoices/{invoice_id}",
+        headers=AUTH,
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    with SessionLocal() as db:
+        reloaded_repository = SqlAlchemyChargeRepository(db)
+        assert invoice_id not in reloaded_repository.invoices
+
+
+def test_quote_delete_removes_complete_aggregate_from_database() -> None:
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "request_number": "Q-PERSIST-DELETE",
+            "company_id": 10,
+            "customer_id": 20,
+            "mode": "ROAD",
+            "currency": "USD",
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    quote_id = quote.json()["id"]
+    submitted = client.put(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/workspace",
+        headers=AUTH,
+        json={"status": "REQUESTED"},
+    )
+    assert submitted.status_code == 200, submitted.text
+    offer = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/offers",
+        headers=AUTH,
+        json={"offer_number": "OFF-PERSIST-DELETE", "amount": "500", "currency": "USD"},
+    )
+    assert offer.status_code == 201, offer.text
+    offer_id = offer.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/charge-management/quote-requests/{quote_id}",
+        headers=AUTH,
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    with SessionLocal() as db:
+        reloaded_repository = SqlAlchemyChargeRepository(db)
+        assert quote_id not in reloaded_repository.quote_requests
+        assert offer_id not in reloaded_repository.quote_offers
+        assert all(
+            option.quote_request_id != quote_id
+            for option in reloaded_repository.quote_options.values()
+        )

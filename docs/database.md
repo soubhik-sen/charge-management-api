@@ -43,6 +43,8 @@ erDiagram
 
 The diagram highlights major ownership relationships; inspect `app/db/models.py` and migrations for all optional cross-references and constraints.
 
+`charge_quote_commitment.execution_identity` is the unique executable-route key. It is derived from the source system, accepted plan, and route/source ID supplied at award time. Customer, lane, equipment, service, and validity remain reusable pricing context and are indexed/matched as appropriate, but do not prevent separate routes from creating separate commitments.
+
 ## Seed Data
 
 Migrations and repository initialization provide generic settings, common charge components, standard calculation and allocation profiles, business-date concepts, stable ID sequences, and a `MANUAL` FX source. Seed data is product-neutral and safe to extend through APIs or future migrations.
@@ -60,4 +62,4 @@ Migrations and repository initialization provide generic settings, common charge
 - Back up PostgreSQL and test restore procedures according to the deployment's recovery objectives.
 - Never treat local `.db` files as deployable artifacts; they are ignored by Git.
 
-The current schema head is `0021_version_rate_books`. Migrations `0017` through `0021` add quote-line FX/rate-entry provenance, business-date effectivity, allocation effectivity and missing-driver policy, business-date optimistic locking, and independently persisted rate-book versions. Run `alembic upgrade head` before deploying this application version.
+The current schema head is `0031_route_commitment_identity`. Recent migrations add versioned rate books and templates, caller calculation/date inputs, quote-line provenance, subtotal accumulation control, component-free contract template routes, deterministic contract selection priority, canonical caller-dimension mapping, and executable route identity on quote commitments. Run `alembic upgrade head` before deploying this application version.

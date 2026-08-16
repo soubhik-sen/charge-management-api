@@ -92,6 +92,993 @@
         }
       }
     },
+    "/api/v1/charge-management/pricing-dimensions": {
+      "get": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "List Pricing Dimensions",
+        "operationId": "list_pricing_dimensions_api_v1_charge_management_pricing_dimensions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "active_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active Only"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingDimensionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Create Pricing Dimension",
+        "operationId": "create_pricing_dimension_api_v1_charge_management_pricing_dimensions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingDimensionPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingDimension"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/pricing-dimensions/{dimension_id}": {
+      "put": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Update Pricing Dimension",
+        "operationId": "update_pricing_dimension_api_v1_charge_management_pricing_dimensions__dimension_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dimension_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Dimension Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingDimensionPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingDimension"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Deactivate Pricing Dimension",
+        "operationId": "deactivate_pricing_dimension_api_v1_charge_management_pricing_dimensions__dimension_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dimension_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Dimension Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingDimension"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/caller-mapping-profiles": {
+      "get": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "List Caller Mapping Profiles",
+        "operationId": "list_caller_mapping_profiles_api_v1_charge_management_caller_mapping_profiles_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "caller_system_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Caller System Code"
+            }
+          },
+          {
+            "name": "schema_version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Schema Version"
+            }
+          },
+          {
+            "name": "active_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active Only"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerMappingProfileListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Create Caller Mapping Profile",
+        "operationId": "create_caller_mapping_profile_api_v1_charge_management_caller_mapping_profiles_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallerMappingProfilePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerMappingProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/caller-mapping-profiles/{profile_id}": {
+      "put": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Update Caller Mapping Profile",
+        "operationId": "update_caller_mapping_profile_api_v1_charge_management_caller_mapping_profiles__profile_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallerMappingProfilePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerMappingProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Deactivate Caller Mapping Profile",
+        "operationId": "deactivate_caller_mapping_profile_api_v1_charge_management_caller_mapping_profiles__profile_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerMappingProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/caller-mapping-profiles/{profile_id}/preview": {
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Preview Caller Mapping Profile",
+        "operationId": "preview_caller_mapping_profile_api_v1_charge_management_caller_mapping_profiles__profile_id__preview_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallerMappingPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerMappingPreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/charge-management/calculations/preview": {
       "post": {
         "tags": [
@@ -6934,6 +7921,22 @@
             }
           },
           {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          },
+          {
             "name": "customer_id",
             "in": "query",
             "required": false,
@@ -6947,6 +7950,22 @@
                 }
               ],
               "title": "Customer Id"
+            }
+          },
+          {
+            "name": "vendor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vendor Id"
             }
           },
           {
@@ -7201,6 +8220,22 @@
             }
           },
           {
+            "name": "request_number",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Request Number"
+            }
+          },
+          {
             "name": "mode",
             "in": "query",
             "required": false,
@@ -7214,6 +8249,22 @@
                 }
               ],
               "title": "Mode"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
             }
           },
           {
@@ -7233,6 +8284,22 @@
             }
           },
           {
+            "name": "vendor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vendor Id"
+            }
+          },
+          {
             "name": "forwarder_id",
             "in": "query",
             "required": false,
@@ -7246,6 +8313,22 @@
                 }
               ],
               "title": "Forwarder Id"
+            }
+          },
+          {
+            "name": "carrier_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Carrier Id"
             }
           },
           {
@@ -7735,6 +8818,101 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuoteOfferWorkspace"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/quote-requests/{quote_request_id}": {
+      "delete": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Delete Quote Request",
+        "operationId": "delete_quote_request_api_v1_charge_management_quote_requests__quote_request_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "quote_request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Quote Request Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteRequest"
                 }
               }
             }
@@ -9870,6 +11048,101 @@
         }
       }
     },
+    "/api/v1/charge-management/invoices/{invoice_id}": {
+      "delete": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Delete Invoice",
+        "operationId": "delete_invoice_api_v1_charge_management_invoices__invoice_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "invoice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Invoice Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeInvoice"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/charge-management/invoices/{invoice_id}/workspace": {
       "get": {
         "tags": [
@@ -11590,6 +12863,11 @@
             ],
             "title": "Subtotal Key"
           },
+          "accumulate_result_in_subtotal": {
+            "type": "boolean",
+            "title": "Accumulate Result In Subtotal",
+            "default": true
+          },
           "is_statistical": {
             "type": "boolean",
             "title": "Is Statistical",
@@ -11689,6 +12967,11 @@
             ],
             "title": "Subtotal Key"
           },
+          "accumulate_result_in_subtotal": {
+            "type": "boolean",
+            "title": "Accumulate Result In Subtotal",
+            "default": true
+          },
           "is_statistical": {
             "type": "boolean",
             "title": "Is Statistical",
@@ -11749,6 +13032,242 @@
           "template"
         ],
         "title": "CalculationTemplateWorkspace"
+      },
+      "CallerAttributeMapping": {
+        "properties": {
+          "source_attribute": {
+            "type": "string",
+            "title": "Source Attribute"
+          },
+          "dimension_code": {
+            "type": "string",
+            "title": "Dimension Code"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          },
+          "default_value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "value_map": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Value Map"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_attribute",
+          "dimension_code"
+        ],
+        "title": "CallerAttributeMapping"
+      },
+      "CallerMappingPreviewRequest": {
+        "properties": {
+          "caller_attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Caller Attributes"
+          }
+        },
+        "type": "object",
+        "title": "CallerMappingPreviewRequest"
+      },
+      "CallerMappingPreviewResponse": {
+        "properties": {
+          "profile_code": {
+            "type": "string",
+            "title": "Profile Code"
+          },
+          "caller_system_code": {
+            "type": "string",
+            "title": "Caller System Code"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "dimension_values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimension Values"
+          },
+          "standard_fields": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Standard Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_code",
+          "caller_system_code",
+          "schema_version"
+        ],
+        "title": "CallerMappingPreviewResponse"
+      },
+      "CallerMappingProfile": {
+        "properties": {
+          "profile_code": {
+            "type": "string",
+            "title": "Profile Code"
+          },
+          "profile_name": {
+            "type": "string",
+            "title": "Profile Name"
+          },
+          "caller_system_code": {
+            "type": "string",
+            "title": "Caller System Code"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "default": "1"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/CallerAttributeMapping"
+            },
+            "type": "array",
+            "title": "Mappings"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "canonical_dimension_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Canonical Dimension Codes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_code",
+          "profile_name",
+          "caller_system_code",
+          "id"
+        ],
+        "title": "CallerMappingProfile"
+      },
+      "CallerMappingProfileListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CallerMappingProfile"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "CallerMappingProfileListResponse"
+      },
+      "CallerMappingProfilePayload": {
+        "properties": {
+          "profile_code": {
+            "type": "string",
+            "title": "Profile Code"
+          },
+          "profile_name": {
+            "type": "string",
+            "title": "Profile Name"
+          },
+          "caller_system_code": {
+            "type": "string",
+            "title": "Caller System Code"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "default": "1"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/CallerAttributeMapping"
+            },
+            "type": "array",
+            "title": "Mappings"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_code",
+          "profile_name",
+          "caller_system_code"
+        ],
+        "title": "CallerMappingProfilePayload"
       },
       "ChargeActionResponse": {
         "properties": {
@@ -14445,6 +15964,40 @@
         ],
         "title": "ChargeDocument"
       },
+      "ChargeDocumentApprovalCheck": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "label",
+          "passed"
+        ],
+        "title": "ChargeDocumentApprovalCheck"
+      },
       "ChargeDocumentCreate": {
         "properties": {
           "document_number": {
@@ -15750,6 +17303,28 @@
             },
             "type": "array",
             "title": "Match Results"
+          },
+          "source_quote_option": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteOption"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approval_ready": {
+            "type": "boolean",
+            "title": "Approval Ready",
+            "default": false
+          },
+          "approval_checks": {
+            "items": {
+              "$ref": "#/components/schemas/ChargeDocumentApprovalCheck"
+            },
+            "type": "array",
+            "title": "Approval Checks"
           }
         },
         "type": "object",
@@ -17706,6 +19281,288 @@
         ],
         "title": "ContractLinePayload"
       },
+      "ContractTemplateRoute": {
+        "properties": {
+          "route_number": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Number"
+          },
+          "calculation_template_id": {
+            "type": "integer",
+            "title": "Calculation Template Id"
+          },
+          "origin_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Code"
+          },
+          "destination_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Code"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "equipment_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equipment Type"
+          },
+          "commodity_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commodity Code"
+          },
+          "service_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Level"
+          },
+          "charge_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Context"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 100
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "contract_id": {
+            "type": "integer",
+            "title": "Contract Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calculation_template_id",
+          "id",
+          "contract_id"
+        ],
+        "title": "ContractTemplateRoute"
+      },
+      "ContractTemplateRoutePayload": {
+        "properties": {
+          "route_number": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Number"
+          },
+          "calculation_template_id": {
+            "type": "integer",
+            "title": "Calculation Template Id"
+          },
+          "origin_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Code"
+          },
+          "destination_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Code"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "equipment_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equipment Type"
+          },
+          "commodity_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commodity Code"
+          },
+          "service_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Level"
+          },
+          "charge_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Context"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 100
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calculation_template_id"
+        ],
+        "title": "ContractTemplateRoutePayload"
+      },
       "ContractWorkspace": {
         "properties": {
           "contract": {
@@ -18225,11 +20082,244 @@
         ],
         "title": "InvoiceMatchResponse"
       },
+      "PricingDimension": {
+        "properties": {
+          "dimension_code": {
+            "type": "string",
+            "title": "Dimension Code"
+          },
+          "dimension_name": {
+            "type": "string",
+            "title": "Dimension Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "data_type": {
+            "type": "string",
+            "enum": [
+              "STRING",
+              "DECIMAL",
+              "INTEGER",
+              "BOOLEAN",
+              "DATE"
+            ],
+            "title": "Data Type",
+            "default": "STRING"
+          },
+          "allowed_values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Values"
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "title": "Case Sensitive",
+            "default": false
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "built_in_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Built In Field"
+          },
+          "is_system": {
+            "type": "boolean",
+            "title": "Is System",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dimension_code",
+          "dimension_name",
+          "id"
+        ],
+        "title": "PricingDimension"
+      },
+      "PricingDimensionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PricingDimension"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "PricingDimensionListResponse"
+      },
+      "PricingDimensionPayload": {
+        "properties": {
+          "dimension_code": {
+            "type": "string",
+            "title": "Dimension Code"
+          },
+          "dimension_name": {
+            "type": "string",
+            "title": "Dimension Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "data_type": {
+            "type": "string",
+            "enum": [
+              "STRING",
+              "DECIMAL",
+              "INTEGER",
+              "BOOLEAN",
+              "DATE"
+            ],
+            "title": "Data Type",
+            "default": "STRING"
+          },
+          "allowed_values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Values"
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "title": "Case Sensitive",
+            "default": false
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "dimension_code",
+          "dimension_name"
+        ],
+        "title": "PricingDimensionPayload"
+      },
       "QuoteAwardRequest": {
         "properties": {
           "quote_option_id": {
             "type": "integer",
             "title": "Quote Option Id"
+          },
+          "execution_source_system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Source System"
+          },
+          "execution_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Plan Id"
+          },
+          "execution_route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Route Id"
+          },
+          "execution_source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Source Id"
+          },
+          "execution_request_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Request Number"
           }
         },
         "type": "object",
@@ -18289,6 +20379,72 @@
           "charge_document_id": {
             "type": "integer",
             "title": "Charge Document Id"
+          },
+          "execution_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Identity"
+          },
+          "execution_source_system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Source System"
+          },
+          "execution_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Plan Id"
+          },
+          "execution_route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Route Id"
+          },
+          "execution_source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Source Id"
+          },
+          "execution_request_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Request Number"
           },
           "company_id": {
             "anyOf": [
@@ -18653,7 +20809,8 @@
           "container_count": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
@@ -18668,7 +20825,8 @@
           "package_count": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
@@ -18683,7 +20841,8 @@
           "chargeable_weight": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
@@ -18698,7 +20857,8 @@
           "quantity": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
@@ -18713,7 +20873,8 @@
           "amount": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
@@ -20061,6 +22222,28 @@
             ],
             "title": "Source Contract Id"
           },
+          "source_contract_line_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Contract Line Id"
+          },
+          "source_contract_template_route_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Contract Template Route Id"
+          },
           "source_rate_book_id": {
             "anyOf": [
               {
@@ -20082,6 +22265,28 @@
               }
             ],
             "title": "Source Rate Book Entry Id"
+          },
+          "source_calculation_template_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Calculation Template Id"
+          },
+          "source_calculation_template_step_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Calculation Template Step Id"
           },
           "is_statistical": {
             "type": "boolean",
@@ -20135,6 +22340,49 @@
               }
             ],
             "title": "Source Object Id"
+          },
+          "caller_system_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller System Code"
+          },
+          "caller_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Schema Version"
+          },
+          "caller_mapping_profile_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Mapping Profile Code"
+          },
+          "caller_attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Caller Attributes"
+          },
+          "dimension_values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimension Values"
           },
           "company_id": {
             "anyOf": [
@@ -20409,6 +22657,26 @@
             "type": "object",
             "title": "Context"
           },
+          "calculation_inputs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Calculation Inputs"
+          },
+          "component_calculation_inputs": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Component Calculation Inputs"
+          },
+          "date_values": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessDateValue"
+            },
+            "type": "array",
+            "title": "Date Values"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -20484,6 +22752,49 @@
               }
             ],
             "title": "Source Object Id"
+          },
+          "caller_system_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller System Code"
+          },
+          "caller_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Schema Version"
+          },
+          "caller_mapping_profile_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Mapping Profile Code"
+          },
+          "caller_attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Caller Attributes"
+          },
+          "dimension_values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimension Values"
           },
           "company_id": {
             "anyOf": [
@@ -20614,7 +22925,8 @@
           "quantity": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
@@ -20627,7 +22939,8 @@
           "gross_weight": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -20642,7 +22955,8 @@
           "chargeable_weight": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -20657,7 +22971,8 @@
           "gross_volume_cbm": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -20672,7 +22987,8 @@
           "container_count": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -20687,7 +23003,8 @@
           "package_count": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -20779,6 +23096,26 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Context"
+          },
+          "calculation_inputs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Calculation Inputs"
+          },
+          "component_calculation_inputs": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Component Calculation Inputs"
+          },
+          "date_values": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessDateValue"
+            },
+            "type": "array",
+            "title": "Date Values"
           }
         },
         "type": "object",
@@ -20900,6 +23237,63 @@
               }
             ],
             "title": "Source Object Id"
+          },
+          "caller_system_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller System Code"
+          },
+          "caller_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Schema Version"
+          },
+          "caller_mapping_profile_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Mapping Profile Code"
+          },
+          "caller_attributes": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Attributes"
+          },
+          "dimension_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dimension Values"
           },
           "company_id": {
             "anyOf": [
@@ -21036,7 +23430,8 @@
           "quantity": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "string",
@@ -21051,7 +23446,8 @@
           "gross_weight": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -21066,7 +23462,8 @@
           "chargeable_weight": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -21081,7 +23478,8 @@
           "gross_volume_cbm": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -21096,7 +23494,8 @@
           "container_count": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -21111,7 +23510,8 @@
           "package_count": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "string",
@@ -21216,6 +23616,47 @@
               }
             ],
             "title": "Context"
+          },
+          "calculation_inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Inputs"
+          },
+          "component_calculation_inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Calculation Inputs"
+          },
+          "date_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BusinessDateValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Values"
           }
         },
         "type": "object",
@@ -21292,6 +23733,13 @@
             },
             "type": "array",
             "title": "Row Attribute Keys"
+          },
+          "dimension_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dimension Codes"
           },
           "description": {
             "anyOf": [
@@ -21574,6 +24022,11 @@
               }
             ],
             "title": "Service Level"
+          },
+          "dimension_values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimension Values"
           },
           "scale_from": {
             "anyOf": [
@@ -21858,6 +24311,11 @@
             ],
             "title": "Service Level"
           },
+          "dimension_values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimension Values"
+          },
           "scale_from": {
             "anyOf": [
               {
@@ -22037,6 +24495,14 @@
             "type": "array",
             "title": "Row Attribute Keys",
             "description": "Controlled applicability and override columns shared by every row in this rate-book version. Rate value, currency, component, and active state are core fields."
+          },
+          "dimension_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dimension Codes",
+            "description": "Canonical applicability dimensions shared by every row. Values are supplied in each entry's dimension_values object."
           },
           "description": {
             "anyOf": [
@@ -22303,6 +24769,11 @@
             ],
             "title": "Valid To"
           },
+          "selection_priority": {
+            "type": "integer",
+            "title": "Selection Priority",
+            "default": 100
+          },
           "default_rate_book_id": {
             "anyOf": [
               {
@@ -22382,6 +24853,13 @@
               }
             ],
             "title": "External Reference"
+          },
+          "template_routes": {
+            "items": {
+              "$ref": "#/components/schemas/ContractTemplateRoute"
+            },
+            "type": "array",
+            "title": "Template Routes"
           },
           "lines": {
             "items": {
@@ -22607,6 +25085,11 @@
             ],
             "title": "Valid To"
           },
+          "selection_priority": {
+            "type": "integer",
+            "title": "Selection Priority",
+            "default": 100
+          },
           "default_rate_book_id": {
             "anyOf": [
               {
@@ -22695,6 +25178,13 @@
               }
             ],
             "title": "External Reference"
+          },
+          "template_routes": {
+            "items": {
+              "$ref": "#/components/schemas/ContractTemplateRoutePayload"
+            },
+            "type": "array",
+            "title": "Template Routes"
           },
           "lines": {
             "items": {
@@ -22907,6 +25397,17 @@
             ],
             "title": "Valid To"
           },
+          "selection_priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Priority"
+          },
           "default_rate_book_id": {
             "anyOf": [
               {
@@ -22995,6 +25496,20 @@
               }
             ],
             "title": "External Reference"
+          },
+          "template_routes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContractTemplateRoutePayload"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Routes"
           },
           "lines": {
             "anyOf": [

@@ -466,6 +466,15 @@ def test_quote_rating_executes_template_subtotals_and_percentage_steps() -> None
                     "charge_component_code": "FUEL_SURCHARGE",
                     "relationship_role": "PAYEE",
                     "subtotal_key": "FREIGHT",
+                    "accumulate_result_in_subtotal": False,
+                    "rate_book_id": fuel_rate_book_id,
+                },
+                {
+                    "step_number": 3,
+                    "charge_component_code": "FUEL_SURCHARGE",
+                    "relationship_role": "PAYEE",
+                    "subtotal_key": "FREIGHT",
+                    "accumulate_result_in_subtotal": False,
                     "rate_book_id": fuel_rate_book_id,
                 },
             ],
@@ -520,9 +529,10 @@ def test_quote_rating_executes_template_subtotals_and_percentage_steps() -> None
 
     assert rated.status_code == 200, rated.text
     option = rated.json()["options"][0]
-    assert option["payee_total_amount"] == "110.00"
-    assert [line["amount"] for line in option["lines"]] == ["100.00", "10.00"]
+    assert option["payee_total_amount"] == "120.00"
+    assert [line["amount"] for line in option["lines"]] == ["100.00", "10.00", "10.00"]
     assert option["lines"][1]["calculation_input_snapshot_json"]["percentage_base_amount"] == "100.00"
+    assert option["lines"][2]["calculation_input_snapshot_json"]["percentage_base_amount"] == "100.00"
     assert all(line["source_rate_book_entry_id"] is not None for line in option["lines"])
 
 

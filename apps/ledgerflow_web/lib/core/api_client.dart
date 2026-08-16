@@ -29,6 +29,9 @@ class LedgerFlowApiClient {
     'components': '/api/v1/charge-management/components',
     'rateBooks': '/api/v1/charge-management/rate-books',
     'calculationTemplates': '/api/v1/charge-management/calculation-templates',
+    'pricingDimensions': '/api/v1/charge-management/pricing-dimensions',
+    'callerMappingProfiles':
+        '/api/v1/charge-management/caller-mapping-profiles',
     'quotes': '/api/v1/charge-management/quote-requests',
     'documents': '/api/v1/charge-management/charge-documents',
     'invoices': '/api/v1/charge-management/invoices',

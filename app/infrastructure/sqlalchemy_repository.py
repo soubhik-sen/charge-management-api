@@ -19,6 +19,7 @@ from app.db.models import (
     ChargeBusinessDateProfileRow,
     ChargeBusinessDateProfileStepRow,
     ChargeBusinessDateProfileVersionRow,
+    ChargeCallerMappingProfileRow,
     ChargeCalculationProfileFactorRow,
     ChargeCalculationProfileRow,
     ChargeCalculationProfileVersionRow,
@@ -27,6 +28,7 @@ from app.db.models import (
     ChargeComponentAliasRow,
     ChargeComponentRow,
     ChargeContractLineRow,
+    ChargeContractTemplateRouteRow,
     ChargeDocumentRow,
     ChargeExportBatchRow,
     ChargeFxRateRow,
@@ -42,12 +44,14 @@ from app.db.models import (
     ChargeQuoteOptionLineRow,
     ChargeQuoteOptionRow,
     ChargeQuoteRequestRow,
+    ChargePricingDimensionRow,
     ChargeRateBookEntryRow,
     ChargeRateBookRow,
     ChargeRateContractRow,
 )
 from app.domain.models import (
     RATE_BOOK_ROW_ATTRIBUTE_KEYS,
+    BusinessDateValue,
     BusinessDateProfile,
     BusinessDateProfileAssignment,
     BusinessDateProfileStep,
@@ -68,6 +72,7 @@ from app.domain.models import (
     CalculationTemplate,
     CalculationTemplateStep,
     ContractLine,
+    ContractTemplateRoute,
     FxRate,
     FxRateSource,
     QuoteCommitment,
@@ -80,6 +85,7 @@ from app.domain.models import (
     RateBookEntry,
     RateContract,
 )
+from app.domain.dimension_service import seed_system_dimensions
 from app.domain.service import InMemoryChargeRepository
 
 
@@ -339,12 +345,15 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             ChargeQuoteOptionRow,
             ChargeQuoteOfferRow,
             ChargeQuoteRequestRow,
+            ChargeContractTemplateRouteRow,
             ChargeContractLineRow,
             ChargeRateContractRow,
             ChargeCalculationTemplateStepRow,
             ChargeCalculationTemplateRow,
             ChargeRateBookEntryRow,
             ChargeRateBookRow,
+            ChargeCallerMappingProfileRow,
+            ChargePricingDimensionRow,
             ChargeComponentAliasRow,
             ChargeComponentRow,
             ChargeBusinessDateProfileAssignmentRow,
@@ -373,6 +382,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self.seed_allocation_profiles()
         self.seed_components()
         self.flush()
+        seed_system_dimensions(self.session)
         self.session.add(
             ChargeFxRateSourceRow(
                 id=1,
@@ -385,6 +395,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             )
         )
         self.session.flush()
+        self._load_fx_sources()
 
     def next_id(self, bucket: str) -> int:
         row = self.session.scalar(
@@ -450,6 +461,11 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             "contract_line": {
                 line.id for contract in self.contracts.values() for line in contract.lines
             },
+            "contract_template_route": {
+                route.id for contract in self.contracts.values() for route in contract.template_routes
+            },
+            "quote_request": set(self.quote_requests),
+            "quote_offer": set(self.quote_offers),
             "quote_option": set(self.quote_options),
             "quote_option_line": {
                 line.id for option in self.quote_options.values() for line in option.lines
@@ -458,6 +474,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             "charge_line": {
                 line.id for document in self.documents.values() for line in document.lines
             },
+            "invoice": set(self.invoices),
             "match_result": set(self.match_results),
         }
 
@@ -465,10 +482,18 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         current = self._state_row_keys()
         specs = (
             ("match_result", ChargeMatchResultRow, ChargeMatchResultRow.id),
+            ("invoice", ChargeInvoiceRow, ChargeInvoiceRow.id),
             ("charge_line", ChargeLineRow, ChargeLineRow.id),
             ("charge_document", ChargeDocumentRow, ChargeDocumentRow.id),
             ("quote_option_line", ChargeQuoteOptionLineRow, ChargeQuoteOptionLineRow.id),
             ("quote_option", ChargeQuoteOptionRow, ChargeQuoteOptionRow.id),
+            ("quote_offer", ChargeQuoteOfferRow, ChargeQuoteOfferRow.id),
+            ("quote_request", ChargeQuoteRequestRow, ChargeQuoteRequestRow.id),
+            (
+                "contract_template_route",
+                ChargeContractTemplateRouteRow,
+                ChargeContractTemplateRouteRow.id,
+            ),
             ("contract_line", ChargeContractLineRow, ChargeContractLineRow.id),
             (
                 "calculation_template_step",
@@ -896,7 +921,12 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             component = self.components.get(row.charge_component_id)
             if component is None:
                 continue
-            entry = _model_from_row(RateBookEntry, row, charge_component_code=component.component_code)
+            entry = _model_from_row(
+                RateBookEntry,
+                row,
+                charge_component_code=component.component_code,
+                dimension_values=dict(row.attributes_json or {}),
+            )
             entries_by_book[entry.rate_book_id].append(entry)
             self._ids["rate_book_entry"] = max(self._ids["rate_book_entry"], entry.id)
         for row in books:
@@ -917,6 +947,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     if row.row_attribute_keys_json is not None
                     else _infer_rate_book_row_attribute_keys(book_entries)
                 ),
+                dimension_codes=list(row.dimension_codes_json or []),
                 description=row.description,
                 currency=row.currency,
                 valid_from=row.valid_from,
@@ -960,6 +991,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 charge_component_code=component.component_code,
                 relationship_role=row.relationship_role,
                 subtotal_key=row.subtotal_group,
+                accumulate_result_in_subtotal=row.accumulate_result_in_subtotal,
                 precondition_key=(row.precondition_json or {}).get("precondition_key"),
                 rate_book_code=rate_book.rate_book_code if rate_book else None,
                 rate_book_name=rate_book.rate_book_name if rate_book else None,
@@ -992,7 +1024,14 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         lines = self.session.scalars(
             select(ChargeContractLineRow).order_by(ChargeContractLineRow.contract_id, ChargeContractLineRow.id)
         ).all()
+        template_routes = self.session.scalars(
+            select(ChargeContractTemplateRouteRow).order_by(
+                ChargeContractTemplateRouteRow.contract_id,
+                ChargeContractTemplateRouteRow.id,
+            )
+        ).all()
         lines_by_contract: dict[int, list[ContractLine]] = defaultdict(list)
+        routes_by_contract: dict[int, list[ContractTemplateRoute]] = defaultdict(list)
         for row in lines:
             component = self.components.get(row.charge_component_id)
             if component is None:
@@ -1000,6 +1039,13 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             line = _model_from_row(ContractLine, row, charge_component_code=component.component_code)
             lines_by_contract[line.contract_id].append(line)
             self._ids["contract_line"] = max(self._ids["contract_line"], line.id)
+        for row in template_routes:
+            route = _model_from_row(ContractTemplateRoute, row)
+            routes_by_contract[route.contract_id].append(route)
+            self._ids["contract_template_route"] = max(
+                self._ids["contract_template_route"],
+                route.id,
+            )
         for row in contracts:
             contract = RateContract(
                 id=row.id,
@@ -1020,6 +1066,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 currency=row.currency,
                 valid_from=row.valid_from,
                 valid_to=row.valid_to,
+                selection_priority=row.selection_priority,
                 default_rate_book_id=row.default_rate_book_id,
                 default_calculation_template_id=row.default_calculation_template_id,
                 margin_type=row.margin_type,
@@ -1027,6 +1074,10 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 minimum_margin_amount=_money_decimal(row.minimum_margin_amount),
                 minimum_margin_percent=_trim_decimal(row.minimum_margin_percent),
                 external_reference=row.external_reference,
+                template_routes=sorted(
+                    routes_by_contract.get(row.id, []),
+                    key=lambda item: (item.route_number or 0, item.id),
+                ),
                 lines=sorted(
                     lines_by_contract.get(row.id, []),
                     key=lambda item: (item.line_number or 0, item.id),
@@ -1097,6 +1148,11 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 request_number=row.request_number,
                 source_object_type=row.source_object_type,
                 source_object_id=row.source_object_id,
+                caller_system_code=row.caller_system_code,
+                caller_schema_version=row.caller_schema_version,
+                caller_mapping_profile_code=row.caller_mapping_profile_code,
+                caller_attributes=dict(row.caller_attributes_json or {}),
+                dimension_values=dict(row.dimension_values_json or {}),
                 company_id=row.company_id,
                 customer_id=row.customer_id,
                 vendor_id=row.vendor_id,
@@ -1123,6 +1179,15 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 margin_rules=dict(row.margin_rules_json or {}),
                 charge_context=row.charge_context,
                 context=dict(row.context_json or {}),
+                calculation_inputs=dict(row.calculation_inputs_json or {}),
+                component_calculation_inputs={
+                    str(key): dict(value or {})
+                    for key, value in dict(row.component_calculation_inputs_json or {}).items()
+                },
+                date_values=[
+                    BusinessDateValue.model_validate(item)
+                    for item in list(row.date_values_json or [])
+                ],
                 status=row.status,
                 quotation_policy_snapshot=row.quotation_policy_snapshot,
                 awarded_option_id=row.awarded_option_id,
@@ -1221,6 +1286,12 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 quote_request_id=row.quote_request_id,
                 quote_option_id=row.quote_option_id,
                 charge_document_id=row.charge_document_id,
+                execution_identity=row.execution_identity,
+                execution_source_system=row.execution_source_system,
+                execution_plan_id=row.execution_plan_id,
+                execution_route_id=row.execution_route_id,
+                execution_source_id=row.execution_source_id,
+                execution_request_number=row.execution_request_number,
                 company_id=row.company_id,
                 customer_id=row.customer_id,
                 vendor_id=row.vendor_id,
@@ -1630,6 +1701,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     rate_book_name=book.rate_book_name,
                     charge_component_id=component.id if component else None,
                     row_attribute_keys_json=list(book.row_attribute_keys),
+                    dimension_codes_json=list(book.dimension_codes),
                     description=book.description,
                     currency=book.currency,
                     valid_from=book.valid_from,
@@ -1677,6 +1749,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     validity_to=entry.validity_to,
                     priority=entry.priority,
                     is_active=entry.is_active,
+                    attributes_json=dict(entry.dimension_values),
                 )
             )
         self.session.flush()
@@ -1714,6 +1787,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     rate_book_id=step.rate_book_id,
                     precondition_json=None if step.precondition_key is None else {"precondition_key": step.precondition_key},
                     subtotal_group=step.subtotal_key,
+                    accumulate_result_in_subtotal=step.accumulate_result_in_subtotal,
                     is_statistical=step.is_statistical,
                 )
             )
@@ -1741,6 +1815,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     currency=contract.currency,
                     valid_from=contract.valid_from,
                     valid_to=contract.valid_to,
+                    selection_priority=contract.selection_priority,
                     default_rate_book_id=contract.default_rate_book_id,
                     default_calculation_template_id=contract.default_calculation_template_id,
                     margin_type=contract.margin_type,
@@ -1750,6 +1825,30 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     external_reference=contract.external_reference,
                     created_at=contract.created_at,
                     updated_at=contract.updated_at,
+                )
+            )
+        self.session.flush()
+        for route in sorted(
+            (route for contract in self.contracts.values() for route in contract.template_routes),
+            key=lambda item: item.id,
+        ):
+            self.session.merge(
+                ChargeContractTemplateRouteRow(
+                    id=route.id,
+                    contract_id=route.contract_id,
+                    calculation_template_id=route.calculation_template_id,
+                    route_number=route.route_number,
+                    origin_code=route.origin_code,
+                    destination_code=route.destination_code,
+                    mode=route.mode,
+                    equipment_type=route.equipment_type,
+                    commodity_code=route.commodity_code,
+                    service_level=route.service_level,
+                    charge_context=route.charge_context,
+                    priority=route.priority,
+                    is_active=route.is_active,
+                    valid_from=route.valid_from,
+                    valid_to=route.valid_to,
                 )
             )
         self.session.flush()
@@ -1791,6 +1890,11 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     request_number=request.request_number,
                     source_object_type=request.source_object_type,
                     source_object_id=request.source_object_id,
+                    caller_system_code=request.caller_system_code,
+                    caller_schema_version=request.caller_schema_version,
+                    caller_mapping_profile_code=request.caller_mapping_profile_code,
+                    caller_attributes_json=dict(request.caller_attributes),
+                    dimension_values_json=dict(request.dimension_values),
                     company_id=request.company_id,
                     customer_id=request.customer_id,
                     vendor_id=request.vendor_id,
@@ -1820,6 +1924,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     margin_rules_json=dict(request.margin_rules),
                     charge_context=request.charge_context,
                     context_json=dict(request.context),
+                    calculation_inputs_json=dict(request.calculation_inputs),
+                    component_calculation_inputs_json=dict(request.component_calculation_inputs),
+                    date_values_json=_json_ready_value(request.date_values),
                     created_at=request.created_at,
                     updated_at=request.updated_at,
                 )
@@ -1914,8 +2021,12 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                         pinned_allocation_snapshot_json=dict(line.pinned_allocation_snapshot_json or {}),
                         effective_allocation_snapshot_json=dict(line.effective_allocation_snapshot_json or {}),
                         source_contract_id=line.source_contract_id,
+                        source_contract_line_id=line.source_contract_line_id,
+                        source_contract_template_route_id=line.source_contract_template_route_id,
                         source_rate_book_id=line.source_rate_book_id,
                         source_rate_book_entry_id=line.source_rate_book_entry_id,
+                        source_calculation_template_id=line.source_calculation_template_id,
+                        source_calculation_template_step_id=line.source_calculation_template_step_id,
                         is_statistical=line.is_statistical,
                         is_margin_line=line.is_margin_line,
                     )
@@ -1972,6 +2083,12 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     quote_request_id=commitment.quote_request_id,
                     quote_option_id=commitment.quote_option_id,
                     charge_document_id=commitment.charge_document_id,
+                    execution_identity=commitment.execution_identity,
+                    execution_source_system=commitment.execution_source_system,
+                    execution_plan_id=commitment.execution_plan_id,
+                    execution_route_id=commitment.execution_route_id,
+                    execution_source_id=commitment.execution_source_id,
+                    execution_request_number=commitment.execution_request_number,
                     company_id=commitment.company_id,
                     customer_id=commitment.customer_id,
                     vendor_id=commitment.vendor_id,

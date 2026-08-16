@@ -20,6 +20,7 @@ void main() {
           body: RateBookWorkspace(
             rateBooks: _liveRateBooks,
             components: _components,
+            pricingDimensions: _pricingDimensions,
             live: true,
             onMutation:
                 ({
@@ -98,6 +99,10 @@ void main() {
     expect(calls[0]['body']['entries'][0]['mode'], 'OCEAN');
     expect(calls[0]['body']['entries'][0]['priority'], 50);
     expect(calls[0]['body']['entries'][0]['minimum_amount'], '25.00');
+    expect(calls[0]['body']['dimension_codes'], ['DELIVERY_ZONE']);
+    expect(calls[0]['body']['entries'][0]['dimension_values'], {
+      'DELIVERY_ZONE': 'CENTRAL',
+    });
 
     expect(calls[1]['method'], 'POST');
     expect(
@@ -175,6 +180,160 @@ void main() {
     expect(editDraft.onPressed, isNull);
     expect(publishDraft.onPressed, isNull);
   });
+
+  testWidgets(
+    'rate-book workspace supports searchable filtered list and keeps family selection stable',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final rateBooks = <JsonMap>[
+        ..._liveRateBooks,
+        {
+          'id': 51,
+          'rate_book_code': 'ROAD_DIESEL_2026',
+          'rate_book_name': 'Road diesel 2026 draft',
+          'charge_component_code': 'FUEL_SURCHARGE',
+          'description': 'Road surcharge matrix for Iberia.',
+          'currency': 'EUR',
+          'status': 'DRAFT',
+          'version_number': 1,
+          'lock_version': 1,
+          'valid_from': '2026-04-01',
+          'valid_to': '2026-12-31',
+          'calculation_basis': 'PERCENTAGE',
+          'entries': [
+            {
+              'id': 511,
+              'charge_component_code': 'FUEL_SURCHARGE',
+              'basis': 'PERCENTAGE',
+              'currency': 'EUR',
+              'rate_percent': '9.25',
+              'validity_from': '2026-04-01',
+              'validity_to': '2026-12-31',
+              'is_active': true,
+            },
+          ],
+          'is_active': true,
+        },
+        {
+          'id': 61,
+          'rate_book_code': 'ROAD_LINEHAUL_2026',
+          'rate_book_name': 'Road long-haul published',
+          'charge_component_code': 'BASE_FREIGHT',
+          'description': 'Released line-haul rates for road transport.',
+          'currency': 'EUR',
+          'status': 'PUBLISHED',
+          'version_number': 1,
+          'lock_version': 3,
+          'valid_from': '2026-01-01',
+          'valid_to': '2026-12-31',
+          'calculation_basis': 'DISTANCE',
+          'published_at': '2026-02-14T10:30:00Z',
+          'entries': [
+            {
+              'id': 611,
+              'charge_component_code': 'BASE_FREIGHT',
+              'basis': 'DISTANCE',
+              'currency': 'EUR',
+              'rate_amount': '1.35',
+              'origin_code': 'ESMAD',
+              'destination_code': 'ESBCN',
+              'validity_from': '2026-01-01',
+              'validity_to': '2026-12-31',
+              'is_active': true,
+            },
+          ],
+          'is_active': true,
+        },
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: LedgerFlowDesign.theme,
+          home: Scaffold(
+            body: RateBookWorkspace(
+              rateBooks: rateBooks,
+              components: _components,
+              pricingDimensions: _pricingDimensions,
+              live: true,
+              onMutation:
+                  ({
+                    required method,
+                    required path,
+                    body,
+                    required successMessage,
+                  }) async {
+                    return true;
+                  },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('transaction-list-search')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('transaction-list-status')),
+        findsOneWidget,
+      );
+      expect(find.text('ATLANTIC_2026'), findsWidgets);
+      expect(find.text('ROAD_DIESEL_2026'), findsOneWidget);
+      expect(find.text('ROAD_LINEHAUL_2026'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-list-search')),
+        'diesel',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('ROAD_DIESEL_2026'), findsWidgets);
+      expect(find.text('ATLANTIC_2026'), findsNothing);
+      expect(find.text('ROAD_LINEHAUL_2026'), findsNothing);
+
+      await tester.tap(find.text('ROAD_DIESEL_2026').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Road diesel 2026 draft'), findsWidgets);
+      expect(find.text('9.25%'), findsWidgets);
+      expect(find.text('FUEL_SURCHARGE'), findsWidgets);
+      expect(find.text('EUR'), findsWidgets);
+
+      await tester.tap(find.byKey(const ValueKey('transaction-list-status')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('DRAFT').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('ROAD_DIESEL_2026'), findsWidgets);
+      expect(find.text('ROAD_LINEHAUL_2026'), findsNothing);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-list-search')),
+        '',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('ATLANTIC_2026'), findsWidgets);
+      expect(find.text('ROAD_DIESEL_2026'), findsWidgets);
+      expect(find.text('ROAD_LINEHAUL_2026'), findsNothing);
+      expect(find.text('Road diesel 2026 draft'), findsWidgets);
+      expect(find.text('9.25%'), findsWidgets);
+
+      await tester.tap(find.byKey(const ValueKey('transaction-list-status')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('All statuses').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('ATLANTIC_2026'), findsWidgets);
+      expect(find.text('ROAD_DIESEL_2026'), findsWidgets);
+      expect(find.text('ROAD_LINEHAUL_2026'), findsOneWidget);
+      expect(find.text('Road diesel 2026 draft'), findsWidgets);
+      expect(find.text('9.25%'), findsWidgets);
+    },
+  );
 }
 
 final List<JsonMap> _components = [
@@ -216,6 +375,7 @@ final List<JsonMap> _liveRateBooks = [
       'validity_from',
       'validity_to',
     ],
+    'dimension_codes': ['DELIVERY_ZONE'],
     'description': 'Draft revision for Atlantic ocean lanes.',
     'currency': 'USD',
     'status': 'DRAFT',
@@ -237,6 +397,7 @@ final List<JsonMap> _liveRateBooks = [
         'mode': 'OCEAN',
         'priority': 50,
         'minimum_amount': '25.00',
+        'dimension_values': {'DELIVERY_ZONE': 'CENTRAL'},
         'validity_from': '2026-02-01',
         'validity_to': '2026-12-31',
         'is_active': true,
@@ -273,6 +434,29 @@ final List<JsonMap> _liveRateBooks = [
         'is_active': true,
       },
     ],
+    'is_active': true,
+  },
+];
+
+final List<JsonMap> _pricingDimensions = [
+  {
+    'id': 1,
+    'dimension_code': 'ORIGIN_CODE',
+    'dimension_name': 'Origin',
+    'data_type': 'STRING',
+    'built_in_field': 'origin_code',
+    'is_system': true,
+    'is_active': true,
+  },
+  {
+    'id': 8,
+    'dimension_code': 'DELIVERY_ZONE',
+    'dimension_name': 'Delivery zone',
+    'description': 'Canonical last-mile pricing zone.',
+    'data_type': 'STRING',
+    'allowed_values': ['CENTRAL', 'NORTH'],
+    'built_in_field': null,
+    'is_system': false,
     'is_active': true,
   },
 ];

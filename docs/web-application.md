@@ -7,14 +7,16 @@ The Flutter web application under `apps/ledgerflow_web` is the reference user in
 | Workspace | Purpose |
 | --- | --- |
 | Overview | Operational KPIs, charge volume and margin trend, approval queue, and recent charge documents. |
-| Quotes | Quote request context, lifecycle, ranked commercial options, matched contracts, and payer/payee charge-line comparison. |
-| Charge documents | Expected charges, status, approval checks, and calculation, allocation, business-date, rate, and FX provenance. |
-| Invoices | Exception-first line matching, variance totals, resolution choices, match health, and linked document context. |
-| Rate books | Create books, edit drafts, create/publish versions, inspect real version history, and maintain date-effective rate rows and profile references. |
+| Quotes | Search, filter, and page through quote requests; create or import requests, determine matching contracts, rate and rank options, award a winner, and inspect exact charge-line provenance. |
+| Contracts | Create party-bound payer/payee contracts, configure applicability and pricing on contract lines, and release contracts for quote matching. |
+| Charge documents | Search, filter, and page through documents; inspect expected/actual/approved amounts and exact provenance, change mutable status, refresh authoritative approval checks, approve, export, and reverse. |
+| Invoices | Search, filter, and page through invoices; use exception-first line matching, variance totals, resolution choices, match health, and linked document context. |
+| Rate books | Search, filter, and page through versioned book families; create books, edit drafts, create/publish versions, inspect real version history, and maintain date-effective rate rows and profile references. |
 | Calculation templates | Build ordered multi-component calculations, select component-specific books, and manage immutable published versions. |
 | Components | Search, inspect, create, edit, deactivate, and attach calculation, allocation, and business-date defaults. |
 | Profiles | Create/edit calculation and allocation profiles, manage draft versions, publish releases, and inspect usage. |
 | FX & dates | Create/edit/deactivate directional FX rates; create/version/publish effective-dated business-date profiles and maintain scoped assignments. |
+| Caller mappings | Maintain canonical pricing dimensions and versioned per-caller schema mappings; preview raw caller payload normalization before integration. |
 
 The UI fields use the public JSON names from the OpenAPI contract. Unknown optional fields degrade to empty or inherited values instead of requiring host-specific metadata.
 
@@ -43,10 +45,10 @@ flutter pub get
 flutter run -d chrome --web-port=8080 \
   --dart-define=LEDGERFLOW_API_URL=http://localhost:8000 \
   --dart-define=LEDGERFLOW_API_TOKEN=local-dev-token \
-  --dart-define=LEDGERFLOW_UI_SCALE=0.8
+  --dart-define=LEDGERFLOW_UI_SCALE=1.0
 ```
 
-`LEDGERFLOW_UI_SCALE` defaults to `0.8` and scales the complete application viewport, including navigation, tables, forms, dialogs, and overlays. Set it to `1.0` to render the original Flutter logical size.
+`LEDGERFLOW_UI_SCALE` defaults to `1.0`, the normal Flutter logical size. Set a lower value only when an embedding host intentionally requires a denser interface.
 
 Allow the Flutter development origin in the API process:
 
@@ -69,12 +71,12 @@ Production builds intentionally omit `LEDGERFLOW_API_TOKEN` and obtain a user to
 
 The compiled site is written to `apps/ledgerflow_web/build/web`. Configure an SPA rewrite from `/*` to `/index.html` on the static host.
 
-For local same-origin operation, set `LEDGERFLOW_WEB_DIRECTORY=apps/ledgerflow_web/build/web` on the API process and build with `LEDGERFLOW_API_URL` set to that API origin. API, health, and documentation routes remain registered ahead of the optional static mount.
+For local same-origin operation, set `LEDGERFLOW_WEB_DIRECTORY=apps/ledgerflow_web/build/web` on the API process and build with an empty `LEDGERFLOW_API_URL`. The client then uses relative `/api`, `/health`, and `/docs` routes, avoiding CORS and host-name mismatches. API, health, and documentation routes remain registered ahead of the optional static mount.
 
 ## Administration Workflows
 
-When connected to a live API, the reference UI performs persisted master-data administration through the public REST contract. It supports component create/edit/deactivate; calculation, allocation, and business-date profile create/edit/version/publish; business-date assignment create/edit/remove; rate-book create/draft-edit/version/publish; and FX-rate create/edit/deactivate. Rate rows select an active charge component from the component master rather than accepting an unvalidated component code.
+When connected to a live API, the reference UI performs persisted master-data and transaction administration through the public REST contract. It supports component create/edit/deactivate; calculation, allocation, and business-date profile create/edit/version/publish; business-date assignment create/edit/remove; rate-book create/draft-edit/version/publish; canonical pricing-dimension and caller-mapping maintenance; calculation-template maintenance; FX-rate create/edit/deactivate; contract create/edit/release; quote create/import/submit/determine/rate/rank/award; charge-document status/approval/export/reversal/delete; and guarded invoice deletion. Contracts support a row-free header template, component-free conditional template routes, explicit selection priority, and legacy direct component lines.
 
 Demo mode deliberately disables writes. Profile selectors show published definitions only, while inspectors retain complete version history. API lifecycle and authorization checks remain authoritative.
 
-See [UI administration](ui-administration.md) for task-oriented instructions. Other API lifecycle operations, including quote award, charge approval/reversal/export, and invoice matching, remain documented in [API examples](api-examples.md) and interactive Swagger at `/docs` until their reference UI actions are implemented.
+See [UI administration](ui-administration.md) for task-oriented instructions. Invoice capture, workspace editing, and matching remain documented in [API examples](api-examples.md) and interactive Swagger at `/docs`; the reference UI currently exposes invoice inspection and guarded deletion.

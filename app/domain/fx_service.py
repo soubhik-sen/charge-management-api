@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import ChargeFxRateRow, ChargeFxRateSourceRow
@@ -65,7 +67,7 @@ class FxRateService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="FX rate source_code already exists.")
         row = ChargeFxRateSourceRow(**values)
         self.db.add(row)
-        self.db.flush()
+        self._flush_unique("FX rate source_code already exists.")
         return self._source_model(row)
 
     def get_source(self, source_id: int) -> FxRateSource:
@@ -84,7 +86,7 @@ class FxRateService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="FX rate source_code already exists.")
         for key, value in values.items():
             setattr(row, key, value)
-        self.db.flush()
+        self._flush_unique("FX rate source_code already exists.")
         return self._source_model(row)
 
     def deactivate_source(self, source_id: int) -> FxRateSource:
@@ -149,7 +151,7 @@ class FxRateService:
         self._assert_unique_rate(values)
         row = ChargeFxRateRow(**values)
         self.db.add(row)
-        self.db.flush()
+        self._flush_unique("FX rate already exists for this source, currency pair, date, type, and method.")
         return self._rate_model(row, source=source)
 
     def get_rate(self, rate_id: int) -> FxRate:
@@ -164,7 +166,7 @@ class FxRateService:
         self._assert_unique_rate(values, exclude_id=rate_id)
         for key, value in values.items():
             setattr(row, key, value)
-        self.db.flush()
+        self._flush_unique("FX rate already exists for this source, currency pair, date, type, and method.")
         return self._rate_model(row, source=source)
 
     def deactivate_rate(self, rate_id: int) -> FxRate:
@@ -286,6 +288,13 @@ class FxRateService:
                 detail="An FX rate already exists for this source, pair, date, type, and method.",
             )
 
+    def _flush_unique(self, detail: str) -> None:
+        try:
+            self.db.flush()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from exc
+
     def _require_source(self, source_id: int) -> ChargeFxRateSourceRow:
         row = self.db.get(ChargeFxRateSourceRow, source_id)
         if row is None:
@@ -308,6 +317,13 @@ class FxRateService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="source_code, source_name, and timezone are required.",
             )
+        try:
+            ZoneInfo(timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="timezone must be a valid IANA timezone identifier.",
+            ) from exc
         if payload.priority < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="priority cannot be negative.")
         return {

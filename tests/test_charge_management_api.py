@@ -42,11 +42,170 @@ def test_seeded_road_per_kilometer_profile_is_executable() -> None:
     assert preview.status_code == 200, preview.text
     assert preview.json()["source_amount"] == "600.00"
     assert preview.json()["quantity"] == "480.000000"
+    invalid_input = client.post(
+        "/api/v1/charge-management/calculations/preview",
+        headers=AUTH,
+        json={
+            "basis": "DISTANCE",
+            "rate_amount": "1.25",
+            "source_currency": "EUR",
+            "target_currency": "EUR",
+            "calculation_profile_version_id": version_id,
+            "calculation_inputs": {"DISTANCE_KM": "not-a-number"},
+        },
+    )
+    assert invalid_input.status_code == 422
+    assert "must be numeric" in invalid_input.text
 
 
 def test_requires_bearer_token() -> None:
     response = client.get("/api/v1/charge-management/initialization-data")
     assert response.status_code == 401
+
+
+def test_quote_request_identifiers_and_physical_inputs_are_validated() -> None:
+    created = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "request_number": " external-road-001 ",
+            "company_id": 1001,
+            "customer_id": 2001,
+            "vendor_id": 3001,
+            "carrier_id": 4001,
+            "quantity": "1",
+            "valid_from": "2026-08-01",
+            "valid_to": "2026-08-31",
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["request_number"] == "EXTERNAL-ROAD-001"
+
+    found = client.get(
+        "/api/v1/charge-management/quote-requests?request_number=external-road-001",
+        headers=AUTH,
+    )
+    assert found.status_code == 200, found.text
+    assert found.json()["total"] == 1
+    assert found.json()["items"][0]["id"] == created.json()["id"]
+    scoped = client.get(
+        "/api/v1/charge-management/quote-requests"
+        "?company_id=1001&customer_id=2001&vendor_id=3001&carrier_id=4001",
+        headers=AUTH,
+    )
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["total"] == 1
+
+    duplicate = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={"request_number": "EXTERNAL-ROAD-001"},
+    )
+    assert duplicate.status_code == 409
+
+    invalid_quantity = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={"quantity": "0"},
+    )
+    assert invalid_quantity.status_code == 422
+
+    invalid_validity = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={"valid_from": "2026-08-31", "valid_to": "2026-08-01"},
+    )
+    assert invalid_validity.status_code == 422
+
+
+def test_invoice_identifiers_and_line_amounts_are_validated() -> None:
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={"currency": "USD", "lines": []},
+    )
+    assert document.status_code == 201, document.text
+    document_id = document.json()["id"]
+
+    invoice = client.post(
+        "/api/v1/charge-management/invoices",
+        headers=AUTH,
+        json={
+            "charge_document_id": document_id,
+            "invoice_number": " INV-EDGE-001 ",
+            "currency": "USD",
+            "lines": [{"amount": "10.00"}],
+        },
+    )
+    assert invoice.status_code == 201, invoice.text
+    assert invoice.json()["invoice_number"] == "INV-EDGE-001"
+
+    duplicate = client.post(
+        "/api/v1/charge-management/invoices",
+        headers=AUTH,
+        json={
+            "charge_document_id": document_id,
+            "invoice_number": "INV-EDGE-001",
+            "currency": "USD",
+            "lines": [],
+        },
+    )
+    assert duplicate.status_code == 409
+
+    invalid_amount = client.post(
+        "/api/v1/charge-management/invoices",
+        headers=AUTH,
+        json={
+            "charge_document_id": document_id,
+            "invoice_number": "INV-EDGE-002",
+            "currency": "USD",
+            "lines": [{"amount": "not-a-number"}],
+        },
+    )
+    assert invalid_amount.status_code == 422
+
+    blank_update = client.put(
+        f"/api/v1/charge-management/invoices/{invoice.json()['id']}/workspace",
+        headers=AUTH,
+        json={"invoice_number": "   "},
+    )
+    assert blank_update.status_code == 422
+
+
+def test_contract_list_supports_all_party_scope_filters() -> None:
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": " PARTY-SCOPE-001 ",
+            "contract_name": "Party scope",
+            "contract_role": "PAYEE",
+            "company_id": 1001,
+            "customer_id": 2001,
+            "vendor_id": 3001,
+            "forwarder_id": 4001,
+            "carrier_id": 5001,
+            "currency": "eur",
+        },
+    )
+    assert contract.status_code == 201, contract.text
+    assert contract.json()["contract_number"] == "PARTY-SCOPE-001"
+    assert contract.json()["currency"] == "EUR"
+
+    scoped = client.get(
+        "/api/v1/charge-management/contracts"
+        "?company_id=1001&customer_id=2001&vendor_id=3001&forwarder_id=4001&carrier_id=5001",
+        headers=AUTH,
+    )
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["total"] == 1
+
+    no_match = client.get(
+        "/api/v1/charge-management/contracts?company_id=9999",
+        headers=AUTH,
+    )
+    assert no_match.status_code == 200, no_match.text
+    assert no_match.json()["total"] == 0
 
 
 def test_initialization_data_has_seeded_components() -> None:
@@ -81,7 +240,11 @@ def test_initialization_data_has_seeded_components() -> None:
     assert road_components["ROAD_FREIGHT_FTL"]["default_calculation_profile_id"] is not None
     assert road_components["ROAD_FREIGHT_LTL"]["allocation_profile_id"] is not None
     assert road_components["ROAD_TOLL"]["calculation_basis"] == "DISTANCE"
+    assert road_components["ROAD_TOLL"]["default_calculation_profile_id"] is not None
     assert road_components["WAITING_TIME"]["calculation_basis"] == "PER_HOUR"
+    assert road_components["WAITING_TIME"]["default_calculation_profile_id"] is not None
+    assert road_components["PALLET_EXCHANGE"]["default_calculation_profile_id"] is not None
+    assert road_components["MULTI_STOP_SURCHARGE"]["default_calculation_profile_id"] is not None
     assert road_components["CMR_DOCUMENTATION"]["business_date_policy_mode"] == "PROFILE_OVERRIDE"
     assert {row["charge_date_basis"] for row in response.json()["components"]} == {"DOCUMENT_DATE"}
     assert response.json()["settings"]["quotation_policy"] == "OPTIONAL"
@@ -1298,6 +1461,7 @@ def test_calculation_template_list_workspace_and_update_contract() -> None:
     assert workspace.json()["template"]["id"] == template_id
     assert workspace.json()["steps"][0]["charge_component_code"] == "BASE_FREIGHT"
     assert workspace.json()["steps"][0]["rate_book_code"] == "RB-OCEAN-001"
+    assert workspace.json()["steps"][0]["accumulate_result_in_subtotal"] is True
 
     updated = client.put(
         f"/api/v1/charge-management/calculation-templates/{template_id}/workspace",
@@ -1313,6 +1477,7 @@ def test_calculation_template_list_workspace_and_update_contract() -> None:
                     "charge_component_code": "BASE_FREIGHT",
                     "relationship_role": "PAYER",
                     "subtotal_key": "PROVIDER_COST",
+                    "accumulate_result_in_subtotal": False,
                     "rate_book_id": rate_book_id,
                 }
             ],
@@ -1323,6 +1488,7 @@ def test_calculation_template_list_workspace_and_update_contract() -> None:
     assert updated.json()["template"]["status"] == "DRAFT"
     assert updated.json()["template"]["lock_version"] == 2
     assert updated.json()["steps"][0]["relationship_role"] == "PAYER"
+    assert updated.json()["steps"][0]["accumulate_result_in_subtotal"] is False
 
     published = client.post(
         f"/api/v1/charge-management/calculation-templates/{template_id}/publish",
@@ -1511,12 +1677,213 @@ def test_contract_release_requires_rate_source_line() -> None:
     assert updated.json()["contract"]["lines"][0]["line_number"] == 1
     assert updated.json()["contract"]["lines"][0]["rate_book_id"] is None
 
+    bypass_release = client.put(
+        f"/api/v1/charge-management/contracts/{contract_id}/workspace",
+        headers=AUTH,
+        json={"status": "RELEASED"},
+    )
+    assert bypass_release.status_code == 400
+
     released = client.post(
         f"/api/v1/charge-management/contracts/{contract_id}/release",
         headers=AUTH,
     )
     assert released.status_code == 200, released.text
     assert released.json()["status"] == "RELEASED"
+    immutable_update = client.put(
+        f"/api/v1/charge-management/contracts/{contract_id}/workspace",
+        headers=AUTH,
+        json={"description": "Must create a new version"},
+    )
+    assert immutable_update.status_code == 409
+
+
+def test_header_template_contract_releases_and_rates_without_contract_lines() -> None:
+    rate_book_id = _create_rate_book()
+    template_id = _create_published_template("HEADER-TEMPLATE", rate_book_id)
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": "PAYEE-HEADER-TEMPLATE",
+            "contract_name": "Customer header template",
+            "contract_role": "PAYEE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "selection_priority": 25,
+            "default_calculation_template_id": template_id,
+            "lines": [],
+            "template_routes": [],
+        },
+    )
+    assert contract.status_code == 201, contract.text
+    contract_id = contract.json()["id"]
+    assert contract.json()["selection_priority"] == 25
+    assert contract.json()["lines"] == []
+
+    released = client.post(
+        f"/api/v1/charge-management/contracts/{contract_id}/release",
+        headers=AUTH,
+    )
+    assert released.status_code == 200, released.text
+
+    quote = _create_ocean_quote()
+    _submit_quote(quote["id"])
+    determined = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote['id']}/determine-contracts",
+        headers=AUTH,
+    )
+    assert determined.status_code == 200, determined.text
+    assert [row["id"] for row in determined.json()["payee_contracts"]] == [contract_id]
+
+    rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote['id']}/rate",
+        headers=AUTH,
+    )
+    assert rated.status_code == 200, rated.text
+    line = rated.json()["options"][0]["lines"][0]
+    assert line["source_contract_id"] == contract_id
+    assert line["source_contract_line_id"] is None
+    assert line["source_contract_template_route_id"] is None
+    assert line["source_calculation_template_id"] == template_id
+
+
+def test_component_free_template_route_selects_template_and_records_provenance() -> None:
+    rate_book_id = _create_rate_book()
+    template_id = _create_published_template("ROUTED-TEMPLATE", rate_book_id)
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": "PAYEE-ROUTED-TEMPLATE",
+            "contract_name": "Customer conditional template",
+            "contract_role": "PAYEE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "template_routes": [
+                {
+                    "route_number": 10,
+                    "calculation_template_id": template_id,
+                    "origin_code": "BRSSZ",
+                    "destination_code": "USNYC",
+                    "mode": "OCEAN",
+                    "priority": 10,
+                }
+            ],
+            "lines": [],
+        },
+    )
+    assert contract.status_code == 201, contract.text
+    contract_id = contract.json()["id"]
+    route_id = contract.json()["template_routes"][0]["id"]
+    assert "charge_component_code" not in contract.json()["template_routes"][0]
+    assert client.post(
+        f"/api/v1/charge-management/contracts/{contract_id}/release",
+        headers=AUTH,
+    ).status_code == 200
+
+    quote = _create_ocean_quote()
+    _submit_quote(quote["id"])
+    rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote['id']}/rate",
+        headers=AUTH,
+    )
+    assert rated.status_code == 200, rated.text
+    line = rated.json()["options"][0]["lines"][0]
+    assert line["source_contract_line_id"] is None
+    assert line["source_contract_template_route_id"] == route_id
+    assert line["source_calculation_template_id"] == template_id
+
+
+def test_equal_best_template_routes_are_rejected_as_ambiguous() -> None:
+    rate_book_id = _create_rate_book()
+    template_id = _create_published_template("AMBIGUOUS-ROUTE-TEMPLATE", rate_book_id)
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": "PAYEE-AMBIGUOUS-ROUTES",
+            "contract_name": "Ambiguous template routes",
+            "contract_role": "PAYEE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "template_routes": [
+                {
+                    "route_number": route_number,
+                    "calculation_template_id": template_id,
+                    "origin_code": "BRSSZ",
+                    "mode": "OCEAN",
+                    "priority": 10,
+                }
+                for route_number in (10, 20)
+            ],
+            "lines": [],
+        },
+    )
+    assert contract.status_code == 201, contract.text
+    assert client.post(
+        f"/api/v1/charge-management/contracts/{contract.json()['id']}/release",
+        headers=AUTH,
+    ).status_code == 200
+
+    quote = _create_ocean_quote()
+    _submit_quote(quote["id"])
+    ambiguous = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote['id']}/determine-contracts",
+        headers=AUTH,
+    )
+    assert ambiguous.status_code == 409
+    assert "ambiguous matching template routes" in ambiguous.text
+
+
+def test_contract_priority_selects_one_match_and_equal_best_matches_are_rejected() -> None:
+    rate_book_id = _create_rate_book()
+    selected_id = _create_contract(
+        "PAYEE-PRIORITY-10",
+        "PAYEE",
+        rate_book_id,
+        selection_priority=10,
+    )
+    fallback_id = _create_contract(
+        "PAYEE-PRIORITY-20",
+        "PAYEE",
+        rate_book_id,
+        selection_priority=20,
+    )
+    for contract_id in (selected_id, fallback_id):
+        assert client.post(
+            f"/api/v1/charge-management/contracts/{contract_id}/release",
+            headers=AUTH,
+        ).status_code == 200
+
+    quote = _create_ocean_quote()
+    _submit_quote(quote["id"])
+    determined = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote['id']}/determine-contracts",
+        headers=AUTH,
+    )
+    assert determined.status_code == 200, determined.text
+    assert [row["id"] for row in determined.json()["payee_contracts"]] == [selected_id]
+
+    tied_id = _create_contract(
+        "PAYEE-PRIORITY-10-TIE",
+        "PAYEE",
+        rate_book_id,
+        selection_priority=10,
+    )
+    assert client.post(
+        f"/api/v1/charge-management/contracts/{tied_id}/release",
+        headers=AUTH,
+    ).status_code == 200
+    ambiguous = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote['id']}/determine-contracts",
+        headers=AUTH,
+    )
+    assert ambiguous.status_code == 409
+    assert "Ambiguous payee contracts" in ambiguous.text
 
 
 def test_rated_option_and_awarded_document_propagate_allocation_profile_snapshots() -> None:
@@ -1860,6 +2227,77 @@ def test_quote_offer_is_visible_in_workspace_and_rankable() -> None:
         json={"quote_option_id": offer_workspace.json()["quote_option"]["id"]},
     )
     assert award_withdrawn.status_code == 409
+
+
+def test_unawarded_quote_delete_removes_offer_and_rated_option_aggregate() -> None:
+    quote = _create_ocean_quote()
+    quote_id = quote["id"]
+    _submit_quote(quote_id)
+    offer = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/offers",
+        headers=AUTH,
+        json={
+            "offer_number": "OFF-DELETE-001",
+            "amount": "725.00",
+            "currency": "USD",
+        },
+    )
+    assert offer.status_code == 201, offer.text
+    workspace = client.get(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/workspace",
+        headers=AUTH,
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["offers"]
+    assert workspace.json()["options"]
+
+    deleted = client.delete(
+        f"/api/v1/charge-management/quote-requests/{quote_id}",
+        headers=AUTH,
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["id"] == quote_id
+    assert client.get(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/workspace",
+        headers=AUTH,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/charge-management/quote-offers/{offer.json()['id']}/workspace",
+        headers=AUTH,
+    ).status_code == 404
+    listed = client.get("/api/v1/charge-management/quote-requests", headers=AUTH)
+    assert listed.status_code == 200, listed.text
+    assert all(row["id"] != quote_id for row in listed.json()["items"])
+
+
+def test_awarded_quote_delete_is_blocked_to_preserve_provenance() -> None:
+    quote = _create_ocean_quote()
+    quote_id = quote["id"]
+    _submit_quote(quote_id)
+    offer = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/offers",
+        headers=AUTH,
+        json={"offer_number": "OFF-AWARD-DELETE", "amount": "800.00", "currency": "USD"},
+    )
+    assert offer.status_code == 201, offer.text
+    workspace = client.get(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/workspace",
+        headers=AUTH,
+    )
+    option_id = workspace.json()["options"][0]["id"]
+    awarded = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/award",
+        headers=AUTH,
+        json={"quote_option_id": option_id},
+    )
+    assert awarded.status_code == 200, awarded.text
+
+    blocked = client.delete(
+        f"/api/v1/charge-management/quote-requests/{quote_id}",
+        headers=AUTH,
+    )
+    assert blocked.status_code == 409
+    assert "provenance" in blocked.text
 
 
 def test_db_metadata_contains_quote_offer_schema() -> None:
@@ -2336,6 +2774,89 @@ def test_direct_charge_document_supports_generic_line_hierarchy_and_targets() ->
     assert body["lines"][1]["target_reference_snapshot_json"] == {"container_number": "CONT-1"}
 
 
+def test_direct_foreign_currency_lines_require_unambiguous_fx_provenance() -> None:
+    sources = client.get(
+        "/api/v1/charge-management/fx-rate-sources?q=MANUAL",
+        headers=AUTH,
+    )
+    assert sources.status_code == 200, sources.text
+    source_id = sources.json()["items"][0]["id"]
+    rate = client.post(
+        "/api/v1/charge-management/fx-rates",
+        headers=AUTH,
+        json={
+            "source_id": source_id,
+            "source_currency": "EUR",
+            "target_currency": "USD",
+            "rate_date": "2026-06-29",
+            "rate": "1.10000000",
+            "rate_type": "MID",
+            "conversion_method": "DIRECT",
+        },
+    )
+    assert rate.status_code == 201, rate.text
+
+    line = {
+        "relationship_role": "PAYEE",
+        "charge_component_code": "BASE_FREIGHT",
+        "expected_amount": "100.00",
+        "currency": "USD",
+        "source_currency": "EUR",
+        "exchange_rate": "1.10000000",
+        "exchange_rate_date": "2026-06-29",
+    }
+    missing_source_amount = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={"document_date": "2026-06-29", "currency": "USD", "lines": [line]},
+    )
+    assert missing_source_amount.status_code == 422
+    assert "source_amount is required" in missing_source_amount.text
+
+    invalid_rate_reference = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "document_date": "2026-06-29",
+            "currency": "USD",
+            "lines": [{**line, "source_amount": "100.00", "fx_rate_id": 999999}],
+        },
+    )
+    assert invalid_rate_reference.status_code == 400
+
+    mismatched_rate = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "document_date": "2026-06-29",
+            "currency": "USD",
+            "lines": [
+                {
+                    **line,
+                    "source_amount": "100.00",
+                    "fx_rate_id": rate.json()["id"],
+                    "exchange_rate": "1.20000000",
+                }
+            ],
+        },
+    )
+    assert mismatched_rate.status_code == 400
+
+    valid = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "document_date": "2026-06-29",
+            "currency": "USD",
+            "lines": [
+                {**line, "source_amount": "100.00", "fx_rate_id": rate.json()["id"]}
+            ],
+        },
+    )
+    assert valid.status_code == 201, valid.text
+    assert valid.json()["lines"][0]["expected_amount"] == "110.00"
+
+
 def test_direct_charge_document_supports_selected_target_subsets_and_validation() -> None:
     created_profile = client.post(
         "/api/v1/charge-management/calculation-profiles",
@@ -2519,6 +3040,383 @@ def test_direct_only_quotation_policy_blocks_quote_request() -> None:
     assert "Quotation is disabled" in response.text
 
 
+def test_quote_request_rejects_duplicate_typed_date_values() -> None:
+    response = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "company_id": 10,
+            "customer_id": 20,
+            "mode": "ROAD",
+            "currency": "USD",
+            "date_values": [
+                {"date_type": "document_date", "date_value": "2026-07-20"},
+                {"date_type": "DOCUMENT_DATE", "date_value": "2026-07-21"},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "date_values must contain at most one value for each date_type" in response.text
+
+
+def test_quote_rating_uses_component_inputs_and_emits_exact_line_provenance() -> None:
+    profiles = client.get(
+        "/api/v1/charge-management/calculation-profiles?q=PER_KILOMETER",
+        headers=AUTH,
+    )
+    assert profiles.status_code == 200, profiles.text
+    calculation_profile = profiles.json()["items"][0]
+
+    component = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            "component_code": "ROAD_DISTANCE_SURCHARGE",
+            "component_name": "Road Distance Surcharge",
+            "category": "SURCHARGE",
+            "default_party_role": "PAYEE",
+            "charge_context": "ROAD",
+            "calculation_basis": "DISTANCE",
+            "default_calculation_profile_id": calculation_profile["id"],
+        },
+    )
+    assert component.status_code == 201, component.text
+
+    rate_book = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RB-ROAD-DISTANCE",
+            "rate_book_name": "Road distance rates",
+            "currency": "USD",
+            "entries": [
+                {
+                    "charge_component_code": "ROAD_DISTANCE_SURCHARGE",
+                    "rate_amount": "2.00",
+                    "basis": "DISTANCE",
+                    "currency": "USD",
+                    "origin_code": "BARCELONA",
+                    "destination_code": "MADRID",
+                    "mode": "ROAD",
+                }
+            ],
+        },
+    )
+    assert rate_book.status_code == 201, rate_book.text
+    _publish_rate_book(rate_book.json()["id"])
+
+    template = client.post(
+        "/api/v1/charge-management/calculation-templates",
+        headers=AUTH,
+        json={
+            "template_code": "ROAD-DISTANCE-TEMPLATE",
+            "template_name": "Road distance template",
+            "steps": [
+                {
+                    "step_number": 10,
+                    "charge_component_code": "ROAD_DISTANCE_SURCHARGE",
+                    "relationship_role": "PAYEE",
+                    "rate_book_id": rate_book.json()["id"],
+                }
+            ],
+        },
+    )
+    assert template.status_code == 201, template.text
+    published_template = client.post(
+        f"/api/v1/charge-management/calculation-templates/{template.json()['id']}/publish",
+        headers=AUTH,
+    )
+    assert published_template.status_code == 200, published_template.text
+
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": "PAYEE-ROAD-DISTANCE",
+            "contract_name": "PAYEE-ROAD-DISTANCE",
+            "contract_role": "PAYEE",
+            "payer_party_ref": "party:customer:20",
+            "payee_party_ref": "party:platform:10",
+            "party_role_ref": "PAYEE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "charge_component_code": "ROAD_DISTANCE_SURCHARGE",
+                    "calculation_template_id": template.json()["id"],
+                    "origin_code": "BARCELONA",
+                    "destination_code": "MADRID",
+                    "mode": "ROAD",
+                }
+            ],
+        },
+    )
+    assert contract.status_code == 201, contract.text
+    contract_id = contract.json()["id"]
+    contract_line_id = contract.json()["lines"][0]["id"]
+    template_step_id = template.json()["steps"][0]["id"]
+    released = client.post(
+        f"/api/v1/charge-management/contracts/{contract_id}/release",
+        headers=AUTH,
+    )
+    assert released.status_code == 200, released.text
+
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BARCELONA",
+            "destination_code": "MADRID",
+            "mode": "ROAD",
+            "charge_context": "ROAD",
+            "currency": "USD",
+            "calculation_inputs": {"DISTANCE_KM": "10"},
+            "component_calculation_inputs": {
+                "road_distance_surcharge": {"DISTANCE_KM": "25"}
+            },
+            "date_values": [
+                {"date_type": "road_actual_pickup_date", "date_value": "2026-07-21"}
+            ],
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    assert quote.json()["component_calculation_inputs"] == {
+        "ROAD_DISTANCE_SURCHARGE": {"DISTANCE_KM": "25"}
+    }
+    assert quote.json()["date_values"][0]["date_type"] == "ROAD_ACTUAL_PICKUP_DATE"
+    _submit_quote(quote.json()["id"])
+
+    rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote.json()['id']}/rate",
+        headers=AUTH,
+    )
+    assert rated.status_code == 200, rated.text
+    line = rated.json()["options"][0]["lines"][0]
+    assert line["amount"] == "50.00"
+    assert line["calculation_input_snapshot_json"]["DISTANCE_KM"]["value"] == "25"
+    assert line["calculation_input_snapshot_json"]["DISTANCE_KM"]["source"] == "TRANSACTION_INPUT"
+    assert line["source_contract_id"] == contract_id
+    assert line["source_contract_line_id"] == contract_line_id
+    assert line["source_rate_book_id"] == rate_book.json()["id"]
+    assert line["source_rate_book_entry_id"] == rate_book.json()["entries"][0]["id"]
+    assert line["source_calculation_template_id"] == template.json()["id"]
+    assert line["source_calculation_template_step_id"] == template_step_id
+
+    awarded = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote.json()['id']}/award",
+        headers=AUTH,
+        json={"quote_option_id": rated.json()["options"][0]["id"]},
+    )
+    assert awarded.status_code == 200, awarded.text
+    document_workspace = client.get(
+        f"/api/v1/charge-management/charge-documents/{awarded.json()['charge_document']['id']}/workspace",
+        headers=AUTH,
+    )
+    assert document_workspace.status_code == 200, document_workspace.text
+    workspace_json = document_workspace.json()
+    assert workspace_json["source_quote_option"]["id"] == rated.json()["options"][0]["id"]
+    source_line = workspace_json["source_quote_option"]["lines"][0]
+    assert source_line["source_contract_id"] == contract_id
+    assert source_line["source_contract_line_id"] == contract_line_id
+    assert source_line["source_rate_book_id"] == rate_book.json()["id"]
+    assert source_line["source_calculation_template_id"] == template.json()["id"]
+    assert workspace_json["approval_ready"] is True
+    assert {check["code"] for check in workspace_json["approval_checks"]} == {
+        "STATUS_ELIGIBLE",
+        "LINE_PROCESSING_COMPLETE",
+    }
+
+
+def test_quote_rating_uses_typed_business_dates_for_component_validity_and_fx() -> None:
+    fx_source = client.post(
+        "/api/v1/charge-management/fx-rate-sources",
+        headers=AUTH,
+        json={"source_code": "ROAD_FX", "source_name": "Road FX Source"},
+    )
+    assert fx_source.status_code == 201, fx_source.text
+
+    rate_early = client.post(
+        "/api/v1/charge-management/fx-rates",
+        headers=AUTH,
+        json={
+            "source_id": fx_source.json()["id"],
+            "source_currency": "EUR",
+            "target_currency": "USD",
+            "rate_date": "2026-07-20",
+            "rate": "1.3000000000",
+        },
+    )
+    assert rate_early.status_code == 201, rate_early.text
+    rate_pickup = client.post(
+        "/api/v1/charge-management/fx-rates",
+        headers=AUTH,
+        json={
+            "source_id": fx_source.json()["id"],
+            "source_currency": "EUR",
+            "target_currency": "USD",
+            "rate_date": "2026-07-21",
+            "rate": "1.1000000000",
+        },
+    )
+    assert rate_pickup.status_code == 201, rate_pickup.text
+
+    profile = client.post(
+        "/api/v1/charge-management/business-date-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "ROAD_PICKUP_PRIORITY",
+            "profile_name": "Road pickup priority",
+            "initial_version": {
+                "steps": [
+                    {"step_number": 10, "date_key": "ROAD_ACTUAL_PICKUP_DATE"},
+                    {"step_number": 20, "date_key": "DOCUMENT_DATE"},
+                ]
+            },
+        },
+    )
+    assert profile.status_code == 201, profile.text
+    profile_version_id = profile.json()["versions"][0]["id"]
+    published_profile = client.post(
+        f"/api/v1/charge-management/business-date-profile-versions/{profile_version_id}/publish",
+        headers=AUTH,
+    )
+    assert published_profile.status_code == 200, published_profile.text
+
+    component = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            "component_code": "ROAD_FX_SURCHARGE",
+            "component_name": "Road FX Surcharge",
+            "category": "SURCHARGE",
+            "default_party_role": "PAYEE",
+            "charge_context": "ROAD",
+            "calculation_basis": "SHIPMENT",
+            "business_date_policy_mode": "PROFILE_OVERRIDE",
+            "business_date_profile_id": profile.json()["id"],
+        },
+    )
+    assert component.status_code == 201, component.text
+
+    rate_book = client.post(
+        "/api/v1/charge-management/rate-books",
+        headers=AUTH,
+        json={
+            "rate_book_code": "RB-ROAD-FX",
+            "rate_book_name": "Road FX book",
+            "currency": "EUR",
+            "valid_from": "2026-07-21",
+            "valid_to": "2026-07-21",
+            "entries": [
+                {
+                    "charge_component_code": "ROAD_FX_SURCHARGE",
+                    "rate_amount": "10.00",
+                    "basis": "SHIPMENT",
+                    "currency": "EUR",
+                    "origin_code": "BARCELONA",
+                    "destination_code": "MADRID",
+                    "mode": "ROAD",
+                    "validity_from": "2026-07-21",
+                    "validity_to": "2026-07-21",
+                }
+            ],
+        },
+    )
+    assert rate_book.status_code == 201, rate_book.text
+    _publish_rate_book(rate_book.json()["id"])
+
+    contract = client.post(
+        "/api/v1/charge-management/contracts",
+        headers=AUTH,
+        json={
+            "contract_number": "PAYEE-ROAD-FX",
+            "contract_name": "PAYEE-ROAD-FX",
+            "contract_role": "PAYEE",
+            "payer_party_ref": "party:customer:20",
+            "payee_party_ref": "party:platform:10",
+            "party_role_ref": "PAYEE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "charge_component_code": "ROAD_FX_SURCHARGE",
+                    "rate_book_id": rate_book.json()["id"],
+                    "origin_code": "BARCELONA",
+                    "destination_code": "MADRID",
+                    "mode": "ROAD",
+                }
+            ],
+        },
+    )
+    assert contract.status_code == 201, contract.text
+    released = client.post(
+        f"/api/v1/charge-management/contracts/{contract.json()['id']}/release",
+        headers=AUTH,
+    )
+    assert released.status_code == 200, released.text
+
+    quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BARCELONA",
+            "destination_code": "MADRID",
+            "mode": "ROAD",
+            "charge_context": "ROAD",
+            "currency": "USD",
+            "date_values": [
+                {"date_type": "ROAD_ACTUAL_PICKUP_DATE", "date_value": "2026-07-21"},
+                {"date_type": "DOCUMENT_DATE", "date_value": "2026-07-20"},
+            ],
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    _submit_quote(quote.json()["id"])
+    rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote.json()['id']}/rate",
+        headers=AUTH,
+    )
+    assert rated.status_code == 200, rated.text
+    line = rated.json()["options"][0]["lines"][0]
+    assert line["amount"] == "11.00"
+    assert line["exchange_rate_date"] == "2026-07-21"
+    assert line["fx_rate_id"] == rate_pickup.json()["id"]
+
+    compatibility_quote = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BARCELONA",
+            "destination_code": "MADRID",
+            "mode": "ROAD",
+            "charge_context": "ROAD",
+            "currency": "USD",
+            "requested_service_date": "2026-07-20",
+            "date_values": [
+                {"date_type": "ROAD_ACTUAL_PICKUP_DATE", "date_value": "2026-07-21"},
+                {"date_type": "DOCUMENT_DATE", "date_value": "2026-07-20"},
+            ],
+        },
+    )
+    assert compatibility_quote.status_code == 201, compatibility_quote.text
+    _submit_quote(compatibility_quote.json()["id"])
+    compatibility_rated = client.post(
+        f"/api/v1/charge-management/quote-requests/{compatibility_quote.json()['id']}/rate",
+        headers=AUTH,
+    )
+    assert compatibility_rated.status_code == 422
+    assert "No active rate entry matched the quote request" in compatibility_rated.text
+
+
 def test_quote_to_export_and_reverse_lifecycle() -> None:
     repository.provider_cost_layer_enabled = True
     rate_book_id = _create_rate_book()
@@ -2545,7 +3443,9 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
         "/api/v1/charge-management/quote-requests",
         headers=AUTH,
         json={
-            "source_object_type": "MANUAL",
+            "request_number": "PLAN-A-ROUTE-001",
+            "source_object_type": "ROUTEWISE_ROUTE",
+            "source_object_id": "PLAN-A:ROUTE-001",
             "company_id": 10,
             "customer_id": 20,
             "origin_code": "BRSSZ",
@@ -2580,13 +3480,76 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
     awarded = client.post(
         f"/api/v1/charge-management/quote-requests/{quote_id}/award",
         headers=AUTH,
-        json={"quote_option_id": option["id"]},
+        json={
+            "quote_option_id": option["id"],
+            "execution_source_system": "ROUTEWISE",
+            "execution_plan_id": "PLAN-A",
+            "execution_route_id": "ROUTE-001",
+            "execution_source_id": "PLAN-A:ROUTE-001",
+            "execution_request_number": "PLAN-A-ROUTE-001",
+        },
     )
     assert awarded.status_code == 200, awarded.text
     document_id = awarded.json()["charge_document"]["id"]
     commitment = awarded.json()["quote_commitment"]
     assert commitment["committed_container_count"] == "2"
     assert commitment["status"] == "ACTIVE"
+    repeated_award = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/award",
+        headers=AUTH,
+        json={
+            "quote_option_id": option["id"],
+            "execution_source_system": "ROUTEWISE",
+            "execution_plan_id": "PLAN-A",
+            "execution_route_id": "ROUTE-001",
+            "execution_source_id": "PLAN-A:ROUTE-001",
+            "execution_request_number": "PLAN-A-ROUTE-001",
+        },
+    )
+    assert repeated_award.status_code == 200, repeated_award.text
+    assert repeated_award.json()["charge_document"]["id"] == document_id
+    assert repeated_award.json()["quote_commitment"]["id"] == commitment["id"]
+    assert repeated_award.json()["quote_commitment"]["execution_plan_id"] == "PLAN-A"
+    assert repeated_award.json()["quote_commitment"]["execution_route_id"] == "ROUTE-001"
+    conflicting_award_retry = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/award",
+        headers=AUTH,
+        json={
+            "quote_option_id": option["id"],
+            "execution_source_system": "ROUTEWISE",
+            "execution_plan_id": "PLAN-A",
+            "execution_route_id": "ROUTE-001",
+            "execution_source_id": "PLAN-A:ROUTE-001",
+            "execution_request_number": "PLAN-A-ROUTE-001-CHANGED",
+        },
+    )
+    assert conflicting_award_retry.status_code == 409
+    assert conflicting_award_retry.json()["detail"]["code"] == "EXECUTION_IDENTITY_CONFLICT"
+    retried_create = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "request_number": "PLAN-A-ROUTE-001",
+            "source_object_type": "ROUTEWISE_ROUTE",
+            "source_object_id": "PLAN-A:ROUTE-001",
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BRSSZ",
+            "destination_code": "USNYC",
+            "mode": "OCEAN",
+            "equipment_type": "REEFER_40FT",
+            "currency": "USD",
+            "container_count": "2",
+            "margin_rules": {"percentage": "15", "minimum_margin": "100"},
+        },
+    )
+    assert retried_create.status_code == 201, retried_create.text
+    assert retried_create.json()["id"] == quote_id
+    rank_after_award = client.post(
+        f"/api/v1/charge-management/quote-requests/{quote_id}/rank",
+        headers=AUTH,
+    )
+    assert rank_after_award.status_code == 409
     awarded_workspace = client.get(
         f"/api/v1/charge-management/quote-requests/{quote_id}/workspace",
         headers=AUTH,
@@ -2614,12 +3577,15 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
         "/api/v1/charge-management/quote-requests",
         headers=AUTH,
         json={
-            "source_object_type": "MANUAL",
+            "request_number": "PLAN-A-ROUTE-002",
+            "source_object_type": "ROUTEWISE_ROUTE",
+            "source_object_id": "PLAN-A:ROUTE-002",
             "company_id": 10,
             "customer_id": 20,
             "origin_code": "BRSSZ",
             "destination_code": "USNYC",
             "mode": "OCEAN",
+            "equipment_type": "REEFER_40FT",
             "currency": "USD",
             "container_count": "1",
         },
@@ -2635,10 +3601,35 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
     duplicate_award = client.post(
         f"/api/v1/charge-management/quote-requests/{duplicate_quote_id}/award",
         headers=AUTH,
-        json={"quote_option_id": duplicate_rated.json()["options"][0]["id"]},
+        json={
+            "quote_option_id": duplicate_rated.json()["options"][0]["id"],
+            "execution_source_system": "ROUTEWISE",
+            "execution_plan_id": "PLAN-A",
+            "execution_route_id": "ROUTE-002",
+            "execution_source_id": "PLAN-A:ROUTE-002",
+            "execution_request_number": "PLAN-A-ROUTE-002",
+        },
     )
-    assert duplicate_award.status_code == 409
-    assert "same commercial scope" in duplicate_award.text
+    assert duplicate_award.status_code == 200, duplicate_award.text
+    assert duplicate_award.json()["charge_document"]["id"] != document_id
+    assert duplicate_award.json()["quote_commitment"]["id"] != commitment["id"]
+    duplicate_retry = client.post(
+        f"/api/v1/charge-management/quote-requests/{duplicate_quote_id}/award",
+        headers=AUTH,
+        json={
+            "quote_option_id": duplicate_rated.json()["options"][0]["id"],
+            "execution_source_system": "ROUTEWISE",
+            "execution_plan_id": "PLAN-A",
+            "execution_route_id": "ROUTE-002",
+            "execution_source_id": "PLAN-A:ROUTE-002",
+            "execution_request_number": "PLAN-A-ROUTE-002",
+        },
+    )
+    assert duplicate_retry.status_code == 200, duplicate_retry.text
+    assert (
+        duplicate_retry.json()["charge_document"]["id"]
+        == duplicate_award.json()["charge_document"]["id"]
+    )
 
     matched_commitments = client.post(
         "/api/v1/charge-management/quote-commitments/match",
@@ -2653,7 +3644,7 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
         },
     )
     assert matched_commitments.status_code == 200, matched_commitments.text
-    assert matched_commitments.json()["matches"][0]["id"] == commitment["id"]
+    assert commitment["id"] in {row["id"] for row in matched_commitments.json()["matches"]}
 
     consumed = client.post(
         f"/api/v1/charge-management/quote-commitments/{commitment['id']}/consume",
@@ -2668,6 +3659,30 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
     assert consumed.status_code == 200, consumed.text
     assert consumed.json()["commitment"]["remaining_container_count"] == "1"
     assert consumed.json()["consumption"]["reference_number"] == "MBL-001"
+    repeated_consumption = client.post(
+        f"/api/v1/charge-management/quote-commitments/{commitment['id']}/consume",
+        headers=AUTH,
+        json={
+            "source_object_type": " shipment ",
+            "source_object_id": " SHP-100 ",
+            "reference_number": " MBL-001 ",
+            "container_count": "1",
+        },
+    )
+    assert repeated_consumption.status_code == 200, repeated_consumption.text
+    assert repeated_consumption.json()["consumption"]["id"] == consumed.json()["consumption"]["id"]
+    assert repeated_consumption.json()["commitment"]["remaining_container_count"] == "1"
+    conflicting_retry = client.post(
+        f"/api/v1/charge-management/quote-commitments/{commitment['id']}/consume",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT",
+            "source_object_id": "SHP-100",
+            "reference_number": "MBL-001",
+            "container_count": "2",
+        },
+    )
+    assert conflicting_retry.status_code == 409
 
     second_consumed = client.post(
         f"/api/v1/charge-management/quote-commitments/{commitment['id']}/consume",
@@ -2845,6 +3860,20 @@ def test_charge_document_approval_blocks_failed_processing_and_locked_reopen() -
     assert blocked.status_code == 409
     assert "failed calculation" in blocked.text
 
+    blocked_workspace = client.get(
+        f"/api/v1/charge-management/charge-documents/{document_id}/workspace",
+        headers=AUTH,
+    )
+    assert blocked_workspace.status_code == 200, blocked_workspace.text
+    assert blocked_workspace.json()["approval_ready"] is False
+    processing_check = next(
+        check
+        for check in blocked_workspace.json()["approval_checks"]
+        if check["code"] == "LINE_PROCESSING_COMPLETE"
+    )
+    assert processing_check["passed"] is False
+    assert "failed calculation" in processing_check["detail"].lower()
+
     fixed = client.put(
         f"/api/v1/charge-management/charge-documents/{document_id}/workspace",
         headers=AUTH,
@@ -2877,6 +3906,119 @@ def test_charge_document_approval_blocks_failed_processing_and_locked_reopen() -
     assert reopen.status_code == 409
 
 
+def test_invoice_delete_clears_matches_and_unblocks_manual_document_delete() -> None:
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT",
+            "source_object_id": "SHP-INVOICE-DELETE",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+            "lines": [
+                {
+                    "relationship_role": "PAYER",
+                    "charge_component_code": "BASE_FREIGHT",
+                    "expected_amount": "125.00",
+                    "currency": "USD",
+                    "basis": "SHIPMENT",
+                }
+            ],
+        },
+    )
+    assert document.status_code == 201, document.text
+    document_id = document.json()["id"]
+    invoice = client.post(
+        "/api/v1/charge-management/invoices",
+        headers=AUTH,
+        json={
+            "charge_document_id": document_id,
+            "invoice_number": "INV-DELETE-001",
+            "invoice_type": "SUPPLIER",
+            "currency": "USD",
+            "lines": [
+                {"charge_component_code": "BASE_FREIGHT", "amount": "125.00"}
+            ],
+        },
+    )
+    assert invoice.status_code == 201, invoice.text
+    invoice_id = invoice.json()["id"]
+    matched = client.post(
+        f"/api/v1/charge-management/invoices/{invoice_id}/match",
+        headers=AUTH,
+    )
+    assert matched.status_code == 200, matched.text
+    assert matched.json()["results"]
+
+    deleted = client.delete(
+        f"/api/v1/charge-management/invoices/{invoice_id}",
+        headers=AUTH,
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["id"] == invoice_id
+
+    listed = client.get(
+        "/api/v1/charge-management/invoices?q=INV-DELETE-001",
+        headers=AUTH,
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["total"] == 0
+    workspace = client.get(
+        f"/api/v1/charge-management/charge-documents/{document_id}/workspace",
+        headers=AUTH,
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["invoices"] == []
+    assert workspace.json()["match_results"] == []
+
+    deleted_document = client.delete(
+        f"/api/v1/charge-management/charge-documents/{document_id}",
+        headers=AUTH,
+    )
+    assert deleted_document.status_code == 200, deleted_document.text
+
+
+def test_invoice_delete_is_blocked_after_document_approval() -> None:
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "source_object_type": "SHIPMENT",
+            "source_object_id": "SHP-INVOICE-DELETE-LOCKED",
+            "company_id": 10,
+            "customer_id": 20,
+            "currency": "USD",
+        },
+    )
+    assert document.status_code == 201, document.text
+    document_id = document.json()["id"]
+    invoice = client.post(
+        "/api/v1/charge-management/invoices",
+        headers=AUTH,
+        json={
+            "charge_document_id": document_id,
+            "invoice_number": "INV-DELETE-LOCKED",
+            "invoice_type": "SUPPLIER",
+            "currency": "USD",
+            "lines": [],
+        },
+    )
+    assert invoice.status_code == 201, invoice.text
+    approved = client.post(
+        f"/api/v1/charge-management/charge-documents/{document_id}/approve",
+        headers=AUTH,
+    )
+    assert approved.status_code == 200, approved.text
+
+    blocked = client.delete(
+        f"/api/v1/charge-management/invoices/{invoice.json()['id']}",
+        headers=AUTH,
+    )
+    assert blocked.status_code == 409
+    assert "approved, exported, or reversed" in blocked.text
+
+
 def test_quote_awarded_charge_line_delete_is_blocked() -> None:
     rate_book_id = _create_rate_book()
     payer_contract_id = _create_contract("PAYER-DELETE-BLOCK", "PAYER", rate_book_id)
@@ -2894,6 +4036,7 @@ def test_quote_awarded_charge_line_delete_is_blocked() -> None:
             "origin_code": "BRSSZ",
             "destination_code": "USNYC",
             "mode": "OCEAN",
+            "equipment_type": "REEFER_40FT",
             "currency": "USD",
             "container_count": "1",
         },
@@ -2986,6 +4129,13 @@ def test_openapi_exposes_core_paths() -> None:
     assert "post" in paths["/api/v1/charge-management/calculations/preview"]
     assert "/api/v1/charge-management/business-dates/resolve" in paths
     assert "post" in paths["/api/v1/charge-management/business-dates/resolve"]
+    assert "/api/v1/charge-management/pricing-dimensions" in paths
+    assert "post" in paths["/api/v1/charge-management/pricing-dimensions"]
+    assert "/api/v1/charge-management/pricing-dimensions/{dimension_id}" in paths
+    assert "/api/v1/charge-management/caller-mapping-profiles" in paths
+    assert "post" in paths["/api/v1/charge-management/caller-mapping-profiles"]
+    assert "/api/v1/charge-management/caller-mapping-profiles/{profile_id}" in paths
+    assert "/api/v1/charge-management/caller-mapping-profiles/{profile_id}/preview" in paths
     assert "/api/v1/charge-management/calculation-profiles" in paths
     assert "post" in paths["/api/v1/charge-management/calculation-profiles"]
     assert "/api/v1/charge-management/calculation-profiles/{profile_id}" in paths
@@ -3017,6 +4167,8 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/calculation-templates/{calculation_template_id}/workspace" in paths
     assert "/api/v1/charge-management/contracts" in paths
     assert "/api/v1/charge-management/quote-requests" in paths
+    assert "/api/v1/charge-management/quote-requests/{quote_request_id}" in paths
+    assert "delete" in paths["/api/v1/charge-management/quote-requests/{quote_request_id}"]
     assert "/api/v1/charge-management/quote-requests/{quote_request_id}/workspace" in paths
     assert "put" in paths["/api/v1/charge-management/quote-requests/{quote_request_id}/workspace"]
     assert "/api/v1/charge-management/quote-requests/{quote_request_id}/offers" in paths
@@ -3034,6 +4186,8 @@ def test_openapi_exposes_core_paths() -> None:
     assert "delete" in paths["/api/v1/charge-management/charge-documents/{charge_document_id}/lines/{charge_line_id}"]
     assert "/api/v1/charge-management/invoices" in paths
     assert "get" in paths["/api/v1/charge-management/invoices"]
+    assert "/api/v1/charge-management/invoices/{invoice_id}" in paths
+    assert "delete" in paths["/api/v1/charge-management/invoices/{invoice_id}"]
     assert "/api/v1/charge-management/invoices/{invoice_id}/workspace" in paths
     assert "put" in paths["/api/v1/charge-management/invoices/{invoice_id}/workspace"]
     assert "/api/v1/charge-management/charge-documents/{charge_document_id}/post-export" in paths
@@ -3043,6 +4197,28 @@ def test_openapi_exposes_core_paths() -> None:
     assert "DOCUMENT_DATE" in schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
     assert "ROAD_ACTUAL_PICKUP_DATE" in schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
     assert "supplied_date_keys" in schemas["BusinessDateResolveResponse"]["properties"]
+    assert "calculation_inputs" in schemas["QuoteRequestCreate"]["properties"]
+    assert "component_calculation_inputs" in schemas["QuoteRequestCreate"]["properties"]
+    assert "date_values" in schemas["QuoteRequestCreate"]["properties"]
+    assert "caller_system_code" in schemas["QuoteRequestCreate"]["properties"]
+    assert "caller_mapping_profile_code" in schemas["QuoteRequestCreate"]["properties"]
+    assert "caller_attributes" in schemas["QuoteRequestCreate"]["properties"]
+    assert "dimension_values" in schemas["QuoteRequestCreate"]["properties"]
+    assert "dimension_codes" in schemas["RateBookPayload"]["properties"]
+    assert "dimension_values" in schemas["RateBookEntryPayload"]["properties"]
+    assert "canonical_dimension_codes" in schemas["CallerMappingProfile"]["properties"]
+    assert "source_contract_line_id" in schemas["QuoteOptionLine"]["properties"]
+    assert "source_contract_template_route_id" in schemas["QuoteOptionLine"]["properties"]
+    assert "source_calculation_template_id" in schemas["QuoteOptionLine"]["properties"]
+    assert "source_calculation_template_step_id" in schemas["QuoteOptionLine"]["properties"]
+    assert (
+        schemas["CalculationTemplateStepPayload"]["properties"]
+        ["accumulate_result_in_subtotal"]["default"]
+        is True
+    )
+    assert schemas["RateContractPayload"]["properties"]["selection_priority"]["default"] == 100
+    assert "template_routes" in schemas["RateContractPayload"]["properties"]
+    assert "charge_component_code" not in schemas["ContractTemplateRoutePayload"]["properties"]
 
     contract_path = (
         Path(__file__).resolve().parents[1]
@@ -3058,6 +4234,8 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/calculation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/allocation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/business-date-profiles" in contract["paths"]
+    assert "/api/v1/charge-management/pricing-dimensions" in contract["paths"]
+    assert "/api/v1/charge-management/caller-mapping-profiles" in contract["paths"]
     contract_schemas = contract["components"]["schemas"]
     assert "date_values" in contract_schemas["BusinessDateResolveRequest"]["properties"]
     assert contract_schemas["BusinessDateResolveRequest"]["properties"]["context"]["deprecated"] is True
@@ -3066,6 +4244,23 @@ def test_openapi_exposes_core_paths() -> None:
         "ROAD_ACTUAL_PICKUP_DATE"
         in contract_schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
     )
+    assert "calculation_inputs" in contract_schemas["QuoteRequestCreate"]["properties"]
+    assert "component_calculation_inputs" in contract_schemas["QuoteRequestCreate"]["properties"]
+    assert "date_values" in contract_schemas["QuoteRequestCreate"]["properties"]
+    assert "source_contract_line_id" in contract_schemas["QuoteOptionLine"]["properties"]
+    assert "source_contract_template_route_id" in contract_schemas["QuoteOptionLine"]["properties"]
+    assert "source_calculation_template_id" in contract_schemas["QuoteOptionLine"]["properties"]
+    assert "source_calculation_template_step_id" in contract_schemas["QuoteOptionLine"]["properties"]
+    assert (
+        contract_schemas["CalculationTemplateStepPayload"]["properties"]
+        ["accumulate_result_in_subtotal"]["default"]
+        is True
+    )
+    assert (
+        contract_schemas["RateContractPayload"]["properties"]["selection_priority"]["default"]
+        == 100
+    )
+    assert "template_routes" in contract_schemas["RateContractPayload"]["properties"]
     assert "get" in contract["paths"]["/api/v1/charge-management/rate-books"]
     assert "/api/v1/charge-management/rate-books/{rate_book_id}/workspace" in contract["paths"]
     assert "/api/v1/charge-management/rate-books/{rate_book_id}/versions" in contract["paths"]
@@ -3082,9 +4277,13 @@ def test_openapi_exposes_core_paths() -> None:
     assert "delete" in contract["paths"]["/api/v1/charge-management/charge-documents/{charge_document_id}/lines/{charge_line_id}"]
     assert "/api/v1/charge-management/invoices" in contract["paths"]
     assert "get" in contract["paths"]["/api/v1/charge-management/invoices"]
+    assert "/api/v1/charge-management/invoices/{invoice_id}" in contract["paths"]
+    assert "delete" in contract["paths"]["/api/v1/charge-management/invoices/{invoice_id}"]
     assert "/api/v1/charge-management/invoices/{invoice_id}/workspace" in contract["paths"]
     assert "put" in contract["paths"]["/api/v1/charge-management/invoices/{invoice_id}/workspace"]
     assert "/api/v1/charge-management/quote-requests" in contract["paths"]
+    assert "/api/v1/charge-management/quote-requests/{quote_request_id}" in contract["paths"]
+    assert "delete" in contract["paths"]["/api/v1/charge-management/quote-requests/{quote_request_id}"]
     assert "/api/v1/charge-management/quote-requests/{quote_request_id}/workspace" in contract["paths"]
     assert "put" in contract["paths"]["/api/v1/charge-management/quote-requests/{quote_request_id}/workspace"]
     assert "/api/v1/charge-management/quote-requests/{quote_request_id}/offers" in contract["paths"]
@@ -3411,7 +4610,61 @@ def _publish_rate_book(rate_book_id: int) -> dict:
     return response.json()
 
 
-def _create_contract(contract_number: str, contract_role: str, rate_book_id: int) -> int:
+def _create_published_template(template_code: str, rate_book_id: int) -> int:
+    response = client.post(
+        "/api/v1/charge-management/calculation-templates",
+        headers=AUTH,
+        json={
+            "template_code": template_code,
+            "template_name": template_code,
+            "status": "DRAFT",
+            "steps": [
+                {
+                    "step_number": 10,
+                    "charge_component_code": "BASE_FREIGHT",
+                    "relationship_role": "BOTH",
+                    "rate_book_id": rate_book_id,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    template_id = int(response.json()["id"])
+    published = client.post(
+        f"/api/v1/charge-management/calculation-templates/{template_id}/publish",
+        headers=AUTH,
+    )
+    assert published.status_code == 200, published.text
+    return template_id
+
+
+def _create_ocean_quote() -> dict:
+    response = client.post(
+        "/api/v1/charge-management/quote-requests",
+        headers=AUTH,
+        json={
+            "source_object_type": "MANUAL",
+            "company_id": 10,
+            "customer_id": 20,
+            "origin_code": "BRSSZ",
+            "destination_code": "USNYC",
+            "mode": "OCEAN",
+            "equipment_type": "REEFER_40FT",
+            "currency": "USD",
+            "container_count": "1",
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _create_contract(
+    contract_number: str,
+    contract_role: str,
+    rate_book_id: int,
+    *,
+    selection_priority: int = 100,
+) -> int:
     response = client.post(
         "/api/v1/charge-management/contracts",
         headers=AUTH,
@@ -3425,6 +4678,7 @@ def _create_contract(contract_number: str, contract_role: str, rate_book_id: int
             "company_id": 10,
             "customer_id": 20,
             "currency": "USD",
+            "selection_priority": selection_priority,
             "lines": [
                 {
                     "charge_component_code": "BASE_FREIGHT",

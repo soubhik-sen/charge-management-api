@@ -16,13 +16,65 @@ abstract final class LedgerFlowDesign {
   static const info = Color(0xFF175CD3);
 
   static ThemeData get theme {
-    final textTheme = ThemeData.light().textTheme.apply(
+    final baseTextTheme = ThemeData.light().textTheme.apply(
       fontFamily: 'Manrope',
       bodyColor: ink,
       displayColor: ink,
     );
+    final textTheme = baseTextTheme.copyWith(
+      headlineLarge: baseTextTheme.headlineLarge?.copyWith(
+        fontSize: 28,
+        height: 1.15,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.7,
+      ),
+      headlineMedium: baseTextTheme.headlineMedium?.copyWith(
+        fontSize: 24,
+        height: 1.2,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.45,
+      ),
+      headlineSmall: baseTextTheme.headlineSmall?.copyWith(
+        fontSize: 20,
+        height: 1.25,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.25,
+      ),
+      titleLarge: baseTextTheme.titleLarge?.copyWith(
+        fontSize: 18,
+        height: 1.25,
+        fontWeight: FontWeight.w700,
+      ),
+      titleMedium: baseTextTheme.titleMedium?.copyWith(
+        fontSize: 14,
+        height: 1.35,
+        fontWeight: FontWeight.w600,
+      ),
+      titleSmall: baseTextTheme.titleSmall?.copyWith(
+        fontSize: 12,
+        height: 1.35,
+        fontWeight: FontWeight.w600,
+      ),
+      bodyLarge: baseTextTheme.bodyLarge?.copyWith(fontSize: 13, height: 1.45),
+      bodyMedium: baseTextTheme.bodyMedium?.copyWith(fontSize: 13, height: 1.4),
+      bodySmall: baseTextTheme.bodySmall?.copyWith(fontSize: 11, height: 1.4),
+      labelLarge: baseTextTheme.labelLarge?.copyWith(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
+      labelMedium: baseTextTheme.labelMedium?.copyWith(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+      ),
+      labelSmall: baseTextTheme.labelSmall?.copyWith(
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+      ),
+    );
     return ThemeData(
       useMaterial3: true,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       colorScheme: ColorScheme.fromSeed(
         seedColor: teal,
         primary: teal,
@@ -42,38 +94,80 @@ abstract final class LedgerFlowDesign {
         ),
       ),
       inputDecorationTheme: const InputDecorationTheme(
+        isDense: true,
         filled: true,
         fillColor: Colors.white,
+        constraints: BoxConstraints(minHeight: 38),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(9)),
+          borderRadius: BorderRadius.all(Radius.circular(7)),
           borderSide: BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(9)),
+          borderRadius: BorderRadius.all(Radius.circular(7)),
           borderSide: BorderSide(color: border),
         ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        labelStyle: TextStyle(fontSize: 12),
+        helperStyle: TextStyle(fontSize: 11, height: 1.35),
+        errorStyle: TextStyle(fontSize: 11, height: 1.35),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: teal,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 13),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: ink,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 13),
           side: const BorderSide(color: border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          minimumSize: const Size(0, 32),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          minimumSize: const Size(30, 30),
+          maximumSize: const Size(34, 34),
+          padding: const EdgeInsets.all(5),
+        ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        minTileHeight: 37,
+        minLeadingWidth: 20,
+        minVerticalPadding: 0,
+        contentPadding: EdgeInsets.symmetric(horizontal: 10),
+        titleTextStyle: TextStyle(
+          color: ink,
+          fontFamily: 'Manrope',
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
         ),
       ),
       dataTableTheme: const DataTableThemeData(
-        headingTextStyle: TextStyle(fontWeight: FontWeight.w600, color: muted),
-        dataTextStyle: TextStyle(fontSize: 13, color: ink),
+        headingTextStyle: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: muted,
+        ),
+        dataTextStyle: TextStyle(fontSize: 12, color: ink),
         headingRowColor: WidgetStatePropertyAll(Color(0xFFF9FAFB)),
+        headingRowHeight: 38,
+        dataRowMinHeight: 42,
+        dataRowMaxHeight: 52,
+        horizontalMargin: 14,
+        columnSpacing: 20,
         dividerThickness: 1,
       ),
     );
@@ -284,13 +378,13 @@ class StatusPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
         child: Text(
           value.replaceAll('_', ' '),
           style: TextStyle(
             color: color,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),

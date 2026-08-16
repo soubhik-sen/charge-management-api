@@ -5,7 +5,7 @@ import 'package:ledgerflow_web/features/ledgerflow_shell.dart';
 import 'package:ledgerflow_web/main.dart';
 
 void main() {
-  testWidgets('opens the compact demo workspace and navigates to quotes', (
+  testWidgets('opens the normal-scale demo workspace and navigates to quotes', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(800, 900));
@@ -16,10 +16,10 @@ void main() {
 
     expect(find.byType(LedgerFlowShell), findsOneWidget);
     expect(find.byType(LedgerFlowLogo), findsWidgets);
-    final applicationScale = tester.widget<Transform>(
+    expect(
       find.byKey(const ValueKey('ledgerflow-application-scale')),
+      findsNothing,
     );
-    expect(applicationScale.transform.storage.first, closeTo(0.8, 0.001));
     expect(find.text('Charge operations'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.menu));
