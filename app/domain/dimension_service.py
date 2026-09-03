@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,7 +29,6 @@ from app.domain.models import (
     RateBookEntryPayload,
     RateBookPayload,
 )
-
 
 BUILT_IN_DIMENSIONS = (
     (1, "ORIGIN_CODE", "Origin", "origin_code"),
@@ -66,6 +65,15 @@ def seed_system_dimensions(db: Session) -> None:
             )
         )
     db.flush()
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text(
+                "SELECT setval("
+                "pg_get_serial_sequence('charge_pricing_dimension', 'id'), "
+                "COALESCE(MAX(id), 1), COUNT(*) > 0) "
+                "FROM charge_pricing_dimension"
+            )
+        )
 
 
 class PricingDimensionService:

@@ -86,6 +86,12 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "end_timestamp_key",
         "free_time_days",
     } <= free_time_rule_columns
+    free_time_scope_checks = {
+        constraint["name"]: constraint["sqltext"]
+        for constraint in inspector.get_check_constraints("charge_free_time_rule")
+        if constraint.get("name")
+    }
+    assert "TENANT" in free_time_scope_checks["ck_charge_free_time_rule_scope_type"]
     assert "charge_free_time_profile" in tables
     free_time_profile_columns = {column["name"] for column in inspector.get_columns("charge_free_time_profile")}
     assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= free_time_profile_columns
@@ -304,7 +310,7 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         pricing_dimension_count = connection.execute(
             text("select count(*) from charge_pricing_dimension where is_system = true")
         ).scalar_one()
-    assert version == "0032_owner_scoped_profiles_and_free_time_rules"
+    assert version == "0033_free_time_scope_and_dimension_identity"
     assert source_code == "MANUAL"
     assert flat_count == 1
     assert road_component_count == 22

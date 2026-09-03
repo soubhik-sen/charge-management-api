@@ -694,6 +694,10 @@ class ChargeFreeTimeProfileRuleRow(Base):
     __table_args__ = (
         UniqueConstraint("version_id", "sequence", name="uq_charge_free_time_rule_sequence"),
         UniqueConstraint("version_id", "rule_code", name="uq_charge_free_time_rule_code"),
+        CheckConstraint(
+            "scope_type in ('GLOBAL', 'TENANT', 'COMPANY', 'CUSTOMER', 'VENDOR', 'FORWARDER', 'CARRIER')",
+            name="ck_charge_free_time_rule_scope_type",
+        ),
         Index("ix_charge_free_time_rule_version", "version_id"),
         Index("ix_charge_free_time_rule_scope", "scope_type", "scope_id", "event_type", "priority"),
     )

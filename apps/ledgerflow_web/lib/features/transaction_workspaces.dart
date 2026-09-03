@@ -2438,45 +2438,48 @@ class _QuoteRequestEditorDialogState extends State<QuoteRequestEditorDialog> {
                   );
                 }),
                 const SizedBox(height: 16),
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  title: const Text('Advanced calculation inputs'),
-                  subtitle: const Text(
-                    'Use factor codes such as DISTANCE_KM, STOP_COUNT, PALLET_COUNT, or component-specific overrides.',
+                Material(
+                  type: MaterialType.transparency,
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Advanced calculation inputs'),
+                    subtitle: const Text(
+                      'Use factor codes such as DISTANCE_KM, STOP_COUNT, PALLET_COUNT, or component-specific overrides.',
+                    ),
+                    children: [
+                      TextFormField(
+                        controller: _calculationInputsJson,
+                        minLines: 3,
+                        maxLines: 8,
+                        decoration: const InputDecoration(
+                          labelText: 'Global calculation inputs (JSON)',
+                          helperText: 'Example: {"DISTANCE_KM": 480}',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _componentInputsJson,
+                        minLines: 3,
+                        maxLines: 8,
+                        decoration: const InputDecoration(
+                          labelText: 'Component calculation inputs (JSON)',
+                          helperText:
+                              'Example: {"ROAD_TOLL": {"DISTANCE_KM": 480}}',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _contextJson,
+                        minLines: 3,
+                        maxLines: 8,
+                        decoration: const InputDecoration(
+                          labelText: 'Matching and precondition context (JSON)',
+                          helperText:
+                              'Percentage bases, duration, and template precondition flags',
+                        ),
+                      ),
+                    ],
                   ),
-                  children: [
-                    TextFormField(
-                      controller: _calculationInputsJson,
-                      minLines: 3,
-                      maxLines: 8,
-                      decoration: const InputDecoration(
-                        labelText: 'Global calculation inputs (JSON)',
-                        helperText: 'Example: {"DISTANCE_KM": 480}',
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _componentInputsJson,
-                      minLines: 3,
-                      maxLines: 8,
-                      decoration: const InputDecoration(
-                        labelText: 'Component calculation inputs (JSON)',
-                        helperText:
-                            'Example: {"ROAD_TOLL": {"DISTANCE_KM": 480}}',
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _contextJson,
-                      minLines: 3,
-                      maxLines: 8,
-                      decoration: const InputDecoration(
-                        labelText: 'Matching and precondition context (JSON)',
-                        helperText:
-                            'Percentage bases, duration, and template precondition flags',
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),

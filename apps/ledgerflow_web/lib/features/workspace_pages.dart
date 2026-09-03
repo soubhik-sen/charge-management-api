@@ -4757,20 +4757,23 @@ class _SnapshotInspector extends StatelessWidget {
       border: Border.all(color: LedgerFlowDesign.border),
       borderRadius: BorderRadius.circular(8),
     ),
-    child: ExpansionTile(
-      dense: true,
-      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      expandedCrossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: double.infinity,
-          child: SelectableText(
-            const JsonEncoder.withIndent('  ').convert(value),
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+    child: Material(
+      type: MaterialType.transparency,
+      child: ExpansionTile(
+        dense: true,
+        title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: SelectableText(
+              const JsonEncoder.withIndent('  ').convert(value),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }
