@@ -4,12 +4,12 @@ This guide covers the master-data and quote-testing workflows available in the L
 
 ## Connect The UI
 
-The deployed UI starts in a read-only demo workspace. Demo data is intentionally local to the browser build and is not written to the database.
+The deployed UI starts in an empty disconnected workspace. It displays records only after a successful API connection; local fixture data is reserved for automated component tests and is never presented by the application shell.
 
 1. Select **Connect API** in the top bar.
 2. Enter the API base URL, such as `http://localhost:8000`.
 3. Enter a bearer token issued for that API.
-4. Confirm that the sidebar status changes from **Demo workspace** to **Live API**.
+4. Confirm that the sidebar status changes from **Not connected** to **Live API**.
 
 The token is held only in memory. Reloading the page removes it. The browser never receives the JWT signing secret.
 

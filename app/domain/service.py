@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import unicodedata
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, DecimalException, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
 
@@ -40,6 +40,15 @@ from app.domain.models import (
     BusinessDateProfileStep,
     BusinessDateProfileVersion,
     BusinessDateProfileVersionCreate,
+    FreeTimeDurationPreviewRequest,
+    FreeTimeDurationPreviewResponse,
+    FreeTimeProfile,
+    FreeTimeProfileCreate,
+    FreeTimeProfileListResponse,
+    FreeTimeProfileUpdate,
+    FreeTimeProfileVersion,
+    FreeTimeProfileVersionCreate,
+    FreeTimeRule,
     ChargeComponent,
     ChargeComponentAlias,
     ChargeComponentAliasListResponse,
@@ -86,6 +95,7 @@ from app.domain.models import (
     QuoteCommitment,
     QuoteCommitmentConsumeRequest,
     QuoteCommitmentConsumeResponse,
+    QuoteCommitmentCancelResponse,
     QuoteCommitmentConsumption,
     QuoteCommitmentConsumptionReverseRequest,
     QuoteCommitmentMatchRequest,
@@ -307,6 +317,23 @@ def _business_date_policy_mode(value: Any) -> str:
     return cleaned if cleaned in BUSINESS_DATE_POLICY_MODES else "LEGACY_BASIS"
 
 
+def _normalize_owner_scope(owner_type: Any, owner_id: Any) -> tuple[str, int]:
+    if not isinstance(owner_type, str):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_type is required")
+    normalized_type = owner_type.strip().upper()
+    if not normalized_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_type is required")
+    if owner_id in (None, ""):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_id is required")
+    try:
+        normalized_id = int(owner_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_id must be an integer") from None
+    if normalized_id < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_id must be greater than or equal to zero")
+    return normalized_type, normalized_id
+
+
 def _coerce_date(value: Any) -> date | None:
     if isinstance(value, date):
         return value
@@ -524,6 +551,9 @@ class InMemoryChargeRepository:
         self.business_date_profiles: dict[int, BusinessDateProfile] = {}
         self.business_date_profile_versions: dict[int, BusinessDateProfileVersion] = {}
         self.business_date_profile_assignments: dict[int, BusinessDateProfileAssignment] = {}
+        self.free_time_profiles: dict[int, FreeTimeProfile] = {}
+        self.free_time_profile_versions: dict[int, FreeTimeProfileVersion] = {}
+        self.free_time_rules: dict[int, FreeTimeRule] = {}
         self.components: dict[int, ChargeComponent] = {}
         self.components_by_code: dict[str, ChargeComponent] = {}
         self.component_aliases: dict[int, ChargeComponentAlias] = {}
@@ -644,6 +674,8 @@ class InMemoryChargeRepository:
                 id=profile_id,
                 profile_code=str(row["profile_code"]).strip().upper(),
                 profile_name=str(row["profile_name"]).strip(),
+                owner_type="SYSTEM",
+                owner_id=0,
                 description=_clean_optional(row.get("description")),  # type: ignore[arg-type]
                 is_active=bool(row.get("is_active", True)),
                 published_version_id=version.id,
@@ -682,6 +714,8 @@ class InMemoryChargeRepository:
                 id=profile_id,
                 profile_code=str(row["profile_code"]),
                 profile_name=str(row["profile_name"]),
+                owner_type="SYSTEM",
+                owner_id=0,
                 description=_clean_optional(row.get("description")),  # type: ignore[arg-type]
                 published_version_id=version.id,
                 published_version_number=version.version_number,
@@ -712,6 +746,8 @@ class InMemoryChargeRepository:
                 id=profile_id,
                 profile_code=str(row["profile_code"]),
                 profile_name=str(row["profile_name"]),
+                owner_type="SYSTEM",
+                owner_id=0,
                 published_version_id=version.id,
                 published_version_number=version.version_number,
                 versions=[version],
@@ -743,10 +779,17 @@ class ChargeManagementService:
         search: str | None = None,
         source_level: str | None = None,
         status_filter: str | None = None,
+        owner_type: str | None = None,
+        owner_id: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> ChargeAllocationProfileListResponse:
         rows = list(self.repository.allocation_profiles.values())
+        if owner_type:
+            normalized_owner_type = owner_type.strip().upper()
+            rows = [row for row in rows if row.owner_type == normalized_owner_type]
+        if owner_id is not None:
+            rows = [row for row in rows if row.owner_id == int(owner_id)]
         if source_level:
             normalized_shape = source_level.strip().upper()
             rows = [
@@ -789,6 +832,7 @@ class ChargeManagementService:
         payload: ChargeAllocationProfileUpdate,
     ) -> ChargeAllocationProfile:
         profile = self._require_allocation_profile(profile_id)
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
         if not code or not name:
@@ -797,7 +841,10 @@ class ChargeManagementService:
                 detail="Allocation profile_code and profile_name are required.",
             )
         if any(
-            row.profile_code == code and row.id != profile.id
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            and row.id != profile.id
             for row in self.repository.allocation_profiles.values()
         ):
             raise HTTPException(
@@ -806,10 +853,13 @@ class ChargeManagementService:
             )
         profile.profile_code = code
         profile.profile_name = name
+        profile.owner_type = owner_type
+        profile.owner_id = owner_id
         profile.updated_at = utcnow()
         return profile
 
     def create_allocation_profile(self, payload: ChargeAllocationProfileCreate) -> ChargeAllocationProfile:
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
         if not code or not name:
@@ -817,7 +867,12 @@ class ChargeManagementService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="profile_code and profile_name are required",
             )
-        if any(row.profile_code == code for row in self.repository.allocation_profiles.values()):
+        if any(
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            for row in self.repository.allocation_profiles.values()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Charge allocation profile code already exists",
@@ -832,6 +887,8 @@ class ChargeManagementService:
             id=profile_id,
             profile_code=code,
             profile_name=name,
+            owner_type=owner_type,
+            owner_id=owner_id,
             versions=[version],
         )
         self.repository.allocation_profiles[profile.id] = profile
@@ -909,10 +966,17 @@ class ChargeManagementService:
         search: str | None = None,
         application_level: str | None = None,
         status_filter: str | None = None,
+        owner_type: str | None = None,
+        owner_id: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> ChargeCalculationProfileListResponse:
         rows = list(self.repository.calculation_profiles.values())
+        if owner_type:
+            normalized_owner_type = owner_type.strip().upper()
+            rows = [row for row in rows if row.owner_type == normalized_owner_type]
+        if owner_id is not None:
+            rows = [row for row in rows if row.owner_id == int(owner_id)]
         if application_level:
             normalized_level = application_level.strip().upper()
             rows = [
@@ -950,6 +1014,7 @@ class ChargeManagementService:
         return self._require_calculation_profile(profile_id)
 
     def create_calculation_profile(self, payload: ChargeCalculationProfileCreate) -> ChargeCalculationProfile:
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
         if not code or not name:
@@ -957,7 +1022,12 @@ class ChargeManagementService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Calculation profile_code and profile_name are required.",
             )
-        if any(row.profile_code == code for row in self.repository.calculation_profiles.values()):
+        if any(
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            for row in self.repository.calculation_profiles.values()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Charge calculation profile code already exists.",
@@ -972,6 +1042,8 @@ class ChargeManagementService:
             id=profile_id,
             profile_code=code,
             profile_name=name,
+            owner_type=owner_type,
+            owner_id=owner_id,
             description=_clean_optional(payload.description),
             is_active=bool(payload.is_active),
             versions=[version],
@@ -986,6 +1058,7 @@ class ChargeManagementService:
         payload: ChargeCalculationProfileUpdate,
     ) -> ChargeCalculationProfile:
         profile = self._require_calculation_profile(profile_id)
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
         if not code or not name:
@@ -994,7 +1067,10 @@ class ChargeManagementService:
                 detail="Calculation profile_code and profile_name are required.",
             )
         if any(
-            row.profile_code == code and row.id != profile.id
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            and row.id != profile.id
             for row in self.repository.calculation_profiles.values()
         ):
             raise HTTPException(
@@ -1003,6 +1079,8 @@ class ChargeManagementService:
             )
         profile.profile_code = code
         profile.profile_name = name
+        profile.owner_type = owner_type
+        profile.owner_id = owner_id
         profile.description = _clean_optional(payload.description)
         profile.is_active = bool(payload.is_active)
         profile.updated_at = utcnow()
@@ -1109,10 +1187,17 @@ class ChargeManagementService:
         *,
         search: str | None = None,
         status_filter: str | None = None,
+        owner_type: str | None = None,
+        owner_id: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> BusinessDateProfileListResponse:
         rows = list(self.repository.business_date_profiles.values())
+        if owner_type:
+            normalized_owner_type = owner_type.strip().upper()
+            rows = [row for row in rows if row.owner_type == normalized_owner_type]
+        if owner_id is not None:
+            rows = [row for row in rows if row.owner_id == int(owner_id)]
         if status_filter:
             normalized_status = status_filter.strip().upper()
             rows = [
@@ -1220,11 +1305,17 @@ class ChargeManagementService:
         )
 
     def create_business_date_profile(self, payload: BusinessDateProfileCreate) -> BusinessDateProfile:
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
         if not code or not name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="profile_code and profile_name are required")
-        if any(row.profile_code == code for row in self.repository.business_date_profiles.values()):
+        if any(
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            for row in self.repository.business_date_profiles.values()
+        ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Business date profile code already exists")
         profile_id = self.repository.next_id("business_date_profile")
         version = self._business_date_profile_version_from_payload(
@@ -1236,6 +1327,8 @@ class ChargeManagementService:
             id=profile_id,
             profile_code=code,
             profile_name=name,
+            owner_type=owner_type,
+            owner_id=owner_id,
             description=_clean_optional(payload.description),
             versions=[version],
         )
@@ -1249,14 +1342,23 @@ class ChargeManagementService:
         payload: BusinessDateProfileUpdate,
     ) -> BusinessDateProfile:
         profile = self._require_business_date_profile(profile_id)
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
         code = payload.profile_code.strip().upper()
         name = payload.profile_name.strip()
         if not code or not name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="profile_code and profile_name are required")
-        if any(row.profile_code == code and row.id != profile.id for row in self.repository.business_date_profiles.values()):
+        if any(
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            and row.id != profile.id
+            for row in self.repository.business_date_profiles.values()
+        ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Business date profile code already exists")
         profile.profile_code = code
         profile.profile_name = name
+        profile.owner_type = owner_type
+        profile.owner_id = owner_id
         profile.description = _clean_optional(payload.description)
         profile.updated_at = utcnow()
         return profile
@@ -1438,6 +1540,384 @@ class ChargeManagementService:
         if profile is not None:
             profile.updated_at = utcnow()
         return deleted
+
+    def _free_time_rule_from_payload(
+        self,
+        *,
+        profile_version_id: int,
+        payload: FreeTimeRuleCreate,
+        rule_id: int,
+    ) -> FreeTimeRule:
+        scope_type = payload.scope_type.strip().upper() if isinstance(payload.scope_type, str) else "GLOBAL"
+        event_type = _clean_optional(payload.event_type.upper() if isinstance(payload.event_type, str) else payload.event_type)
+        start_timestamp_key = payload.start_timestamp_key.strip().upper()
+        end_timestamp_key = payload.end_timestamp_key.strip().upper()
+        if not start_timestamp_key or not end_timestamp_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="start_timestamp_key and end_timestamp_key are required for a free-time rule.",
+            )
+        return FreeTimeRule(
+            id=rule_id,
+            profile_version_id=profile_version_id,
+            sequence=int(payload.sequence),
+            rule_code=payload.rule_code.strip().upper(),
+            rule_name=payload.rule_name.strip(),
+            scope_type=scope_type,
+            scope_id=int(payload.scope_id) if payload.scope_id is not None else None,
+            event_type=event_type,
+            start_timestamp_key=start_timestamp_key,
+            end_timestamp_key=end_timestamp_key,
+            free_time_days=dec(payload.free_time_days),
+            match_facts_json=dict(payload.match_facts_json or {}),
+            priority=int(payload.priority),
+            notes=_clean_optional(payload.notes),
+            is_active=bool(payload.is_active),
+        )
+
+    def _free_time_profile_version_from_payload(
+        self,
+        *,
+        profile_id: int,
+        payload: FreeTimeProfileVersionCreate,
+        version_number: int,
+    ) -> FreeTimeProfileVersion:
+        version_id = self.repository.next_id("free_time_profile_version")
+        resolved_rules = [
+            self._free_time_rule_from_payload(
+                profile_version_id=version_id,
+                payload=rule,
+                rule_id=self.repository.next_id("free_time_rule"),
+            )
+            for rule in payload.rules
+        ]
+        return FreeTimeProfileVersion(
+            id=version_id,
+            profile_id=profile_id,
+            version_number=version_number,
+            status="DRAFT",
+            lock_version=1,
+            effective_from=payload.effective_from,
+            effective_to=payload.effective_to,
+            notes=_clean_optional(payload.notes),
+            rules=sorted(resolved_rules, key=lambda item: (item.sequence, item.priority, item.id)),
+        )
+
+    def _normalized_free_time_profile_version_payload(self, payload: FreeTimeProfileVersionCreate) -> dict[str, Any]:
+        return {
+            "effective_from": payload.effective_from,
+            "effective_to": payload.effective_to,
+            "notes": _clean_optional(payload.notes),
+            "rules": list(payload.rules),
+        }
+
+    def list_free_time_profiles(
+        self,
+        *,
+        search: str | None = None,
+        status_filter: str | None = None,
+        owner_type: str | None = None,
+        owner_id: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> FreeTimeProfileListResponse:
+        rows = list(self.repository.free_time_profiles.values())
+        if owner_type:
+            normalized_owner_type = owner_type.strip().upper()
+            rows = [row for row in rows if row.owner_type == normalized_owner_type]
+        if owner_id is not None:
+            rows = [row for row in rows if row.owner_id == int(owner_id)]
+        if status_filter:
+            normalized_status = status_filter.strip().upper()
+            rows = [row for row in rows if any(version.status == normalized_status for version in row.versions)]
+        if search:
+            normalized = search.strip().upper()
+            rows = [
+                row
+                for row in rows
+                if normalized in row.profile_code.upper()
+                or normalized in row.profile_name.upper()
+                or normalized in row.owner_type.upper()
+                or any(
+                    normalized in rule.rule_code.upper()
+                    or normalized in rule.rule_name.upper()
+                    for version in row.versions
+                    for rule in version.rules
+                )
+            ]
+        rows.sort(key=lambda row: (row.owner_type, row.owner_id, row.profile_code, row.id))
+        safe_offset = max(int(offset), 0)
+        safe_limit = min(max(int(limit), 1), 200)
+        return FreeTimeProfileListResponse(
+            items=rows[safe_offset : safe_offset + safe_limit],
+            total=len(rows),
+            limit=safe_limit,
+            offset=safe_offset,
+        )
+
+    def get_free_time_profile(self, profile_id: int) -> FreeTimeProfile:
+        return self._require_free_time_profile(profile_id)
+
+    def create_free_time_profile(self, payload: FreeTimeProfileCreate) -> FreeTimeProfile:
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
+        code = payload.profile_code.strip().upper()
+        name = payload.profile_name.strip()
+        if not code or not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="profile_code and profile_name are required")
+        if any(
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            for row in self.repository.free_time_profiles.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Free-time profile code already exists")
+        profile_id = self.repository.next_id("free_time_profile")
+        version = self._free_time_profile_version_from_payload(
+            profile_id=profile_id,
+            payload=payload.initial_version,
+            version_number=1,
+        )
+        profile = FreeTimeProfile(
+            id=profile_id,
+            profile_code=code,
+            profile_name=name,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            description=_clean_optional(payload.description),
+            versions=[version],
+        )
+        self.repository.free_time_profiles[profile.id] = profile
+        self.repository.free_time_profile_versions[version.id] = version
+        for rule in version.rules:
+            self.repository.free_time_rules[rule.id] = rule
+        return profile
+
+    def update_free_time_profile(
+        self,
+        profile_id: int,
+        payload: FreeTimeProfileUpdate,
+    ) -> FreeTimeProfile:
+        profile = self._require_free_time_profile(profile_id)
+        owner_type, owner_id = _normalize_owner_scope(payload.owner_type, payload.owner_id)
+        code = payload.profile_code.strip().upper()
+        name = payload.profile_name.strip()
+        if not code or not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="profile_code and profile_name are required")
+        if any(
+            row.profile_code == code
+            and row.owner_type == owner_type
+            and row.owner_id == owner_id
+            and row.id != profile.id
+            for row in self.repository.free_time_profiles.values()
+        ):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Free-time profile code already exists")
+        profile.profile_code = code
+        profile.profile_name = name
+        profile.owner_type = owner_type
+        profile.owner_id = owner_id
+        profile.description = _clean_optional(payload.description)
+        profile.updated_at = utcnow()
+        return profile
+
+    def create_free_time_profile_version(
+        self,
+        profile_id: int,
+        payload: FreeTimeProfileVersionCreate,
+    ) -> FreeTimeProfile:
+        profile = self._require_free_time_profile(profile_id)
+        next_version_number = max((row.version_number for row in profile.versions), default=0) + 1
+        version = self._free_time_profile_version_from_payload(
+            profile_id=profile.id,
+            payload=payload,
+            version_number=next_version_number,
+        )
+        profile.versions = sorted([*profile.versions, version], key=lambda row: (row.version_number, row.id))
+        profile.updated_at = utcnow()
+        self.repository.free_time_profile_versions[version.id] = version
+        for rule in version.rules:
+            self.repository.free_time_rules[rule.id] = rule
+        return profile
+
+    def update_free_time_profile_version(
+        self,
+        version_id: int,
+        payload: FreeTimeProfileVersionCreate,
+    ) -> FreeTimeProfileVersion:
+        version = self._require_free_time_profile_version(version_id)
+        if version.status == "PUBLISHED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Published free-time profile versions are immutable; create a new version instead.",
+            )
+        if (
+            payload.expected_lock_version is not None
+            and payload.expected_lock_version != version.lock_version
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Free-time profile version was modified concurrently; expected lock version "
+                    f"{payload.expected_lock_version}, current value is {version.lock_version}."
+                ),
+            )
+        normalized = self._normalized_free_time_profile_version_payload(payload)
+        version.notes = normalized["notes"]
+        version.effective_from = normalized["effective_from"]
+        version.effective_to = normalized["effective_to"]
+        resolved_rules = [
+            self._free_time_rule_from_payload(
+                profile_version_id=version.id,
+                payload=rule_payload,
+                rule_id=self.repository.next_id("free_time_rule"),
+            )
+            for rule_payload in normalized["rules"]
+        ]
+        for existing_rule in version.rules:
+            self.repository.free_time_rules.pop(existing_rule.id, None)
+        version.rules = resolved_rules
+        version.lock_version += 1
+        version.updated_at = utcnow()
+        profile = self._require_free_time_profile(version.profile_id)
+        profile.updated_at = utcnow()
+        return version
+
+    def publish_free_time_profile_version(self, version_id: int) -> FreeTimeProfile:
+        version = self._require_free_time_profile_version(version_id)
+        profile = self._require_free_time_profile(version.profile_id)
+        for existing in profile.versions:
+            if existing.id == version.id:
+                existing.status = "PUBLISHED"
+                existing.published_at = utcnow()
+                existing.lock_version += 1
+                existing.updated_at = utcnow()
+            elif existing.status == "PUBLISHED":
+                existing.status = "RETIRED"
+                existing.updated_at = utcnow()
+        profile.published_version_id = version.id
+        profile.published_version_number = version.version_number
+        profile.updated_at = utcnow()
+        return profile
+
+    def preview_free_time_duration(
+        self,
+        profile_id: int,
+        payload: FreeTimeDurationPreviewRequest,
+    ) -> FreeTimeDurationPreviewResponse:
+        profile = self._require_free_time_profile(profile_id)
+        version = self._require_published_free_time_profile_version(profile)
+        start_candidates = self._normalize_free_time_timestamp_map(payload.event_timestamps)
+        facts = self._normalize_free_time_fact_map(payload.event_facts)
+        selected = self._match_free_time_rule(version, payload, start_candidates, facts)
+        if selected is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No free-time rule matched the supplied scope, facts, and timestamps.",
+            )
+        rule, start_timestamp, end_timestamp = selected
+        duration_days = self._duration_days_between(start_timestamp, end_timestamp)
+        chargeable_days = max(duration_days - dec(rule.free_time_days), Decimal("0"))
+        return FreeTimeDurationPreviewResponse(
+            profile_id=profile.id,
+            profile_code=profile.profile_code,
+            profile_version_id=version.id,
+            rule_id=rule.id,
+            rule_code=rule.rule_code,
+            rule_name=rule.rule_name,
+            scope_type=rule.scope_type,
+            scope_id=rule.scope_id,
+            event_type=rule.event_type,
+            start_timestamp_key=rule.start_timestamp_key,
+            end_timestamp_key=rule.end_timestamp_key,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            duration_days=duration_days,
+            free_time_days=dec(rule.free_time_days),
+            chargeable_days=chargeable_days,
+            event_facts=facts,
+            event_timestamps=start_candidates,
+        )
+
+    def _normalize_free_time_timestamp_map(self, values: dict[str, Any]) -> dict[str, datetime]:
+        normalized: dict[str, datetime] = {}
+        for raw_key, raw_value in (values or {}).items():
+            key = str(raw_key).strip().upper()
+            if not key:
+                continue
+            if isinstance(raw_value, datetime):
+                value = raw_value
+            else:
+                value = datetime.fromisoformat(str(raw_value))
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            normalized[key] = value
+        return normalized
+
+    def _normalize_free_time_fact_map(self, values: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for raw_key, raw_value in (values or {}).items():
+            key = str(raw_key).strip().upper()
+            if not key:
+                continue
+            normalized[key] = raw_value
+        return normalized
+
+    def _duration_days_between(self, start_timestamp: datetime, end_timestamp: datetime) -> Decimal:
+        if end_timestamp < start_timestamp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="end_timestamp must be greater than or equal to start_timestamp.",
+            )
+        seconds = Decimal(str((end_timestamp - start_timestamp).total_seconds()))
+        return (seconds / Decimal("86400")).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+    def _match_free_time_rule(
+        self,
+        version: FreeTimeProfileVersion,
+        payload: FreeTimeDurationPreviewRequest,
+        timestamps: dict[str, datetime],
+        facts: dict[str, Any],
+    ) -> tuple[FreeTimeRule, datetime, datetime] | None:
+        normalized_scope_type = payload.scope_type.strip().upper() if payload.scope_type else None
+        candidates: list[tuple[int, int, int, str, int, FreeTimeRule]] = []
+        for rule in version.rules:
+            if not rule.is_active:
+                continue
+            if normalized_scope_type is None:
+                if rule.scope_type != "GLOBAL":
+                    continue
+            elif rule.scope_type != normalized_scope_type:
+                continue
+            if payload.scope_id is None:
+                if rule.scope_id is not None:
+                    continue
+            elif rule.scope_id != payload.scope_id:
+                continue
+            if payload.event_type is not None and rule.event_type is not None and rule.event_type != payload.event_type:
+                continue
+            if rule.event_type is not None and payload.event_type is None:
+                continue
+            if any(facts.get(str(key).strip().upper()) != value for key, value in rule.match_facts_json.items()):
+                continue
+            start_timestamp = timestamps.get(rule.start_timestamp_key.upper())
+            end_timestamp = timestamps.get(rule.end_timestamp_key.upper())
+            if start_timestamp is None or end_timestamp is None:
+                continue
+            if end_timestamp < start_timestamp:
+                continue
+            specificity = len(rule.match_facts_json)
+            if rule.scope_type != "GLOBAL":
+                specificity += 2
+            if rule.scope_id is not None:
+                specificity += 1
+            if rule.event_type is not None:
+                specificity += 1
+            candidates.append((specificity, -int(rule.priority), -int(rule.sequence), rule.rule_code, rule.id, rule))
+        if not candidates:
+            return None
+        _, _, _, _, _, rule = sorted(candidates, reverse=True)[0]
+        start_timestamp = timestamps[rule.start_timestamp_key]
+        end_timestamp = timestamps[rule.end_timestamp_key]
+        return rule, start_timestamp, end_timestamp
 
     def list_components(
         self,
@@ -3188,6 +3668,43 @@ class ChargeManagementService:
         return QuoteCommitmentConsumeResponse(
             commitment=self._with_commitment_remaining(commitment),
             consumption=consumption,
+        )
+
+    def cancel_quote_commitment(
+        self, commitment_id: int, reason: str
+    ) -> QuoteCommitmentCancelResponse:
+        commitment = self.repository.quote_commitments.get(commitment_id)
+        if commitment is None:
+            raise HTTPException(status_code=404, detail="Quote commitment not found")
+        if commitment.status == "CANCELLED":
+            return QuoteCommitmentCancelResponse(
+                commitment=self._with_commitment_remaining(commitment),
+                charge_document=self._require_document(commitment.charge_document_id),
+            )
+        active_consumptions = [
+            item
+            for item in self.repository.quote_commitment_consumptions.values()
+            if item.commitment_id == commitment_id and item.status != "REVERSED"
+        ]
+        if active_consumptions:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "COMMITMENT_ALREADY_CONSUMED",
+                    "message": "Reverse active commitment consumptions before cancellation.",
+                },
+            )
+        commitment.status = "CANCELLED"
+        commitment.updated_at = utcnow()
+        document = self._require_document(commitment.charge_document_id)
+        if document.status not in {"REVERSED", "CANCELLED"}:
+            document.status = "CANCELLED"
+            document.reversed_at = utcnow()
+            document.reversal_reason = reason
+            self._sync_document_line_statuses(document, "CANCELLED")
+        return QuoteCommitmentCancelResponse(
+            commitment=self._with_commitment_remaining(commitment),
+            charge_document=document,
         )
 
     def create_charge_document(self, payload: ChargeDocumentCreate) -> ChargeDocument:
@@ -6700,6 +7217,56 @@ class ChargeManagementService:
                 detail=f"Unknown business date profile assignment id: {assignment_id}",
             )
         return assignment
+
+    def _require_free_time_profile(self, profile_id: int) -> FreeTimeProfile:
+        profile = self.repository.free_time_profiles.get(int(profile_id))
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unknown free-time profile id: {profile_id}",
+            )
+        return profile
+
+    def _require_free_time_profile_version(self, version_id: int) -> FreeTimeProfileVersion:
+        version = self.repository.free_time_profile_versions.get(int(version_id))
+        if version is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unknown free-time profile version id: {version_id}",
+            )
+        if version.status not in {"DRAFT", "PUBLISHED", "RETIRED"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Unsupported free-time profile version status: {version.status}",
+            )
+        return version
+
+    def _require_published_free_time_profile_version(self, profile: FreeTimeProfile) -> FreeTimeProfileVersion:
+        if profile.published_version_id is not None:
+            version = self._require_free_time_profile_version(profile.published_version_id)
+            if version.profile_id != profile.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="free_time_profile_version_id does not belong to free_time_profile_id.",
+                )
+            return version
+        published = [
+            version
+            for version in profile.versions
+            if version.status == "PUBLISHED"
+        ]
+        if not published:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Free-time profile must have a published version before preview.",
+            )
+        version = sorted(published, key=lambda row: (row.version_number, row.id), reverse=True)[0]
+        if version.profile_id != profile.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="free_time_profile_version_id does not belong to free_time_profile_id.",
+            )
+        return version
 
     def _template_steps_from_payload(
         self,

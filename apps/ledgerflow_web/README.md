@@ -10,7 +10,7 @@ flutter run -d chrome \
   --dart-define=LEDGERFLOW_UI_SCALE=1.0
 ```
 
-The UI defaults to its normal `1.0` application scale; override `LEDGERFLOW_UI_SCALE` only when a host intentionally needs a different density. When `LEDGERFLOW_API_TOKEN` is provided, the application connects automatically. Without it, the application starts with demo data and **Connect API** accepts a live API URL and bearer token. Never embed production credentials in a web build.
+The UI defaults to its normal `1.0` application scale; override `LEDGERFLOW_UI_SCALE` only when a host intentionally needs a different density. When `LEDGERFLOW_API_TOKEN` is provided, the application connects automatically. Without it, the application starts with no records and **Connect API** accepts a live API URL and bearer token. If `LEDGERFLOW_API_URL` is not configured, the browser's current origin is suggested so a same-origin reverse proxy can serve the API. Never embed production credentials in a web build.
 
 For a reverse-proxied deployment that serves the UI and API from the same origin, build with an empty `LEDGERFLOW_API_URL`. The client will use relative `/api`, `/health`, and `/docs` routes, avoiding browser CORS and `localhost` versus `127.0.0.1` mismatches.
 

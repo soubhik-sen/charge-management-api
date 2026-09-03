@@ -11,6 +11,7 @@ PostgreSQL is the supported runtime database. SQLAlchemy defines the relational 
 | Calculation | `charge_calculation_profile`, `charge_calculation_profile_version`, `charge_calculation_profile_factor` |
 | Allocation | `charge_allocation_profile`, `charge_allocation_profile_version` |
 | Business dates | `charge_business_date_profile`, `charge_business_date_profile_version`, `charge_business_date_profile_step`, `charge_business_date_profile_assignment` |
+| Free time | `charge_free_time_profile`, `charge_free_time_profile_version`, `charge_free_time_rule` |
 | FX | `charge_fx_rate_source`, `charge_fx_rate` |
 | Pricing | `charge_rate_book`, `charge_rate_book_entry`, `charge_calculation_template`, `charge_calculation_template_step` |
 | Contracts and quotes | `charge_rate_contract`, `charge_contract_line`, `charge_quote_request`, `charge_quote_offer`, `charge_quote_option`, `charge_quote_option_line` |
@@ -47,7 +48,7 @@ The diagram highlights major ownership relationships; inspect `app/db/models.py`
 
 ## Seed Data
 
-Migrations and repository initialization provide generic settings, common charge components, standard calculation and allocation profiles, business-date concepts, stable ID sequences, and a `MANUAL` FX source. Seed data is product-neutral and safe to extend through APIs or future migrations.
+Migrations and repository initialization provide generic settings, common charge components, standard calculation, allocation, business-date, and free-time profiles, stable ID sequences, and a `MANUAL` FX source. The profile tables use owner-scoped `profile_code` uniqueness on `(owner_type, owner_id, profile_code)` so the same technical code can be reused in different owner scopes. Seed data is product-neutral and safe to extend through APIs or future migrations.
 
 ## FX Semantics
 

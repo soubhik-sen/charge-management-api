@@ -19,6 +19,9 @@ from app.db.models import (
     ChargeBusinessDateProfileRow,
     ChargeBusinessDateProfileStepRow,
     ChargeBusinessDateProfileVersionRow,
+    ChargeFreeTimeProfileRow,
+    ChargeFreeTimeProfileRuleRow,
+    ChargeFreeTimeProfileVersionRow,
     ChargeCallerMappingProfileRow,
     ChargeCalculationProfileFactorRow,
     ChargeCalculationProfileRow,
@@ -61,6 +64,9 @@ from app.domain.models import (
     ChargeCalculationProfile,
     ChargeCalculationProfileFactor,
     ChargeCalculationProfileVersion,
+    FreeTimeProfile,
+    FreeTimeProfileVersion,
+    FreeTimeRule,
     ChargeComponent,
     ChargeComponentAlias,
     ChargeDocument,
@@ -266,6 +272,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self.business_date_profiles: dict[int, BusinessDateProfile] = {}
         self.business_date_profile_versions: dict[int, BusinessDateProfileVersion] = {}
         self.business_date_profile_assignments: dict[int, BusinessDateProfileAssignment] = {}
+        self.free_time_profiles: dict[int, FreeTimeProfile] = {}
+        self.free_time_profile_versions: dict[int, FreeTimeProfileVersion] = {}
+        self.free_time_rules: dict[int, FreeTimeRule] = {}
         self.components: dict[int, ChargeComponent] = {}
         self.components_by_code: dict[str, ChargeComponent] = {}
         self.component_aliases: dict[int, ChargeComponentAlias] = {}
@@ -304,6 +313,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self.business_date_profiles.clear()
         self.business_date_profile_versions.clear()
         self.business_date_profile_assignments.clear()
+        self.free_time_profiles.clear()
+        self.free_time_profile_versions.clear()
+        self.free_time_rules.clear()
         self.components.clear()
         self.components_by_code.clear()
         self.component_aliases.clear()
@@ -332,6 +344,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self.session.execute(update(ChargeBusinessDateProfileRow).values(published_version_id=None))
         self.session.execute(update(ChargeAllocationProfileRow).values(published_version_id=None))
         self.session.execute(update(ChargeCalculationProfileRow).values(published_version_id=None))
+        self.session.execute(update(ChargeFreeTimeProfileRow).values(published_version_id=None))
         self.session.flush()
         for table in (
             ChargeMatchResultRow,
@@ -360,6 +373,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             ChargeBusinessDateProfileStepRow,
             ChargeBusinessDateProfileVersionRow,
             ChargeBusinessDateProfileRow,
+            ChargeFreeTimeProfileRuleRow,
+            ChargeFreeTimeProfileVersionRow,
+            ChargeFreeTimeProfileRow,
             ChargeCalculationProfileFactorRow,
             ChargeCalculationProfileVersionRow,
             ChargeCalculationProfileRow,
@@ -425,6 +441,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._persist_allocation_profiles()
         self._persist_calculation_profiles()
         self._persist_business_date_profiles()
+        self._persist_free_time_profiles()
         self._persist_components()
         self._persist_rate_books()
         self._persist_calculation_templates()
@@ -447,6 +464,13 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 for factor in version.factors
             },
             "business_date_profile_assignment": set(self.business_date_profile_assignments),
+            "free_time_profile_rule": {
+                rule.id
+                for version in self.free_time_profile_versions.values()
+                for rule in version.rules
+            },
+            "free_time_profile_version": set(self.free_time_profile_versions),
+            "free_time_profile": set(self.free_time_profiles),
             "business_date_profile_step": {
                 step.id
                 for version in self.business_date_profile_versions.values()
@@ -532,6 +556,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             "business_date_profiles",
             "business_date_profile_versions",
             "business_date_profile_assignments",
+            "free_time_profiles",
+            "free_time_profile_versions",
+            "free_time_rules",
             "components",
             "component_aliases",
             "rate_books",
@@ -590,6 +617,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         self._load_allocation_profiles()
         self._load_calculation_profiles()
         self._load_business_date_profiles()
+        self._load_free_time_profiles()
         self._load_fx_sources()
         self._load_components()
         self._load_rate_books()
@@ -609,6 +637,9 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             self.business_date_profiles,
             self.business_date_profile_versions,
             self.business_date_profile_assignments,
+            self.free_time_profiles,
+            self.free_time_profile_versions,
+            self.free_time_rules,
             self.components,
             self.component_aliases,
             self.rate_books,
@@ -669,6 +700,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 id=row.id,
                 profile_code=row.profile_code,
                 profile_name=row.profile_name,
+                owner_type=row.owner_type,
+                owner_id=row.owner_id,
                 published_version_id=row.published_version_id,
                 published_version_number=next(
                     (
@@ -741,6 +774,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 id=row.id,
                 profile_code=row.profile_code,
                 profile_name=row.profile_name,
+                owner_type=row.owner_type,
+                owner_id=row.owner_id,
                 description=row.description,
                 is_active=row.is_active,
                 published_version_id=row.published_version_id,
@@ -815,6 +850,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                 id=row.id,
                 profile_code=row.profile_code,
                 profile_name=row.profile_name,
+                owner_type=row.owner_type,
+                owner_id=row.owner_id,
                 description=row.description,
                 published_version_id=row.published_version_id,
                 published_version_number=next(
@@ -838,6 +875,93 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             assignment = _model_from_row(BusinessDateProfileAssignment, row)
             self.business_date_profile_assignments[assignment.id] = assignment
             self._ids["business_date_profile_assignment"] = max(self._ids["business_date_profile_assignment"], assignment.id)
+
+    def _load_free_time_profiles(self) -> None:
+        profile_rows = self.session.scalars(
+            select(ChargeFreeTimeProfileRow).order_by(
+                ChargeFreeTimeProfileRow.profile_code,
+                ChargeFreeTimeProfileRow.id,
+            )
+        ).all()
+        version_rows = self.session.scalars(
+            select(ChargeFreeTimeProfileVersionRow).order_by(
+                ChargeFreeTimeProfileVersionRow.profile_id,
+                ChargeFreeTimeProfileVersionRow.version_number,
+                ChargeFreeTimeProfileVersionRow.id,
+            )
+        ).all()
+        rule_rows = self.session.scalars(
+            select(ChargeFreeTimeProfileRuleRow).order_by(
+                ChargeFreeTimeProfileRuleRow.version_id,
+                ChargeFreeTimeProfileRuleRow.sequence,
+                ChargeFreeTimeProfileRuleRow.id,
+            )
+        ).all()
+        rules_by_version: dict[int, list[FreeTimeRule]] = defaultdict(list)
+        for row in rule_rows:
+            rule = FreeTimeRule(
+                id=row.id,
+                profile_version_id=row.version_id,
+                sequence=row.sequence,
+                rule_code=row.rule_code,
+                rule_name=row.rule_name,
+                scope_type=row.scope_type,
+                scope_id=row.scope_id,
+                event_type=row.event_type,
+                start_timestamp_key=row.start_timestamp_key,
+                end_timestamp_key=row.end_timestamp_key,
+                free_time_days=row.free_time_days,
+                match_facts_json=dict(row.match_facts_json or {}),
+                priority=row.priority,
+                notes=row.notes,
+                is_active=row.is_active,
+            )
+            rules_by_version[rule.profile_version_id].append(rule)
+            self._ids["free_time_rule"] = max(self._ids["free_time_rule"], rule.id)
+        versions_by_profile: dict[int, list[FreeTimeProfileVersion]] = defaultdict(list)
+        for row in version_rows:
+            version = FreeTimeProfileVersion(
+                id=row.id,
+                profile_id=row.profile_id,
+                version_number=row.version_number,
+                status=row.status,
+                notes=row.notes,
+                effective_from=row.effective_from,
+                effective_to=row.effective_to,
+                lock_version=row.lock_version,
+                published_at=row.published_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                rules=sorted(rules_by_version.get(row.id, []), key=lambda item: (item.sequence, item.id)),
+            )
+            versions_by_profile[version.profile_id].append(version)
+            self._ids["free_time_profile_version"] = max(self._ids["free_time_profile_version"], version.id)
+        for row in profile_rows:
+            profile = FreeTimeProfile(
+                id=row.id,
+                profile_code=row.profile_code,
+                profile_name=row.profile_name,
+                owner_type=row.owner_type,
+                owner_id=row.owner_id,
+                description=row.description,
+                published_version_id=row.published_version_id,
+                published_version_number=next(
+                    (
+                        version.version_number
+                        for version in versions_by_profile.get(row.id, [])
+                        if version.id == row.published_version_id
+                    ),
+                    None,
+                ),
+                versions=sorted(versions_by_profile.get(row.id, []), key=lambda item: (item.version_number, item.id)),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            self.free_time_profiles[profile.id] = profile
+            self._ids["free_time_profile"] = max(self._ids["free_time_profile"], profile.id)
+        for profile in self.free_time_profiles.values():
+            for version in profile.versions:
+                self.free_time_profile_versions[version.id] = version
 
     def _load_fx_sources(self) -> None:
         self._fx_sources = {}
@@ -1415,6 +1539,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     id=profile.id,
                     profile_code=profile.profile_code,
                     profile_name=profile.profile_name,
+                    owner_type=profile.owner_type,
+                    owner_id=profile.owner_id,
                     published_version_id=None,
                     created_at=profile.created_at,
                     updated_at=profile.updated_at,
@@ -1461,6 +1587,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     id=profile.id,
                     profile_code=profile.profile_code,
                     profile_name=profile.profile_name,
+                    owner_type=profile.owner_type,
+                    owner_id=profile.owner_id,
                     description=profile.description,
                     is_active=profile.is_active,
                     published_version_id=None,
@@ -1525,6 +1653,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     id=profile.id,
                     profile_code=profile.profile_code,
                     profile_name=profile.profile_name,
+                    owner_type=profile.owner_type,
+                    owner_id=profile.owner_id,
                     description=profile.description,
                     published_version_id=None,
                     created_at=profile.created_at,
@@ -1586,6 +1716,73 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     is_active=assignment.is_active,
                     created_at=assignment.created_at,
                     updated_at=assignment.updated_at,
+                )
+            )
+        self.session.flush()
+
+    def _persist_free_time_profiles(self) -> None:
+        for profile in sorted(self.free_time_profiles.values(), key=lambda item: item.id):
+            self.session.merge(
+                ChargeFreeTimeProfileRow(
+                    id=profile.id,
+                    profile_code=profile.profile_code,
+                    profile_name=profile.profile_name,
+                    owner_type=profile.owner_type,
+                    owner_id=profile.owner_id,
+                    description=profile.description,
+                    published_version_id=None,
+                    created_at=profile.created_at,
+                    updated_at=profile.updated_at,
+                )
+            )
+        self.session.flush()
+        for version in sorted(self.free_time_profile_versions.values(), key=lambda item: item.id):
+            self.session.merge(
+                ChargeFreeTimeProfileVersionRow(
+                    id=version.id,
+                    profile_id=version.profile_id,
+                    version_number=version.version_number,
+                    status=version.status,
+                    notes=version.notes,
+                    effective_from=version.effective_from,
+                    effective_to=version.effective_to,
+                    lock_version=version.lock_version,
+                    published_at=version.published_at,
+                    created_at=version.created_at,
+                    updated_at=version.updated_at,
+                )
+            )
+        self.session.flush()
+        for profile in self.free_time_profiles.values():
+            if profile.published_version_id is not None:
+                self.session.execute(
+                    update(ChargeFreeTimeProfileRow)
+                    .where(ChargeFreeTimeProfileRow.id == profile.id)
+                    .values(published_version_id=profile.published_version_id)
+                )
+        self.session.flush()
+        rules = sorted(
+            (rule for version in self.free_time_profile_versions.values() for rule in version.rules),
+            key=lambda item: item.id,
+        )
+        for rule in rules:
+            self.session.merge(
+                ChargeFreeTimeProfileRuleRow(
+                    id=rule.id,
+                    version_id=rule.profile_version_id,
+                    sequence=rule.sequence,
+                    rule_code=rule.rule_code,
+                    rule_name=rule.rule_name,
+                    scope_type=rule.scope_type,
+                    scope_id=rule.scope_id,
+                    event_type=rule.event_type,
+                    start_timestamp_key=rule.start_timestamp_key,
+                    end_timestamp_key=rule.end_timestamp_key,
+                    free_time_days=rule.free_time_days,
+                    match_facts_json=rule.match_facts_json,
+                    priority=rule.priority,
+                    notes=rule.notes,
+                    is_active=rule.is_active,
                 )
             )
         self.session.flush()

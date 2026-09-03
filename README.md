@@ -62,7 +62,7 @@ flutter pub get
 flutter run -d chrome --dart-define=LEDGERFLOW_API_URL=http://localhost:8000
 ```
 
-The UI opens with representative demo data. Select **Connect API**, enter `http://localhost:8000`, and use `local-dev-token` for the Docker development profile. The token is held only in application memory.
+The UI opens in an empty disconnected state and never presents sample records as live data. Select **Connect API**, enter the API URL (the current browser origin is used by default when no build-time URL is configured), and use `local-dev-token` for the Docker development profile. The token is held only in application memory.
 
 ## Authentication Decision
 

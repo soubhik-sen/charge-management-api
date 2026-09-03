@@ -2580,6 +2580,38 @@
             }
           },
           {
+            "name": "owner_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Type"
+            }
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -3334,6 +3366,38 @@
             }
           },
           {
+            "name": "owner_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Type"
+            }
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -4069,6 +4133,38 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "name": "owner_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Type"
+            }
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
             }
           },
           {
@@ -5246,6 +5342,881 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BusinessDateProfileAssignment"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/free-time-profiles": {
+      "get": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "List Free Time Profiles",
+        "operationId": "list_free_time_profiles_api_v1_charge_management_free_time_profiles_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "owner_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Type"
+            }
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeProfileListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Create Free Time Profile",
+        "operationId": "create_free_time_profile_api_v1_charge_management_free_time_profiles_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeTimeProfileCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/free-time-profiles/{profile_id}": {
+      "get": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Get Free Time Profile",
+        "operationId": "get_free_time_profile_api_v1_charge_management_free_time_profiles__profile_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Update Free Time Profile",
+        "operationId": "update_free_time_profile_api_v1_charge_management_free_time_profiles__profile_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeTimeProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/free-time-profiles/{profile_id}/versions": {
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Create Free Time Profile Version",
+        "operationId": "create_free_time_profile_version_api_v1_charge_management_free_time_profiles__profile_id__versions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeTimeProfileVersionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/free-time-profile-versions/{version_id}": {
+      "put": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Update Free Time Profile Version",
+        "operationId": "update_free_time_profile_version_api_v1_charge_management_free_time_profile_versions__version_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeTimeProfileVersionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeProfileVersion"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/free-time-profile-versions/{version_id}/publish": {
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Publish Free Time Profile Version",
+        "operationId": "publish_free_time_profile_version_api_v1_charge_management_free_time_profile_versions__version_id__publish_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charge-management/free-time-profiles/{profile_id}/preview": {
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Preview Free Time Duration",
+        "operationId": "preview_free_time_duration_api_v1_charge_management_free_time_profiles__profile_id__preview_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeTimeDurationPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeTimeDurationPreviewResponse"
                 }
               }
             }
@@ -9719,6 +10690,111 @@
         }
       }
     },
+    "/api/v1/charge-management/quote-commitments/{commitment_id}/cancel": {
+      "post": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Cancel Quote Commitment",
+        "operationId": "cancel_quote_commitment_api_v1_charge_management_quote_commitments__commitment_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commitment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Commitment Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCommitmentCancelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteCommitmentCancelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/charge-management/quote-commitment-consumptions/{consumption_id}/reverse": {
       "post": {
         "tags": [
@@ -11748,6 +12824,14 @@
             "type": "string",
             "title": "Profile Name"
           },
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type"
+          },
+          "owner_id": {
+            "type": "integer",
+            "title": "Owner Id"
+          },
           "description": {
             "anyOf": [
               {
@@ -11809,6 +12893,8 @@
           "id",
           "profile_code",
           "profile_name",
+          "owner_type",
+          "owner_id",
           "profile_key"
         ],
         "title": "BusinessDateProfile"
@@ -11987,6 +13073,17 @@
       },
       "BusinessDateProfileCreate": {
         "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
           "profile_code": {
             "type": "string",
             "title": "Profile Code"
@@ -12216,6 +13313,17 @@
       },
       "BusinessDateProfileUpdate": {
         "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
           "profile_code": {
             "type": "string",
             "title": "Profile Code"
@@ -13360,6 +14468,14 @@
             "type": "string",
             "title": "Profile Name"
           },
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type"
+          },
+          "owner_id": {
+            "type": "integer",
+            "title": "Owner Id"
+          },
           "published_version_id": {
             "anyOf": [
               {
@@ -13404,12 +14520,25 @@
         "required": [
           "id",
           "profile_code",
-          "profile_name"
+          "profile_name",
+          "owner_type",
+          "owner_id"
         ],
         "title": "ChargeAllocationProfile"
       },
       "ChargeAllocationProfileCreate": {
         "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
           "profile_code": {
             "type": "string",
             "title": "Profile Code"
@@ -13463,6 +14592,17 @@
       },
       "ChargeAllocationProfileUpdate": {
         "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
           "profile_code": {
             "type": "string",
             "title": "Profile Code"
@@ -14219,6 +15359,14 @@
             "type": "string",
             "title": "Profile Name"
           },
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type"
+          },
+          "owner_id": {
+            "type": "integer",
+            "title": "Owner Id"
+          },
           "description": {
             "anyOf": [
               {
@@ -14279,12 +15427,25 @@
         "required": [
           "id",
           "profile_code",
-          "profile_name"
+          "profile_name",
+          "owner_type",
+          "owner_id"
         ],
         "title": "ChargeCalculationProfile"
       },
       "ChargeCalculationProfileCreate": {
         "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
           "profile_code": {
             "type": "string",
             "title": "Profile Code"
@@ -14507,6 +15668,17 @@
       },
       "ChargeCalculationProfileUpdate": {
         "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
           "profile_code": {
             "type": "string",
             "title": "Profile Code"
@@ -18764,6 +19936,18 @@
               "RETIRED"
             ]
           },
+          "free_time_profile_version_statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Free Time Profile Version Statuses",
+            "default": [
+              "DRAFT",
+              "PUBLISHED",
+              "RETIRED"
+            ]
+          },
           "fx_rate_types": {
             "items": {
               "type": "string"
@@ -19581,6 +20765,743 @@
           "contract"
         ],
         "title": "ContractWorkspace"
+      },
+      "FreeTimeDurationPreviewRequest": {
+        "properties": {
+          "scope_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Type"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "event_facts": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Event Facts"
+          },
+          "event_timestamps": {
+            "additionalProperties": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "type": "object",
+            "title": "Event Timestamps"
+          }
+        },
+        "type": "object",
+        "title": "FreeTimeDurationPreviewRequest"
+      },
+      "FreeTimeDurationPreviewResponse": {
+        "properties": {
+          "profile_id": {
+            "type": "integer",
+            "title": "Profile Id"
+          },
+          "profile_code": {
+            "type": "string",
+            "title": "Profile Code"
+          },
+          "profile_version_id": {
+            "type": "integer",
+            "title": "Profile Version Id"
+          },
+          "rule_id": {
+            "type": "integer",
+            "title": "Rule Id"
+          },
+          "rule_code": {
+            "type": "string",
+            "title": "Rule Code"
+          },
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "scope_type": {
+            "type": "string",
+            "title": "Scope Type"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "start_timestamp_key": {
+            "type": "string",
+            "title": "Start Timestamp Key"
+          },
+          "end_timestamp_key": {
+            "type": "string",
+            "title": "End Timestamp Key"
+          },
+          "start_timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start Timestamp"
+          },
+          "end_timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End Timestamp"
+          },
+          "duration_basis": {
+            "type": "string",
+            "const": "DURATION_DAYS",
+            "title": "Duration Basis",
+            "default": "DURATION_DAYS"
+          },
+          "duration_days": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Duration Days"
+          },
+          "free_time_days": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Free Time Days"
+          },
+          "chargeable_days": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Chargeable Days"
+          },
+          "event_facts": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Event Facts"
+          },
+          "event_timestamps": {
+            "additionalProperties": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "type": "object",
+            "title": "Event Timestamps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_id",
+          "profile_code",
+          "profile_version_id",
+          "rule_id",
+          "rule_code",
+          "rule_name",
+          "scope_type",
+          "start_timestamp_key",
+          "end_timestamp_key",
+          "start_timestamp",
+          "end_timestamp",
+          "duration_days",
+          "free_time_days",
+          "chargeable_days"
+        ],
+        "title": "FreeTimeDurationPreviewResponse"
+      },
+      "FreeTimeProfile": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "profile_code": {
+            "type": "string",
+            "title": "Profile Code"
+          },
+          "profile_name": {
+            "type": "string",
+            "title": "Profile Name"
+          },
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type"
+          },
+          "owner_id": {
+            "type": "integer",
+            "title": "Owner Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "published_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Id"
+          },
+          "published_version_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version Number"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/FreeTimeProfileVersion"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "profile_code",
+          "profile_name",
+          "owner_type",
+          "owner_id"
+        ],
+        "title": "FreeTimeProfile"
+      },
+      "FreeTimeProfileCreate": {
+        "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
+          "profile_code": {
+            "type": "string",
+            "title": "Profile Code"
+          },
+          "profile_name": {
+            "type": "string",
+            "title": "Profile Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "initial_version": {
+            "$ref": "#/components/schemas/FreeTimeProfileVersionCreate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_code",
+          "profile_name",
+          "initial_version"
+        ],
+        "title": "FreeTimeProfileCreate"
+      },
+      "FreeTimeProfileListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FreeTimeProfile"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "FreeTimeProfileListResponse"
+      },
+      "FreeTimeProfileUpdate": {
+        "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "default": "SYSTEM"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
+          "profile_code": {
+            "type": "string",
+            "title": "Profile Code"
+          },
+          "profile_name": {
+            "type": "string",
+            "title": "Profile Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_code",
+          "profile_name"
+        ],
+        "title": "FreeTimeProfileUpdate"
+      },
+      "FreeTimeProfileVersion": {
+        "properties": {
+          "effective_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/FreeTimeRule"
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "profile_id": {
+            "type": "integer",
+            "title": "Profile Id"
+          },
+          "version_number": {
+            "type": "integer",
+            "title": "Version Number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "RETIRED"
+            ],
+            "title": "Status",
+            "default": "DRAFT"
+          },
+          "lock_version": {
+            "type": "integer",
+            "title": "Lock Version",
+            "default": 1
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "profile_id",
+          "version_number"
+        ],
+        "title": "FreeTimeProfileVersion"
+      },
+      "FreeTimeProfileVersionCreate": {
+        "properties": {
+          "effective_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/FreeTimeRuleCreate"
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "expected_lock_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Lock Version"
+          }
+        },
+        "type": "object",
+        "title": "FreeTimeProfileVersionCreate"
+      },
+      "FreeTimeRule": {
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "rule_code": {
+            "type": "string",
+            "title": "Rule Code"
+          },
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "scope_type": {
+            "type": "string",
+            "title": "Scope Type",
+            "default": "GLOBAL"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "start_timestamp_key": {
+            "type": "string",
+            "title": "Start Timestamp Key"
+          },
+          "end_timestamp_key": {
+            "type": "string",
+            "title": "End Timestamp Key"
+          },
+          "free_time_days": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Free Time Days",
+            "default": "0"
+          },
+          "match_facts_json": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Match Facts Json"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 100
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "profile_version_id": {
+            "type": "integer",
+            "title": "Profile Version Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sequence",
+          "rule_code",
+          "rule_name",
+          "start_timestamp_key",
+          "end_timestamp_key",
+          "id",
+          "profile_version_id"
+        ],
+        "title": "FreeTimeRule"
+      },
+      "FreeTimeRuleCreate": {
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "rule_code": {
+            "type": "string",
+            "title": "Rule Code"
+          },
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "scope_type": {
+            "type": "string",
+            "title": "Scope Type",
+            "default": "GLOBAL"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "start_timestamp_key": {
+            "type": "string",
+            "title": "Start Timestamp Key"
+          },
+          "end_timestamp_key": {
+            "type": "string",
+            "title": "End Timestamp Key"
+          },
+          "free_time_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Free Time Days",
+            "default": "0"
+          },
+          "match_facts_json": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Match Facts Json"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 100
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "sequence",
+          "rule_code",
+          "rule_name",
+          "start_timestamp_key",
+          "end_timestamp_key"
+        ],
+        "title": "FreeTimeRuleCreate"
       },
       "FxRate": {
         "properties": {
@@ -20777,6 +22698,37 @@
           "charge_document_id"
         ],
         "title": "QuoteCommitment"
+      },
+      "QuoteCommitmentCancelRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "QuoteCommitmentCancelRequest"
+      },
+      "QuoteCommitmentCancelResponse": {
+        "properties": {
+          "commitment": {
+            "$ref": "#/components/schemas/QuoteCommitment"
+          },
+          "charge_document": {
+            "$ref": "#/components/schemas/ChargeDocument"
+          }
+        },
+        "type": "object",
+        "required": [
+          "commitment",
+          "charge_document"
+        ],
+        "title": "QuoteCommitmentCancelResponse"
       },
       "QuoteCommitmentConsumeRequest": {
         "properties": {

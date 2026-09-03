@@ -296,12 +296,16 @@ class ChargeAllocationProfileRow(TimestampMixin, Base):
     __tablename__ = "charge_allocation_profile"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    profile_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    profile_code: Mapped[str] = mapped_column(String(80), nullable=False)
     profile_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    owner_type: Mapped[str] = mapped_column(String(80), nullable=False, default="SYSTEM", server_default="SYSTEM")
+    owner_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     published_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
 
     __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "profile_code", name="uq_charge_allocation_profile_owner_code"),
         Index("ix_charge_allocation_profile_code", "profile_code"),
+        Index("ix_charge_allocation_profile_owner", "owner_type", "owner_id"),
     )
 
 
@@ -360,8 +364,10 @@ class ChargeCalculationProfileRow(TimestampMixin, Base):
     __tablename__ = "charge_calculation_profile"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    profile_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    profile_code: Mapped[str] = mapped_column(String(80), nullable=False)
     profile_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    owner_type: Mapped[str] = mapped_column(String(80), nullable=False, default="SYSTEM", server_default="SYSTEM")
+    owner_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     published_version_id: Mapped[int | None] = mapped_column(
@@ -369,7 +375,9 @@ class ChargeCalculationProfileRow(TimestampMixin, Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "profile_code", name="uq_charge_calculation_profile_owner_code"),
         Index("ix_charge_calculation_profile_code", "profile_code"),
+        Index("ix_charge_calculation_profile_owner", "owner_type", "owner_id"),
     )
 
 
@@ -454,8 +462,10 @@ class ChargeBusinessDateProfileRow(TimestampMixin, Base):
     __tablename__ = "charge_business_date_profile"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    profile_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    profile_code: Mapped[str] = mapped_column(String(80), nullable=False)
     profile_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    owner_type: Mapped[str] = mapped_column(String(80), nullable=False, default="SYSTEM", server_default="SYSTEM")
+    owner_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     description: Mapped[str | None] = mapped_column(Text)
     published_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_business_date_profile_version.id"))
 
@@ -469,7 +479,11 @@ class ChargeBusinessDateProfileRow(TimestampMixin, Base):
         cascade="all, delete-orphan",
     )
 
-    __table_args__ = (Index("ix_charge_business_date_profile_code", "profile_code"),)
+    __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "profile_code", name="uq_charge_business_date_profile_owner_code"),
+        Index("ix_charge_business_date_profile_code", "profile_code"),
+        Index("ix_charge_business_date_profile_owner", "owner_type", "owner_id"),
+    )
 
 
 class ChargeBusinessDateProfileVersionRow(TimestampMixin, Base):
@@ -587,6 +601,101 @@ class ChargeBusinessDateProfileAssignmentRow(TimestampMixin, Base):
             "business_purpose",
             "priority",
         ),
+    )
+
+
+class ChargeFreeTimeProfileRow(TimestampMixin, Base):
+    __tablename__ = "charge_free_time_profile"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    profile_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    owner_type: Mapped[str] = mapped_column(String(80), nullable=False, default="SYSTEM", server_default="SYSTEM")
+    owner_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    description: Mapped[str | None] = mapped_column(Text)
+    published_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_free_time_profile_version.id"))
+
+    versions: Mapped[list["ChargeFreeTimeProfileVersionRow"]] = relationship(
+        back_populates="profile",
+        cascade="all, delete-orphan",
+        foreign_keys="ChargeFreeTimeProfileVersionRow.profile_id",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "profile_code", name="uq_charge_free_time_profile_owner_code"),
+        Index("ix_charge_free_time_profile_code", "profile_code"),
+        Index("ix_charge_free_time_profile_owner", "owner_type", "owner_id"),
+    )
+
+
+class ChargeFreeTimeProfileVersionRow(TimestampMixin, Base):
+    __tablename__ = "charge_free_time_profile_version"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(
+        ForeignKey("charge_free_time_profile.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    notes: Mapped[str | None] = mapped_column(Text)
+    effective_from: Mapped[object | None] = mapped_column(Date)
+    effective_to: Mapped[object | None] = mapped_column(Date)
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+    profile: Mapped[ChargeFreeTimeProfileRow] = relationship(
+        back_populates="versions",
+        foreign_keys=[profile_id],
+    )
+    rules: Mapped[list["ChargeFreeTimeProfileRuleRow"]] = relationship(
+        back_populates="version",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("profile_id", "version_number", name="uq_charge_free_time_profile_version_number"),
+        CheckConstraint(
+            "status in ('DRAFT', 'PUBLISHED', 'RETIRED')",
+            name="ck_charge_free_time_profile_version_status",
+        ),
+        CheckConstraint(
+            "effective_from is null or effective_to is null or effective_from <= effective_to",
+            name="ck_charge_free_time_profile_version_effectivity",
+        ),
+        Index("ix_charge_free_time_profile_version_profile", "profile_id"),
+    )
+
+
+class ChargeFreeTimeProfileRuleRow(Base):
+    __tablename__ = "charge_free_time_rule"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("charge_free_time_profile_version.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    rule_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    rule_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(80), nullable=False, default="GLOBAL", server_default="GLOBAL")
+    scope_id: Mapped[int | None] = mapped_column(Integer)
+    event_type: Mapped[str | None] = mapped_column(String(80))
+    start_timestamp_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    end_timestamp_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    free_time_days: Mapped[object] = mapped_column(Numeric(18, 6), nullable=False, default=0, server_default="0")
+    match_facts_json: Mapped[dict | None] = mapped_column(JSON)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    version: Mapped[ChargeFreeTimeProfileVersionRow] = relationship(back_populates="rules")
+
+    __table_args__ = (
+        UniqueConstraint("version_id", "sequence", name="uq_charge_free_time_rule_sequence"),
+        UniqueConstraint("version_id", "rule_code", name="uq_charge_free_time_rule_code"),
+        Index("ix_charge_free_time_rule_version", "version_id"),
+        Index("ix_charge_free_time_rule_scope", "scope_type", "scope_id", "event_type", "priority"),
     )
 
 

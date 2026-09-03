@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, event, inspect, text
@@ -8,12 +10,17 @@ from sqlalchemy.orm import sessionmaker
 from app.infrastructure.sqlalchemy_repository import DatabaseRepositoryControl
 
 
+ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
+ALEMBIC_SCRIPT_LOCATION = Path(__file__).resolve().parents[1] / "alembic"
+
+
 def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "charge_management.sqlite"
     database_url = f"sqlite:///{database_path.as_posix()}"
     monkeypatch.setenv("DATABASE_URL", database_url)
 
-    config = Config("alembic.ini")
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("script_location", str(ALEMBIC_SCRIPT_LOCATION))
     command.upgrade(config, "head")
 
     engine = create_engine(database_url)
@@ -30,6 +37,10 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
     assert "charge_pricing_dimension" in tables
     assert "charge_caller_mapping_profile" in tables
     assert "charge_allocation_profile" in tables
+    allocation_profile_columns = {column["name"] for column in inspector.get_columns("charge_allocation_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= allocation_profile_columns
+    allocation_profile_columns = {column["name"] for column in inspector.get_columns("charge_allocation_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= allocation_profile_columns
     allocation_version_columns = {
         column["name"]
         for column in inspector.get_columns("charge_allocation_profile_version")
@@ -41,14 +52,58 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "lock_version",
     } <= allocation_version_columns
     assert "charge_calculation_profile" in tables
+    calculation_profile_columns = {column["name"] for column in inspector.get_columns("charge_calculation_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= calculation_profile_columns
+    calculation_profile_columns = {column["name"] for column in inspector.get_columns("charge_calculation_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= calculation_profile_columns
     assert "charge_calculation_profile_version" in tables
     assert "charge_calculation_profile_factor" in tables
     assert "charge_business_date_profile" in tables
+    business_date_profile_columns = {column["name"] for column in inspector.get_columns("charge_business_date_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= business_date_profile_columns
+    business_date_profile_columns = {column["name"] for column in inspector.get_columns("charge_business_date_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= business_date_profile_columns
     business_date_version_columns = {
         column["name"]
         for column in inspector.get_columns("charge_business_date_profile_version")
     }
     assert {"effective_from", "effective_to", "lock_version"} <= business_date_version_columns
+    assert "charge_free_time_profile" in tables
+    free_time_profile_columns = {column["name"] for column in inspector.get_columns("charge_free_time_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= free_time_profile_columns
+    assert "charge_free_time_profile_version" in tables
+    free_time_version_columns = {column["name"] for column in inspector.get_columns("charge_free_time_profile_version")}
+    assert {"effective_from", "effective_to", "lock_version", "status"} <= free_time_version_columns
+    assert "charge_free_time_rule" in tables
+    free_time_rule_columns = {column["name"] for column in inspector.get_columns("charge_free_time_rule")}
+    assert {
+        "version_id",
+        "sequence",
+        "rule_code",
+        "rule_name",
+        "scope_type",
+        "start_timestamp_key",
+        "end_timestamp_key",
+        "free_time_days",
+    } <= free_time_rule_columns
+    assert "charge_free_time_profile" in tables
+    free_time_profile_columns = {column["name"] for column in inspector.get_columns("charge_free_time_profile")}
+    assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= free_time_profile_columns
+    assert "charge_free_time_profile_version" in tables
+    free_time_version_columns = {column["name"] for column in inspector.get_columns("charge_free_time_profile_version")}
+    assert {"effective_from", "effective_to", "lock_version", "status"} <= free_time_version_columns
+    assert "charge_free_time_rule" in tables
+    free_time_rule_columns = {column["name"] for column in inspector.get_columns("charge_free_time_rule")}
+    assert {
+        "version_id",
+        "sequence",
+        "rule_code",
+        "rule_name",
+        "scope_type",
+        "start_timestamp_key",
+        "end_timestamp_key",
+        "free_time_days",
+    } <= free_time_rule_columns
     line_column_metadata = {
         column["name"]: column for column in inspector.get_columns("charge_line")
     }
@@ -249,7 +304,7 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         pricing_dimension_count = connection.execute(
             text("select count(*) from charge_pricing_dimension where is_system = true")
         ).scalar_one()
-    assert version == "0031_route_commitment_identity"
+    assert version == "0032_owner_scoped_profiles_and_free_time_rules"
     assert source_code == "MANUAL"
     assert flat_count == 1
     assert road_component_count == 22
@@ -273,7 +328,8 @@ def test_fx_migration_round_trip(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "charge_management_round_trip.sqlite"
     database_url = f"sqlite:///{database_path.as_posix()}"
     monkeypatch.setenv("DATABASE_URL", database_url)
-    config = Config("alembic.ini")
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("script_location", str(ALEMBIC_SCRIPT_LOCATION))
 
     command.upgrade(config, "head")
     command.downgrade(config, "0011_add_business_date_profiles")
@@ -293,7 +349,8 @@ def test_rate_book_migration_promotes_legacy_active_rows(tmp_path, monkeypatch) 
     database_path = tmp_path / "charge_management_rate_book_upgrade.sqlite"
     database_url = f"sqlite:///{database_path.as_posix()}"
     monkeypatch.setenv("DATABASE_URL", database_url)
-    config = Config("alembic.ini")
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("script_location", str(ALEMBIC_SCRIPT_LOCATION))
 
     command.upgrade(config, "0020_business_date_lock_version")
     engine = create_engine(database_url)

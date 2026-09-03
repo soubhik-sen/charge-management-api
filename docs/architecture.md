@@ -9,7 +9,7 @@ LedgerFlow separates reusable charge behavior from the consuming application's i
 - `app.db`: SQLAlchemy schema and database session management.
 - `app.infrastructure`: database-backed repository/services and replaceable integration adapters.
 - `alembic`: ordered schema migrations and generic seed data.
-- `apps/ledgerflow_web`: responsive Flutter workspace, API client, and local demo dataset.
+- `apps/ledgerflow_web`: responsive Flutter workspace, API client, and local test fixtures that are never shown by the disconnected application shell.
 
 ## Request Flow
 

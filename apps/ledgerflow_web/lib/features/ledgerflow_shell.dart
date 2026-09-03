@@ -31,7 +31,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
   ];
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  WorkspaceData _data = WorkspaceData.demo();
+  WorkspaceData _data = WorkspaceData.empty();
   int _selectedIndex = 0;
   bool _loading = false;
   bool _live = false;
@@ -99,7 +99,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
                         duration: const Duration(milliseconds: 240),
                         child: KeyedSubtree(
                           key: ValueKey(
-                            'page-$_selectedIndex-${_live ? 'live' : 'demo'}',
+                            'page-$_selectedIndex-${_live ? 'live' : 'disconnected'}',
                           ),
                           child: _page(),
                         ),
@@ -180,11 +180,11 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
             child: Row(
               children: [
                 Icon(
-                  _live ? Icons.cloud_done_outlined : Icons.science_outlined,
+                  _live ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
                   size: 18,
                   color: _live
                       ? const Color(0xFF54D6C7)
-                      : const Color(0xFFFFCC80),
+                      : const Color(0xFFAFC2D9),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -192,7 +192,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _live ? 'Live API' : 'Demo workspace',
+                        _live ? 'Live API' : 'Not connected',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12,
@@ -202,7 +202,7 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
                       Text(
                         _live
                             ? _apiHostLabel(_apiUrl)
-                            : 'No credentials required',
+                            : 'Connect to view records',
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Color(0xFFAFC2D9),
@@ -220,77 +220,84 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
     );
   }
 
-  Widget _page() => switch (_selectedIndex) {
-    0 => OperationsDashboard(data: _data, onOpen: _selectPage),
-    1 => TransactionQuoteWorkspace(
-      quotes: _data['quotes'],
-      contracts: _data['contracts'],
-      live: _live,
-      client: _client,
-      onReload: _reload,
-    ),
-    2 => ContractManagementWorkspace(
-      contracts: _data['contracts'],
-      components: _data['components'],
-      rateBooks: _data['rateBooks'],
-      calculationTemplates: _data['calculationTemplates'],
-      calculationProfiles: _data['calculationProfiles'],
-      allocationProfiles: _data['allocationProfiles'],
-      live: _live,
-      client: _client,
-      onReload: _reload,
-    ),
-    3 => ChargeDocumentWorkspace(
-      documents: _data['documents'],
-      live: _live,
-      client: _client,
-      onReload: _reload,
-    ),
-    4 => InvoiceWorkspace(
-      invoices: _data['invoices'],
-      live: _live,
-      client: _client,
-      onReload: _reload,
-    ),
-    5 => RateBookWorkspace(
-      rateBooks: _data['rateBooks'],
-      components: _data['components'],
-      pricingDimensions: _data['pricingDimensions'],
-      calculationProfiles: _data['calculationProfiles'],
-      allocationProfiles: _data['allocationProfiles'],
-      live: _live,
-      onMutation: _mutate,
-    ),
-    6 => CalculationTemplateWorkspacePage(
-      templates: _data['calculationTemplates'],
-      components: _data['components'],
-      rateBooks: _data['rateBooks'],
-      live: _live,
-      onMutation: _mutate,
-    ),
-    7 => ComponentManagementWorkspace(
-      records: _data['components'],
-      calculationProfiles: _data['calculationProfiles'],
-      allocationProfiles: _data['allocationProfiles'],
-      businessDateProfiles: _data['dateProfiles'],
-      live: _live,
-      onMutation: _mutate,
-    ),
-    8 => CallerMappingsWorkspace(
-      pricingDimensions: _data['pricingDimensions'],
-      callerMappingProfiles: _data['callerMappingProfiles'],
-      live: _live,
-      onMutation: _mutate,
-      client: _client,
-    ),
-    9 => ProfileManagementHub(data: _data, live: _live, onMutation: _mutate),
-    _ => FxDateManagementHub(
-      data: _data,
-      live: _live,
-      onMutation: _mutate,
-      loadAssignments: _live ? _loadAssignments : null,
-    ),
-  };
+  Widget _page() {
+    if (!_live) {
+      return _DisconnectedWorkspace(onConnect: _showConnectionDialog);
+    }
+    return switch (_selectedIndex) {
+      0 => OperationsDashboard(data: _data, onOpen: _selectPage),
+      1 => TransactionQuoteWorkspace(
+        quotes: _data['quotes'],
+        contracts: _data['contracts'],
+        live: _live,
+        client: _client,
+        onReload: _reload,
+      ),
+      2 => ContractManagementWorkspace(
+        contracts: _data['contracts'],
+        components: _data['components'],
+        rateBooks: _data['rateBooks'],
+        calculationTemplates: _data['calculationTemplates'],
+        calculationProfiles: _data['calculationProfiles'],
+        allocationProfiles: _data['allocationProfiles'],
+        live: _live,
+        client: _client,
+        onReload: _reload,
+      ),
+      3 => ChargeDocumentWorkspace(
+        documents: _data['documents'],
+        live: _live,
+        client: _client,
+        onReload: _reload,
+      ),
+      4 => InvoiceWorkspace(
+        invoices: _data['invoices'],
+        documents: _data['documents'],
+        components: _data['components'],
+        live: _live,
+        client: _client,
+        onReload: _reload,
+      ),
+      5 => RateBookWorkspace(
+        rateBooks: _data['rateBooks'],
+        components: _data['components'],
+        pricingDimensions: _data['pricingDimensions'],
+        calculationProfiles: _data['calculationProfiles'],
+        allocationProfiles: _data['allocationProfiles'],
+        live: _live,
+        onMutation: _mutate,
+      ),
+      6 => CalculationTemplateWorkspacePage(
+        templates: _data['calculationTemplates'],
+        components: _data['components'],
+        rateBooks: _data['rateBooks'],
+        live: _live,
+        onMutation: _mutate,
+      ),
+      7 => ComponentManagementWorkspace(
+        records: _data['components'],
+        calculationProfiles: _data['calculationProfiles'],
+        allocationProfiles: _data['allocationProfiles'],
+        businessDateProfiles: _data['dateProfiles'],
+        live: _live,
+        onMutation: _mutate,
+      ),
+      8 => CallerMappingsWorkspace(
+        pricingDimensions: _data['pricingDimensions'],
+        callerMappingProfiles: _data['callerMappingProfiles'],
+        live: _live,
+        onMutation: _mutate,
+        client: _client,
+      ),
+      9 => ProfileManagementHub(data: _data, live: _live, onMutation: _mutate),
+      _ => FxDateManagementHub(
+        data: _data,
+        live: _live,
+        onMutation: _mutate,
+        loadAssignments: _loadAssignments,
+      ),
+    };
+  }
 
   void _selectPage(int index) => setState(() => _selectedIndex = index);
 
@@ -342,8 +349,8 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
           if (_live)
             TextButton(
               onPressed: () =>
-                  Navigator.pop(context, const _ConnectionInput.demo()),
-              child: const Text('Use demo data'),
+                  Navigator.pop(context, const _ConnectionInput.disconnect()),
+              child: const Text('Disconnect'),
             ),
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -365,12 +372,13 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
     urlController.dispose();
     tokenController.dispose();
     if (result == null) return;
-    if (result.demoMode) {
+    if (result.disconnect) {
       setState(() {
-        _data = WorkspaceData.demo();
+        _data = WorkspaceData.empty();
         _live = false;
         _lastError = null;
         _client = null;
+        _token = null;
       });
       return;
     }
@@ -399,7 +407,14 @@ class _LedgerFlowShellState extends State<LedgerFlowShell> {
       _token = token;
     } catch (error) {
       if (!mounted) return;
-      setState(() => _lastError = 'Could not connect to LedgerFlow: $error');
+      setState(() {
+        _data = WorkspaceData.empty();
+        _apiUrl = url;
+        _live = false;
+        _client = null;
+        _token = token;
+        _lastError = 'Could not connect to LedgerFlow: $error';
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -610,6 +625,73 @@ class _LedgerFlowLoadingState extends StatelessWidget {
   );
 }
 
+class _DisconnectedWorkspace extends StatelessWidget {
+  const _DisconnectedWorkspace({required this.onConnect});
+
+  final VoidCallback onConnect;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: LedgerFlowDesign.canvas,
+    child: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: SurfaceCard(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE5F3F1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.cloud_off_outlined,
+                      color: LedgerFlowDesign.teal,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Connect LedgerFlow',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: LedgerFlowDesign.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'No sample or cached records are shown while the API is disconnected. Connect an API to load your charge-management data.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: LedgerFlowDesign.muted,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: onConnect,
+                    icon: const Icon(Icons.link),
+                    label: const Text('Connect API'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _Destination {
   const _Destination(this.label, this.icon);
 
@@ -618,10 +700,10 @@ class _Destination {
 }
 
 class _ConnectionInput {
-  const _ConnectionInput(this.url, this.token) : demoMode = false;
-  const _ConnectionInput.demo() : url = '', token = '', demoMode = true;
+  const _ConnectionInput(this.url, this.token) : disconnect = false;
+  const _ConnectionInput.disconnect() : url = '', token = '', disconnect = true;
 
   final String url;
   final String token;
-  final bool demoMode;
+  final bool disconnect;
 }

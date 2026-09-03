@@ -381,6 +381,12 @@ Resolution precedence is explicit `exchange_rate_date`, manual line `charge_date
 
 An assignment can be global or scoped to company, customer, vendor, forwarder, or carrier. `shipment_scope` distinguishes `OCEAN_HOUSE`, `AIR_HOUSE`, and `ROAD_SHIPMENT`. Only one effective assignment can own the same scope, shipment scope, and purpose slot.
 
+## Owner-Scoped Profiles And Free-Time Rules
+
+Calculation, allocation, and business-date profiles now carry `owner_type` and `owner_id` so the same `profile_code` can be reused in different owner scopes without colliding. The default owner scope is `SYSTEM/0`, which keeps seeded profiles and backward-compatible callers working while still allowing tenant- or customer-scoped reuse.
+
+Free-time profiles are versioned reusable policies that preview chargeable time from externally supplied `event_facts` and `event_timestamps`. Matching is deterministic: the resolver filters by scope, event type, fact predicates, and timestamp availability, then chooses the most specific active rule using scope specificity, priority, sequence, code, and id. The preview arithmetic uses `DURATION_DAYS` and returns the matched duration, free-time allowance, and chargeable remainder.
+
 ## FX Rate Source And FX Rate
 
 ### What It Is

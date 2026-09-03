@@ -7,6 +7,8 @@ class WorkspaceData {
 
   List<JsonMap> operator [](String key) => records[key] ?? const [];
 
+  static WorkspaceData empty() => const WorkspaceData({});
+
   static WorkspaceData demo() => WorkspaceData({
     'components': _components,
     'pricingDimensions': _pricingDimensions,

@@ -1018,6 +1018,8 @@ class _ChargeDocumentWorkspaceState extends State<ChargeDocumentWorkspace> {
 class InvoiceWorkspace extends StatefulWidget {
   const InvoiceWorkspace({
     required this.invoices,
+    this.documents = const [],
+    this.components = const [],
     this.live = false,
     this.client,
     this.onReload,
@@ -1025,6 +1027,8 @@ class InvoiceWorkspace extends StatefulWidget {
   });
 
   final List<JsonMap> invoices;
+  final List<JsonMap> documents;
+  final List<JsonMap> components;
   final bool live;
   final LedgerFlowApiClient? client;
   final Future<void> Function()? onReload;
@@ -1036,6 +1040,161 @@ class InvoiceWorkspace extends StatefulWidget {
 class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
   int _selected = 0;
   bool _busy = false;
+  bool _loadingWorkspace = false;
+  int _workspaceLoadSequence = 0;
+  int? _loadedInvoiceId;
+  JsonMap? _workspace;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleWorkspaceLoad();
+  }
+
+  @override
+  void didUpdateWidget(covariant InvoiceWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selected >= widget.invoices.length) {
+      _selected = math.max(0, widget.invoices.length - 1);
+    }
+    final selectedId = widget.invoices.isEmpty
+        ? null
+        : _asInt(widget.invoices[_selected]['id']);
+    if (selectedId != _loadedInvoiceId || oldWidget.client != widget.client) {
+      _workspace = null;
+      _loadedInvoiceId = null;
+      _scheduleWorkspaceLoad();
+    }
+  }
+
+  void _scheduleWorkspaceLoad() {
+    if (!widget.live || widget.client == null || widget.invoices.isEmpty) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.invoices.isEmpty) return;
+      _loadInvoiceWorkspace(widget.invoices[_selected]);
+    });
+  }
+
+  Future<void> _loadInvoiceWorkspace(JsonMap invoice) async {
+    final client = widget.client;
+    final invoiceId = _asInt(invoice['id']);
+    if (client == null || invoiceId == null) return;
+    final requestSequence = ++_workspaceLoadSequence;
+    setState(() => _loadingWorkspace = true);
+    try {
+      final workspace = await client.requestJson(
+        'GET',
+        '/api/v1/charge-management/invoices/$invoiceId/workspace',
+      );
+      if (!mounted || requestSequence != _workspaceLoadSequence) return;
+      setState(() {
+        _workspace = workspace;
+        _loadedInvoiceId = invoiceId;
+      });
+    } catch (error) {
+      if (mounted && requestSequence == _workspaceLoadSequence) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not load invoice reconciliation: $error'),
+            backgroundColor: LedgerFlowDesign.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted && requestSequence == _workspaceLoadSequence) {
+        setState(() => _loadingWorkspace = false);
+      }
+    }
+  }
+
+  Future<void> _createInvoice() async {
+    final client = widget.client;
+    if (client == null || widget.documents.isEmpty) return;
+    final payload = await showDialog<JsonMap>(
+      context: context,
+      builder: (context) => _InvoiceCreateDialog(
+        documents: widget.documents,
+        components: widget.components,
+      ),
+    );
+    if (payload == null) return;
+    setState(() => _busy = true);
+    try {
+      await client.requestJson(
+        'POST',
+        '/api/v1/charge-management/invoices',
+        body: payload,
+      );
+      if (!mounted) return;
+      setState(() {
+        _selected = 0;
+        _workspace = null;
+        _loadedInvoiceId = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Invoice created. Run Match invoice to reconcile it.'),
+        ),
+      );
+      await widget.onReload?.call();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invoice creation failed: $error'),
+            backgroundColor: LedgerFlowDesign.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _matchInvoice(JsonMap invoice) async {
+    final client = widget.client;
+    final invoiceId = _asInt(invoice['id']);
+    if (client == null || invoiceId == null) return;
+    setState(() => _busy = true);
+    try {
+      await client.requestJson(
+        'POST',
+        '/api/v1/charge-management/invoices/$invoiceId/match',
+      );
+      await widget.onReload?.call();
+      if (!mounted) return;
+      await _loadInvoiceWorkspace(invoice);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invoice matched.')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invoice matching failed: $error'),
+            backgroundColor: LedgerFlowDesign.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _newInvoiceButton() => FilledButton.icon(
+    onPressed:
+        widget.live &&
+            !_busy &&
+            widget.client != null &&
+            widget.documents.isNotEmpty
+        ? _createInvoice
+        : null,
+    icon: const Icon(Icons.add),
+    label: const Text('New invoice'),
+  );
 
   Future<void> _deleteInvoice(JsonMap invoice) async {
     final confirmed = await _confirmAction(
@@ -1078,16 +1237,34 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
   @override
   Widget build(BuildContext context) {
     if (widget.invoices.isEmpty) {
-      return const PageCanvas(
+      return PageCanvas(
         title: 'Invoice reconciliation',
         subtitle:
             'Match invoices to expected charge lines and resolve variances.',
-        children: [EmptyState(message: 'No invoices are available.')],
+        trailing: _newInvoiceButton(),
+        children: [
+          if (_busy) const LinearProgressIndicator(minHeight: 2),
+          if (_busy) const SizedBox(height: 10),
+          EmptyState(
+            message: widget.documents.isEmpty
+                ? 'Create a charge document before capturing an invoice.'
+                : 'No invoices are available. Create one from a charge document.',
+          ),
+        ],
       );
     }
     final index = math.min(_selected, widget.invoices.length - 1);
-    final invoice = widget.invoices[index];
-    final lines = _rows(invoice, 'lines');
+    final listedInvoice = widget.invoices[index];
+    final workspaceInvoice = _workspace?['invoice'];
+    final invoice =
+        _loadedInvoiceId == _asInt(listedInvoice['id']) &&
+            workspaceInvoice is Map<String, dynamic>
+        ? JsonMap.from(workspaceInvoice)
+        : listedInvoice;
+    final lines = _invoiceReconciliationRows(
+      invoiceLines: _rows(invoice, 'lines'),
+      matchResults: _rows(_workspace ?? const {}, 'match_results'),
+    );
     final currency = _text(invoice, 'currency', fallback: 'USD');
     final total = _number(invoice['total_amount']);
     final expected = lines.fold<double>(
@@ -1105,8 +1282,12 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
         .where((line) => _number(line['variance_amount']).abs() > 0.001)
         .firstOrNull;
     final documentStatus = _text(
-      invoice,
-      'charge_document_status',
+      _workspace?['charge_document'] is Map<String, dynamic>
+          ? JsonMap.from(_workspace!['charge_document'] as Map<String, dynamic>)
+          : invoice,
+      _workspace?['charge_document'] is Map<String, dynamic>
+          ? 'status'
+          : 'charge_document_status',
       fallback: '',
     ).toUpperCase();
     final canDelete =
@@ -1128,6 +1309,14 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           StatusPill(_text(invoice, 'status')),
+          _newInvoiceButton(),
+          FilledButton.icon(
+            onPressed: widget.live && !_busy && widget.client != null
+                ? () => _matchInvoice(invoice)
+                : null,
+            icon: const Icon(Icons.rule_folder_outlined),
+            label: const Text('Match invoice'),
+          ),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
               foregroundColor: LedgerFlowDesign.danger,
@@ -1139,8 +1328,9 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
         ],
       ),
       children: [
-        if (_busy) const LinearProgressIndicator(minHeight: 2),
-        if (_busy) const SizedBox(height: 10),
+        if (_busy || _loadingWorkspace)
+          const LinearProgressIndicator(minHeight: 2),
+        if (_busy || _loadingWorkspace) const SizedBox(height: 10),
         TransactionRecordList(
           records: widget.invoices,
           selectedIndex: index,
@@ -1186,7 +1376,14 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
               isStatus: true,
             ),
           ],
-          onSelected: (value) => setState(() => _selected = value),
+          onSelected: (value) {
+            setState(() {
+              _selected = value;
+              _workspace = null;
+              _loadedInvoiceId = null;
+            });
+            _loadInvoiceWorkspace(widget.invoices[value]);
+          },
         ),
         const SizedBox(height: 16),
         ResponsiveMetricGrid(
@@ -1241,7 +1438,7 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
                             'Exceptions are surfaced before matched lines',
                       ),
                     ),
-                    _InvoiceLineTable(lines: lines),
+                    _InvoiceLineTable(lines: lines, currency: currency),
                   ],
                 ),
               ),
@@ -1326,6 +1523,507 @@ class _InvoiceWorkspaceState extends State<InvoiceWorkspace> {
       ],
     );
   }
+}
+
+List<JsonMap> _invoiceReconciliationRows({
+  required List<JsonMap> invoiceLines,
+  required List<JsonMap> matchResults,
+}) {
+  if (matchResults.isEmpty) {
+    return invoiceLines.indexed
+        .map((entry) {
+          final line = entry.$2;
+          return JsonMap.from(line)
+            ..putIfAbsent('line_number', () => entry.$1 + 1)
+            ..putIfAbsent('invoiced_amount', () => line['amount'])
+            ..putIfAbsent('status', () => 'CAPTURED');
+        })
+        .toList(growable: false);
+  }
+  final invoiceLinesByComponent = <String, JsonMap>{};
+  for (final line in invoiceLines) {
+    final code = _text(
+      line,
+      'charge_component_code',
+      fallback: '',
+    ).toUpperCase();
+    if (code.isNotEmpty) invoiceLinesByComponent.putIfAbsent(code, () => line);
+  }
+  return matchResults.indexed
+      .map((entry) {
+        final result = entry.$2;
+        final code = _text(
+          result,
+          'charge_component_code',
+          fallback: '',
+        ).toUpperCase();
+        final invoiceLine = invoiceLinesByComponent[code] ?? const {};
+        return <String, dynamic>{
+          ...result,
+          'line_number': entry.$1 + 1,
+          'description': _text(invoiceLine, 'description', fallback: code),
+          'matched_charge_line_id': result['charge_line_id'],
+          'invoiced_amount': result['invoice_amount'],
+          'status': result['match_status'],
+        };
+      })
+      .toList(growable: false);
+}
+
+class _InvoiceCreateDialog extends StatefulWidget {
+  const _InvoiceCreateDialog({
+    required this.documents,
+    required this.components,
+  });
+
+  final List<JsonMap> documents;
+  final List<JsonMap> components;
+
+  @override
+  State<_InvoiceCreateDialog> createState() => _InvoiceCreateDialogState();
+}
+
+class _InvoiceCreateDialogState extends State<_InvoiceCreateDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _numberController = TextEditingController();
+  late final TextEditingController _dateController;
+  late int _documentId;
+  String _invoiceType = 'SUPPLIER';
+  List<_InvoiceDraftLine> _lines = [];
+
+  JsonMap get _document => widget.documents.firstWhere(
+    (item) => _asInt(item['id']) == _documentId,
+    orElse: () => widget.documents.first,
+  );
+
+  String get _currency => _text(_document, 'currency', fallback: 'USD');
+
+  @override
+  void initState() {
+    super.initState();
+    _documentId = _asInt(widget.documents.first['id'])!;
+    _dateController = TextEditingController(
+      text: _formatIsoDate(DateTime.now()),
+    );
+    _replaceWithExpectedLines();
+  }
+
+  @override
+  void dispose() {
+    _numberController.dispose();
+    _dateController.dispose();
+    for (final line in _lines) {
+      line.dispose();
+    }
+    super.dispose();
+  }
+
+  List<JsonMap> get _expectedDocumentLines {
+    final expectedRole = _invoiceType == 'SUPPLIER' ? 'PAYER' : 'PAYEE';
+    return _rows(_document, 'lines')
+        .where((line) {
+          final role = _text(line, 'relationship_role').toUpperCase();
+          final lineRole = _text(
+            line,
+            'line_role',
+            fallback: 'POSTING',
+          ).toUpperCase();
+          return role == expectedRole && lineRole == 'POSTING';
+        })
+        .toList(growable: false);
+  }
+
+  void _replaceWithExpectedLines() {
+    for (final line in _lines) {
+      line.dispose();
+    }
+    final aggregated = <String, _InvoiceDraftLine>{};
+    for (final line in _expectedDocumentLines) {
+      final code = _text(
+        line,
+        'charge_component_code',
+        fallback: '',
+      ).toUpperCase();
+      if (code.isEmpty) continue;
+      final existing = aggregated[code];
+      if (existing == null) {
+        aggregated[code] = _InvoiceDraftLine(
+          componentCode: code,
+          description: _text(line, 'description', fallback: code),
+          amount: _number(line['expected_amount']).toStringAsFixed(2),
+        );
+      } else {
+        final amount = _number(existing.amountController.text);
+        existing.amountController.text =
+            (amount + _number(line['expected_amount'])).toStringAsFixed(2);
+      }
+    }
+    _lines = aggregated.values.toList(growable: true);
+    if (_lines.isEmpty) _lines.add(_InvoiceDraftLine());
+  }
+
+  void _changeDocument(int? value) {
+    if (value == null) return;
+    setState(() {
+      _documentId = value;
+      _replaceWithExpectedLines();
+    });
+  }
+
+  void _changeInvoiceType(String? value) {
+    if (value == null) return;
+    setState(() {
+      _invoiceType = value;
+      _replaceWithExpectedLines();
+    });
+  }
+
+  void _addLine() => setState(() => _lines.add(_InvoiceDraftLine()));
+
+  void _removeLine(int index) {
+    if (_lines.length == 1) return;
+    setState(() => _lines.removeAt(index).dispose());
+  }
+
+  Map<String, String> get _componentLabels {
+    final labels = <String, String>{};
+    for (final component in widget.components) {
+      if (component['is_active'] == false) continue;
+      final code = _text(
+        component,
+        'component_code',
+        fallback: '',
+      ).toUpperCase();
+      if (code.isEmpty) continue;
+      labels[code] =
+          '${_text(component, 'component_name', fallback: code)} ($code)';
+    }
+    for (final line in _rows(_document, 'lines')) {
+      final code = _text(
+        line,
+        'charge_component_code',
+        fallback: '',
+      ).toUpperCase();
+      if (code.isEmpty) continue;
+      labels.putIfAbsent(
+        code,
+        () => '${_text(line, 'description', fallback: code)} ($code)',
+      );
+    }
+    return Map.fromEntries(
+      labels.entries.toList()
+        ..sort((left, right) => left.value.compareTo(right.value)),
+    );
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.pop<JsonMap>(context, {
+      'charge_document_id': _documentId,
+      'invoice_number': _numberController.text.trim(),
+      'invoice_type': _invoiceType,
+      'invoice_date': _dateController.text.trim(),
+      'currency': _currency,
+      'lines': [
+        for (final line in _lines)
+          {
+            'charge_component_code': line.componentCode,
+            'description': line.descriptionController.text.trim(),
+            'amount': line.amountController.text.trim(),
+          },
+      ],
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final expectedRole = _invoiceType == 'SUPPLIER' ? 'PAYER' : 'PAYEE';
+    final hasExpectedLines = _expectedDocumentLines.isNotEmpty;
+    final componentLabels = _componentLabels;
+    return AlertDialog(
+      title: const Text('Create invoice'),
+      content: SizedBox(
+        width: 900,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+          ),
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Internal Accounts Payable capture. The selected document provides the expected charges used during matching.',
+                    style: TextStyle(color: LedgerFlowDesign.muted),
+                  ),
+                  const SizedBox(height: 18),
+                  DropdownButtonFormField<int>(
+                    initialValue: _documentId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Charge document',
+                      helperText:
+                          'Invoice currency is inherited from this document.',
+                    ),
+                    items: widget.documents
+                        .map(
+                          (document) => DropdownMenuItem<int>(
+                            value: _asInt(document['id']),
+                            child: Text(
+                              '${_text(document, 'document_number')}  |  ${_text(document, 'status')}  |  ${_text(document, 'currency')}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: _changeDocument,
+                  ),
+                  const SizedBox(height: 14),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final fields = [
+                        DropdownButtonFormField<String>(
+                          initialValue: _invoiceType,
+                          decoration: const InputDecoration(
+                            labelText: 'Invoice type',
+                            helperText:
+                                'Supplier matches PAYER; customer matches PAYEE.',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'SUPPLIER',
+                              child: Text('Supplier invoice'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'CUSTOMER',
+                              child: Text('Customer invoice'),
+                            ),
+                          ],
+                          onChanged: _changeInvoiceType,
+                        ),
+                        TextFormField(
+                          controller: _numberController,
+                          decoration: const InputDecoration(
+                            labelText: 'Invoice number',
+                            helperText: 'Vendor or customer invoice reference.',
+                          ),
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'Invoice number is required.'
+                              : null,
+                        ),
+                        _DatePickerField(
+                          controller: _dateController,
+                          label: 'Invoice date',
+                          help: 'Accounting date supplied on the invoice.',
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'Invoice date is required.'
+                              : null,
+                        ),
+                      ];
+                      if (constraints.maxWidth < 700) {
+                        return Column(
+                          children: [
+                            for (final field in fields) ...[
+                              field,
+                              const SizedBox(height: 14),
+                            ],
+                          ],
+                        );
+                      }
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (
+                            var index = 0;
+                            index < fields.length;
+                            index++
+                          ) ...[
+                            Expanded(child: fields[index]),
+                            if (index < fields.length - 1)
+                              const SizedBox(width: 12),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                  if (!hasExpectedLines) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF7E6),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        'This document has no $expectedRole posting charges. Add lines manually, or verify that the document contains the correct commercial side.',
+                        style: const TextStyle(color: LedgerFlowDesign.warning),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: SectionHeading(
+                          title: 'Invoice lines',
+                          subtitle:
+                              'Matching aggregates invoice amounts by charge component.',
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _addLine,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add line'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  for (var index = 0; index < _lines.length; index++) ...[
+                    _InvoiceDraftLineEditor(
+                      key: ObjectKey(_lines[index]),
+                      line: _lines[index],
+                      componentLabels: componentLabels,
+                      canRemove: _lines.length > 1,
+                      onRemove: () => _removeLine(index),
+                      onComponentChanged: (value) => setState(
+                        () => _lines[index].componentCode = value ?? '',
+                      ),
+                    ),
+                    if (index < _lines.length - 1) const SizedBox(height: 10),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Create invoice')),
+      ],
+    );
+  }
+}
+
+class _InvoiceDraftLine {
+  _InvoiceDraftLine({
+    this.componentCode = '',
+    String description = '',
+    String amount = '',
+  }) : descriptionController = TextEditingController(text: description),
+       amountController = TextEditingController(text: amount);
+
+  String componentCode;
+  final TextEditingController descriptionController;
+  final TextEditingController amountController;
+
+  void dispose() {
+    descriptionController.dispose();
+    amountController.dispose();
+  }
+}
+
+class _InvoiceDraftLineEditor extends StatelessWidget {
+  const _InvoiceDraftLineEditor({
+    required this.line,
+    required this.componentLabels,
+    required this.canRemove,
+    required this.onRemove,
+    required this.onComponentChanged,
+    super.key,
+  });
+
+  final _InvoiceDraftLine line;
+  final Map<String, String> componentLabels;
+  final bool canRemove;
+  final VoidCallback onRemove;
+  final ValueChanged<String?> onComponentChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: LedgerFlowDesign.canvas,
+      border: Border.all(color: LedgerFlowDesign.border),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final componentField = DropdownButtonFormField<String>(
+          initialValue: line.componentCode.isEmpty ? null : line.componentCode,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Charge component'),
+          items: componentLabels.entries
+              .map(
+                (entry) => DropdownMenuItem(
+                  value: entry.key,
+                  child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                ),
+              )
+              .toList(growable: false),
+          validator: (value) => value == null || value.isEmpty
+              ? 'Select a charge component.'
+              : null,
+          onChanged: onComponentChanged,
+        );
+        final descriptionField = TextFormField(
+          controller: line.descriptionController,
+          decoration: const InputDecoration(labelText: 'Description'),
+        );
+        final amountField = TextFormField(
+          controller: line.amountController,
+          decoration: const InputDecoration(labelText: 'Amount'),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          validator: (value) => double.tryParse(value?.trim() ?? '') == null
+              ? 'Enter a valid amount.'
+              : null,
+        );
+        final removeButton = IconButton(
+          tooltip: 'Remove line',
+          onPressed: canRemove ? onRemove : null,
+          icon: const Icon(Icons.delete_outline),
+        );
+        if (constraints.maxWidth < 680) {
+          return Column(
+            children: [
+              componentField,
+              const SizedBox(height: 10),
+              descriptionField,
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: amountField),
+                  const SizedBox(width: 8),
+                  removeButton,
+                ],
+              ),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: 3, child: componentField),
+            const SizedBox(width: 10),
+            Expanded(flex: 3, child: descriptionField),
+            const SizedBox(width: 10),
+            Expanded(child: amountField),
+            const SizedBox(width: 4),
+            removeButton,
+          ],
+        );
+      },
+    ),
+  );
 }
 
 class RateBookWorkspace extends StatefulWidget {
@@ -4244,9 +4942,10 @@ class _ExportResultDialog extends StatelessWidget {
 }
 
 class _InvoiceLineTable extends StatelessWidget {
-  const _InvoiceLineTable({required this.lines});
+  const _InvoiceLineTable({required this.lines, required this.currency});
 
   final List<JsonMap> lines;
+  final String currency;
 
   @override
   Widget build(BuildContext context) {
@@ -4285,12 +4984,26 @@ class _InvoiceLineTable extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
-              DataCell(Text('#${_text(line, 'matched_charge_line_id')}')),
-              DataCell(Text(_money(_number(line['expected_amount'])))),
-              DataCell(Text(_money(_number(line['invoiced_amount'])))),
               DataCell(
                 Text(
-                  _money(variance),
+                  line['matched_charge_line_id'] == null
+                      ? 'Unmatched'
+                      : '#${line['matched_charge_line_id']}',
+                ),
+              ),
+              DataCell(
+                Text(
+                  _money(_number(line['expected_amount']), currency: currency),
+                ),
+              ),
+              DataCell(
+                Text(
+                  _money(_number(line['invoiced_amount']), currency: currency),
+                ),
+              ),
+              DataCell(
+                Text(
+                  _money(variance, currency: currency),
                   style: TextStyle(
                     color: variance == 0
                         ? LedgerFlowDesign.ink

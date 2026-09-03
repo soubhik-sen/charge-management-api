@@ -36,6 +36,14 @@ from app.domain.models import (
     BusinessDateProfileVersionCreate,
     BusinessDateResolveRequest,
     BusinessDateResolveResponse,
+    FreeTimeDurationPreviewRequest,
+    FreeTimeDurationPreviewResponse,
+    FreeTimeProfile,
+    FreeTimeProfileCreate,
+    FreeTimeProfileListResponse,
+    FreeTimeProfileUpdate,
+    FreeTimeProfileVersion,
+    FreeTimeProfileVersionCreate,
     ChargeComponent,
     ChargeComponentAlias,
     ChargeComponentAliasListResponse,
@@ -71,6 +79,8 @@ from app.domain.models import (
     QuoteAwardResponse,
     QuoteCommitmentConsumeRequest,
     QuoteCommitmentConsumeResponse,
+    QuoteCommitmentCancelRequest,
+    QuoteCommitmentCancelResponse,
     QuoteCommitmentConsumptionReverseRequest,
     QuoteCommitmentMatchRequest,
     QuoteCommitmentMatchResponse,
@@ -425,6 +435,8 @@ def list_allocation_profiles(
     q: str | None = Query(default=None),
     source_level: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    owner_type: str | None = Query(default=None),
+    owner_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(require_bearer_principal),
@@ -434,6 +446,8 @@ def list_allocation_profiles(
         search=q,
         source_level=source_level,
         status_filter=status_filter,
+        owner_type=owner_type,
+        owner_id=owner_id,
         limit=limit,
         offset=offset,
     )
@@ -501,6 +515,8 @@ def list_calculation_profiles(
     q: str | None = Query(default=None),
     application_level: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    owner_type: str | None = Query(default=None),
+    owner_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(require_bearer_principal),
@@ -510,6 +526,8 @@ def list_calculation_profiles(
         search=q,
         application_level=application_level,
         status_filter=status_filter,
+        owner_type=owner_type,
+        owner_id=owner_id,
         limit=limit,
         offset=offset,
     )
@@ -576,6 +594,8 @@ def publish_calculation_profile_version(
 def list_business_date_profiles(
     q: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    owner_type: str | None = Query(default=None),
+    owner_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(require_bearer_principal),
@@ -584,6 +604,8 @@ def list_business_date_profiles(
     return service.list_business_date_profiles(
         search=q,
         status_filter=status_filter,
+        owner_type=owner_type,
+        owner_id=owner_id,
         limit=limit,
         offset=offset,
     )
@@ -698,6 +720,94 @@ def delete_business_date_profile_assignment(
 ) -> BusinessDateProfileAssignment:
     _allow(principal, "charge.business_date_profiles.assignments.delete")
     return service.delete_business_date_profile_assignment(assignment_id)
+
+
+@router.get("/free-time-profiles", response_model=FreeTimeProfileListResponse)
+def list_free_time_profiles(
+    q: str | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    owner_type: str | None = Query(default=None),
+    owner_id: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeProfileListResponse:
+    _allow(principal, "charge.free_time_profiles.list")
+    return service.list_free_time_profiles(
+        search=q,
+        status_filter=status_filter,
+        owner_type=owner_type,
+        owner_id=owner_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("/free-time-profiles", response_model=FreeTimeProfile, status_code=201)
+def create_free_time_profile(
+    payload: FreeTimeProfileCreate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeProfile:
+    _allow(principal, "charge.free_time_profiles.create")
+    return service.create_free_time_profile(payload)
+
+
+@router.get("/free-time-profiles/{profile_id}", response_model=FreeTimeProfile)
+def get_free_time_profile(
+    profile_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeProfile:
+    _allow(principal, "charge.free_time_profiles.read")
+    return service.get_free_time_profile(profile_id)
+
+
+@router.put("/free-time-profiles/{profile_id}", response_model=FreeTimeProfile)
+def update_free_time_profile(
+    profile_id: int,
+    payload: FreeTimeProfileUpdate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeProfile:
+    _allow(principal, "charge.free_time_profiles.update")
+    return service.update_free_time_profile(profile_id, payload)
+
+
+@router.post("/free-time-profiles/{profile_id}/versions", response_model=FreeTimeProfile, status_code=201)
+def create_free_time_profile_version(
+    profile_id: int,
+    payload: FreeTimeProfileVersionCreate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeProfile:
+    _allow(principal, "charge.free_time_profiles.versions.create")
+    return service.create_free_time_profile_version(profile_id, payload)
+
+
+@router.put("/free-time-profile-versions/{version_id}", response_model=FreeTimeProfileVersion)
+def update_free_time_profile_version(
+    version_id: int,
+    payload: FreeTimeProfileVersionCreate,
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeProfileVersion:
+    _allow(principal, "charge.free_time_profiles.versions.update")
+    return service.update_free_time_profile_version(version_id, payload)
+
+
+@router.post("/free-time-profile-versions/{version_id}/publish", response_model=FreeTimeProfile)
+def publish_free_time_profile_version(
+    version_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeProfile:
+    _allow(principal, "charge.free_time_profiles.versions.publish")
+    return service.publish_free_time_profile_version(version_id)
+
+
+@router.post("/free-time-profiles/{profile_id}/preview", response_model=FreeTimeDurationPreviewResponse)
+def preview_free_time_duration(
+    profile_id: int,
+    payload: FreeTimeDurationPreviewRequest,
+    principal: Principal = Depends(require_bearer_principal),
+) -> FreeTimeDurationPreviewResponse:
+    _allow(principal, "charge.free_time_profiles.preview")
+    return service.preview_free_time_duration(profile_id, payload)
 
 
 @router.get("/components", response_model=ChargeComponentListResponse)
@@ -1197,6 +1307,19 @@ def consume_quote_commitment(
 ) -> QuoteCommitmentConsumeResponse:
     _allow(principal, "charge.quote_commitments.consume")
     return service.consume_quote_commitment(commitment_id, payload)
+
+
+@router.post(
+    "/quote-commitments/{commitment_id}/cancel",
+    response_model=QuoteCommitmentCancelResponse,
+)
+def cancel_quote_commitment(
+    commitment_id: int,
+    payload: QuoteCommitmentCancelRequest,
+    principal: Principal = Depends(require_bearer_principal),
+) -> QuoteCommitmentCancelResponse:
+    _allow(principal, "charge.quote_commitments.cancel")
+    return service.cancel_quote_commitment(commitment_id, payload.reason)
 
 
 @router.post("/quote-commitment-consumptions/{consumption_id}/reverse", response_model=QuoteCommitmentConsumeResponse)

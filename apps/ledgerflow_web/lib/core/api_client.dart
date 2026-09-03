@@ -12,10 +12,19 @@ class LedgerFlowApiClient {
   }) : baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
        _httpClient = httpClient ?? http.Client();
 
-  static const defaultBaseUrl = String.fromEnvironment(
+  static const _configuredBaseUrl = String.fromEnvironment(
     'LEDGERFLOW_API_URL',
-    defaultValue: 'http://localhost:8000',
   );
+  static String get defaultBaseUrl {
+    if (_configuredBaseUrl.trim().isNotEmpty) return _configuredBaseUrl;
+    final pageUri = Uri.base;
+    if ((pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
+        pageUri.host.isNotEmpty) {
+      return pageUri.origin;
+    }
+    return 'http://localhost:8000';
+  }
+
   static const defaultToken = String.fromEnvironment('LEDGERFLOW_API_TOKEN');
 
   final String baseUrl;

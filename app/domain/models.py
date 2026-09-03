@@ -132,6 +132,17 @@ def _validate_quote_date_values(values: list["BusinessDateValue"] | None) -> lis
     return values
 
 
+def _normalize_owner_type(value: Any) -> Any:
+    if value is None:
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip().upper()
+        if not cleaned:
+            raise ValueError("owner_type is required when owner_id is set")
+        return cleaned
+    return value
+
+
 class ChargeComponent(ApiModel):
     id: int
     component_code: str
@@ -305,13 +316,23 @@ class ChargeAllocationProfileVersionCreate(ChargeAllocationProfileVersionPayload
     expected_lock_version: int | None = Field(default=None, ge=1)
 
 
-class ChargeAllocationProfileCreate(ApiModel):
+class OwnerScopedProfilePayload(ApiModel):
+    owner_type: str = "SYSTEM"
+    owner_id: int = Field(default=0, ge=0)
+
+    @field_validator("owner_type", mode="before")
+    @classmethod
+    def normalize_owner_type(cls, value: Any) -> Any:
+        return _normalize_owner_type(value)
+
+
+class ChargeAllocationProfileCreate(OwnerScopedProfilePayload):
     profile_code: str
     profile_name: str
     initial_version: ChargeAllocationProfileVersionCreate
 
 
-class ChargeAllocationProfileUpdate(ApiModel):
+class ChargeAllocationProfileUpdate(OwnerScopedProfilePayload):
     profile_code: str
     profile_name: str
 
@@ -331,6 +352,8 @@ class ChargeAllocationProfile(ApiModel):
     id: int
     profile_code: str
     profile_name: str
+    owner_type: str
+    owner_id: int
     published_version_id: int | None = None
     published_version_number: int | None = None
     versions: list[ChargeAllocationProfileVersion] = Field(default_factory=list)
@@ -387,7 +410,7 @@ class ChargeCalculationProfileVersion(ChargeCalculationProfileVersionPayload):
     factors: list[ChargeCalculationProfileFactor] = Field(default_factory=list)
 
 
-class ChargeCalculationProfileCreate(ApiModel):
+class ChargeCalculationProfileCreate(OwnerScopedProfilePayload):
     profile_code: str
     profile_name: str
     description: str | None = None
@@ -395,7 +418,7 @@ class ChargeCalculationProfileCreate(ApiModel):
     initial_version: ChargeCalculationProfileVersionCreate
 
 
-class ChargeCalculationProfileUpdate(ApiModel):
+class ChargeCalculationProfileUpdate(OwnerScopedProfilePayload):
     profile_code: str
     profile_name: str
     description: str | None = None
@@ -406,6 +429,8 @@ class ChargeCalculationProfile(ApiModel):
     id: int
     profile_code: str
     profile_name: str
+    owner_type: str
+    owner_id: int
     description: str | None = None
     is_active: bool = True
     published_version_id: int | None = None
@@ -457,7 +482,7 @@ class BusinessDateProfileVersionCreate(BusinessDateProfileVersionPayload):
     expected_lock_version: int | None = Field(default=None, ge=1)
 
 
-class BusinessDateProfileCreate(ApiModel):
+class BusinessDateProfileCreate(OwnerScopedProfilePayload):
     profile_code: str = Field(
         validation_alias=AliasChoices("profile_code", "profile_key")
     )
@@ -494,7 +519,7 @@ class BusinessDateProfileCreate(ApiModel):
         return self
 
 
-class BusinessDateProfileUpdate(ApiModel):
+class BusinessDateProfileUpdate(OwnerScopedProfilePayload):
     profile_code: str = Field(
         validation_alias=AliasChoices("profile_code", "profile_key")
     )
@@ -531,6 +556,8 @@ class BusinessDateProfile(ApiModel):
     id: int
     profile_code: str
     profile_name: str
+    owner_type: str
+    owner_id: int
     description: str | None = None
     published_version_id: int | None = None
     published_version_number: int | None = None
@@ -542,6 +569,147 @@ class BusinessDateProfile(ApiModel):
     @property
     def profile_key(self) -> str:
         return self.profile_code
+
+
+class FreeTimeRulePayload(ApiModel):
+    sequence: int
+    rule_code: str
+    rule_name: str
+    scope_type: str = "GLOBAL"
+    scope_id: int | None = None
+    event_type: str | None = None
+    start_timestamp_key: str
+    end_timestamp_key: str
+    free_time_days: Decimal = Decimal("0")
+    match_facts_json: dict[str, Any] = Field(default_factory=dict)
+    priority: int = 100
+    notes: str | None = None
+    is_active: bool = True
+
+    @field_validator("scope_type", "event_type", "start_timestamp_key", "end_timestamp_key", mode="before")
+    @classmethod
+    def normalize_rule_strings(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        if isinstance(value, str):
+            cleaned = value.strip().upper()
+            if not cleaned:
+                raise ValueError("rule string values must not be blank")
+            return cleaned
+        return value
+
+
+class FreeTimeRuleCreate(FreeTimeRulePayload):
+    pass
+
+
+class FreeTimeRule(FreeTimeRulePayload):
+    id: int
+    profile_version_id: int
+
+
+class FreeTimeProfileVersionPayload(ApiModel):
+    effective_from: date | None = None
+    effective_to: date | None = None
+    notes: str | None = None
+    rules: list[FreeTimeRuleCreate] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_effective_period(self) -> "FreeTimeProfileVersionPayload":
+        if self.effective_from is not None and self.effective_to is not None:
+            if self.effective_from > self.effective_to:
+                raise ValueError("effective_from must be less than or equal to effective_to")
+        return self
+
+
+class FreeTimeProfileVersionCreate(FreeTimeProfileVersionPayload):
+    expected_lock_version: int | None = Field(default=None, ge=1)
+
+
+class FreeTimeProfileCreate(OwnerScopedProfilePayload):
+    profile_code: str
+    profile_name: str
+    description: str | None = None
+    initial_version: FreeTimeProfileVersionCreate
+
+
+class FreeTimeProfileUpdate(OwnerScopedProfilePayload):
+    profile_code: str
+    profile_name: str
+    description: str | None = None
+
+
+class FreeTimeProfileVersion(FreeTimeProfileVersionPayload):
+    id: int
+    profile_id: int
+    version_number: int
+    status: Literal["DRAFT", "PUBLISHED", "RETIRED"] = "DRAFT"
+    lock_version: int = 1
+    published_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    rules: list[FreeTimeRule] = Field(default_factory=list)
+
+
+class FreeTimeProfile(ApiModel):
+    id: int
+    profile_code: str
+    profile_name: str
+    owner_type: str
+    owner_id: int
+    description: str | None = None
+    published_version_id: int | None = None
+    published_version_number: int | None = None
+    versions: list[FreeTimeProfileVersion] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class FreeTimeProfileListResponse(ApiModel):
+    items: list[FreeTimeProfile]
+    total: int
+    limit: int
+    offset: int
+
+
+class FreeTimeDurationPreviewRequest(ApiModel):
+    scope_type: str | None = None
+    scope_id: int | None = None
+    event_type: str | None = None
+    event_facts: dict[str, Any] = Field(default_factory=dict)
+    event_timestamps: dict[str, datetime] = Field(default_factory=dict)
+
+    @field_validator("scope_type", "event_type", mode="before")
+    @classmethod
+    def normalize_preview_strings(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        if isinstance(value, str):
+            cleaned = value.strip().upper()
+            return cleaned or None
+        return value
+
+
+class FreeTimeDurationPreviewResponse(ApiModel):
+    profile_id: int
+    profile_code: str
+    profile_version_id: int
+    rule_id: int
+    rule_code: str
+    rule_name: str
+    scope_type: str
+    scope_id: int | None = None
+    event_type: str | None = None
+    start_timestamp_key: str
+    end_timestamp_key: str
+    start_timestamp: datetime
+    end_timestamp: datetime
+    duration_basis: Literal["DURATION_DAYS"] = "DURATION_DAYS"
+    duration_days: Decimal
+    free_time_days: Decimal
+    chargeable_days: Decimal
+    event_facts: dict[str, Any] = Field(default_factory=dict)
+    event_timestamps: dict[str, datetime] = Field(default_factory=dict)
 
 
 class BusinessDateValue(ApiModel):
@@ -955,6 +1123,7 @@ class ChargeReferenceData(ApiModel):
     ]
     business_date_purposes: list[str] = ["EXCHANGE_RATE_DATE"]
     business_date_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
+    free_time_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
     fx_rate_types: list[str] = ["MID", "BUY", "SELL", "CUSTOM"]
     business_date_keys: list[str] = [
         "DOCUMENT_DATE",
@@ -2007,6 +2176,15 @@ class QuoteCommitmentConsumeRequest(ApiModel):
 class QuoteCommitmentConsumeResponse(ApiModel):
     commitment: QuoteCommitment
     consumption: QuoteCommitmentConsumption
+
+
+class QuoteCommitmentCancelRequest(ApiModel):
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class QuoteCommitmentCancelResponse(ApiModel):
+    commitment: QuoteCommitment
+    charge_document: ChargeDocument
 
 
 class QuoteCommitmentConsumptionReverseRequest(ApiModel):

@@ -1235,6 +1235,201 @@ def test_business_date_profile_lifecycle_assignment_and_resolution() -> None:
     assert deleted_assignment.json()["id"] == assignment_id
 
 
+def test_owner_scoped_profile_codes_can_be_reused_across_families() -> None:
+    calculation_payload = {
+        "profile_code": "OWNER_SCOPED_SHARED",
+        "profile_name": "Owner scoped shared calculation",
+        "owner_type": "TENANT",
+        "owner_id": 101,
+        "initial_version": {
+            "application_level": "SHIPMENT",
+            "calculation_method": "FLAT_AMOUNT",
+            "rate_uom": "USD",
+            "factors": [],
+        },
+    }
+    first_calculation = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json=calculation_payload,
+    )
+    assert first_calculation.status_code == 201, first_calculation.text
+    second_calculation = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={**calculation_payload, "owner_id": 102},
+    )
+    assert second_calculation.status_code == 201, second_calculation.text
+    duplicate_calculation = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json=calculation_payload,
+    )
+    assert duplicate_calculation.status_code == 409
+
+    listed_calculation = client.get(
+        "/api/v1/charge-management/calculation-profiles?owner_type=TENANT&owner_id=101",
+        headers=AUTH,
+    )
+    assert listed_calculation.status_code == 200, listed_calculation.text
+    assert listed_calculation.json()["total"] == 1
+    assert listed_calculation.json()["items"][0]["owner_type"] == "TENANT"
+    assert listed_calculation.json()["items"][0]["owner_id"] == 101
+
+    allocation_payload = {
+        "profile_code": "OWNER_SCOPED_SHARED",
+        "profile_name": "Owner scoped shared allocation",
+        "owner_type": "TENANT",
+        "owner_id": 101,
+        "initial_version": {
+            "source_level": "CONTAINER",
+            "source_to_house_driver": "CBM",
+            "house_to_item_driver": "WEIGHT",
+            "final_posting_level": "HOUSE",
+        },
+    }
+    first_allocation = client.post(
+        "/api/v1/charge-management/allocation-profiles",
+        headers=AUTH,
+        json=allocation_payload,
+    )
+    assert first_allocation.status_code == 201, first_allocation.text
+    second_allocation = client.post(
+        "/api/v1/charge-management/allocation-profiles",
+        headers=AUTH,
+        json={**allocation_payload, "owner_id": 102},
+    )
+    assert second_allocation.status_code == 201, second_allocation.text
+    duplicate_allocation = client.post(
+        "/api/v1/charge-management/allocation-profiles",
+        headers=AUTH,
+        json=allocation_payload,
+    )
+    assert duplicate_allocation.status_code == 409
+
+    listed_allocation = client.get(
+        "/api/v1/charge-management/allocation-profiles?owner_type=TENANT&owner_id=101",
+        headers=AUTH,
+    )
+    assert listed_allocation.status_code == 200, listed_allocation.text
+    assert listed_allocation.json()["total"] == 1
+    assert listed_allocation.json()["items"][0]["owner_type"] == "TENANT"
+    assert listed_allocation.json()["items"][0]["owner_id"] == 101
+
+    business_date_payload = {
+        "profile_code": "OWNER_SCOPED_SHARED",
+        "profile_name": "Owner scoped shared business date",
+        "owner_type": "TENANT",
+        "owner_id": 101,
+        "initial_version": {
+            "steps": [{"step_number": 10, "date_key": "DOCUMENT_DATE"}],
+        },
+    }
+    first_business_date = client.post(
+        "/api/v1/charge-management/business-date-profiles",
+        headers=AUTH,
+        json=business_date_payload,
+    )
+    assert first_business_date.status_code == 201, first_business_date.text
+    second_business_date = client.post(
+        "/api/v1/charge-management/business-date-profiles",
+        headers=AUTH,
+        json={**business_date_payload, "owner_id": 102},
+    )
+    assert second_business_date.status_code == 201, second_business_date.text
+    duplicate_business_date = client.post(
+        "/api/v1/charge-management/business-date-profiles",
+        headers=AUTH,
+        json=business_date_payload,
+    )
+    assert duplicate_business_date.status_code == 409
+
+    listed_business_date = client.get(
+        "/api/v1/charge-management/business-date-profiles?owner_type=TENANT&owner_id=101",
+        headers=AUTH,
+    )
+    assert listed_business_date.status_code == 200, listed_business_date.text
+    assert listed_business_date.json()["total"] == 1
+    assert listed_business_date.json()["items"][0]["owner_type"] == "TENANT"
+    assert listed_business_date.json()["items"][0]["owner_id"] == 101
+
+
+def test_free_time_profile_preview_uses_scoped_rule_matching() -> None:
+    created = client.post(
+        "/api/v1/charge-management/free-time-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "OCEAN_FREE_TIME",
+            "profile_name": "Ocean free time",
+            "owner_type": "TENANT",
+            "owner_id": 101,
+            "initial_version": {
+                "notes": "Initial free-time rules",
+                "rules": [
+                    {
+                        "sequence": 10,
+                        "rule_code": "GLOBAL_RULE",
+                        "rule_name": "Global default",
+                        "scope_type": "GLOBAL",
+                        "event_type": "ARRIVAL",
+                        "start_timestamp_key": "FREE_TIME_START",
+                        "end_timestamp_key": "FREE_TIME_END",
+                        "free_time_days": "1",
+                        "match_facts_json": {"equipment_type": "DRY"},
+                        "priority": 1,
+                    },
+                    {
+                        "sequence": 20,
+                        "rule_code": "TENANT_RULE",
+                        "rule_name": "Tenant-specific",
+                        "scope_type": "TENANT",
+                        "scope_id": 101,
+                        "event_type": "ARRIVAL",
+                        "start_timestamp_key": "FREE_TIME_START",
+                        "end_timestamp_key": "FREE_TIME_END",
+                        "free_time_days": "2",
+                        "match_facts_json": {"equipment_type": "DRY"},
+                        "priority": 0,
+                    },
+                ],
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    version_id = profile["versions"][0]["id"]
+    published = client.post(
+        f"/api/v1/charge-management/free-time-profile-versions/{version_id}/publish",
+        headers=AUTH,
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["published_version_id"] == version_id
+
+    preview = client.post(
+        f"/api/v1/charge-management/free-time-profiles/{profile['id']}/preview",
+        headers=AUTH,
+        json={
+            "scope_type": "TENANT",
+            "scope_id": 101,
+            "event_type": "ARRIVAL",
+            "event_facts": {"equipment_type": "DRY"},
+            "event_timestamps": {
+                "FREE_TIME_START": "2026-08-01T00:00:00Z",
+                "FREE_TIME_END": "2026-08-05T00:00:00Z",
+            },
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["rule_code"] == "TENANT_RULE"
+    assert body["duration_basis"] == "DURATION_DAYS"
+    assert body["duration_days"] == "4.000000"
+    assert body["free_time_days"] == "2.000000"
+    assert body["chargeable_days"] == "2.000000"
+    assert body["scope_type"] == "TENANT"
+    assert body["scope_id"] == 101
+
+
 def test_charge_line_date_basis_override_precedence() -> None:
     component = client.post(
         "/api/v1/charge-management/components",
@@ -3630,6 +3825,26 @@ def test_quote_to_export_and_reverse_lifecycle() -> None:
         duplicate_retry.json()["charge_document"]["id"]
         == duplicate_award.json()["charge_document"]["id"]
     )
+    cancelled = client.post(
+        "/api/v1/charge-management/quote-commitments/"
+        f"{duplicate_award.json()['quote_commitment']['id']}/cancel",
+        headers=AUTH,
+        json={"reason": "Executable transport order was replanned"},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["commitment"]["status"] == "CANCELLED"
+    assert cancelled.json()["charge_document"]["status"] == "CANCELLED"
+    assert cancelled.json()["charge_document"]["reversal_reason"] == (
+        "Executable transport order was replanned"
+    )
+    repeated_cancel = client.post(
+        "/api/v1/charge-management/quote-commitments/"
+        f"{duplicate_award.json()['quote_commitment']['id']}/cancel",
+        headers=AUTH,
+        json={"reason": "Executable transport order was replanned"},
+    )
+    assert repeated_cancel.status_code == 200, repeated_cancel.text
+    assert repeated_cancel.json()["commitment"]["id"] == cancelled.json()["commitment"]["id"]
 
     matched_commitments = client.post(
         "/api/v1/charge-management/quote-commitments/match",
@@ -4155,6 +4370,13 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/business-date-profile-versions/{version_id}/publish" in paths
     assert "/api/v1/charge-management/business-date-profiles/{profile_id}/assignments" in paths
     assert "/api/v1/charge-management/business-date-profile-assignments/{assignment_id}" in paths
+    assert "/api/v1/charge-management/free-time-profiles" in paths
+    assert "post" in paths["/api/v1/charge-management/free-time-profiles"]
+    assert "/api/v1/charge-management/free-time-profiles/{profile_id}" in paths
+    assert "/api/v1/charge-management/free-time-profiles/{profile_id}/versions" in paths
+    assert "/api/v1/charge-management/free-time-profile-versions/{version_id}" in paths
+    assert "/api/v1/charge-management/free-time-profile-versions/{version_id}/publish" in paths
+    assert "/api/v1/charge-management/free-time-profiles/{profile_id}/preview" in paths
     assert "/api/v1/charge-management/quote-requests/{quote_request_id}/rate" in paths
     assert "/api/v1/charge-management/rate-books" in paths
     assert "get" in paths["/api/v1/charge-management/rate-books"]
@@ -4177,6 +4399,7 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/quote-offers/{offer_id}/withdraw" in paths
     assert "/api/v1/charge-management/quote-commitments/match" in paths
     assert "/api/v1/charge-management/quote-commitments/{commitment_id}/consume" in paths
+    assert "/api/v1/charge-management/quote-commitments/{commitment_id}/cancel" in paths
     assert "/api/v1/charge-management/quote-commitment-consumptions/{consumption_id}/reverse" in paths
     assert "/api/v1/charge-management/charge-documents" in paths
     assert "get" in paths["/api/v1/charge-management/charge-documents"]
@@ -4197,6 +4420,19 @@ def test_openapi_exposes_core_paths() -> None:
     assert "DOCUMENT_DATE" in schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
     assert "ROAD_ACTUAL_PICKUP_DATE" in schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
     assert "supplied_date_keys" in schemas["BusinessDateResolveResponse"]["properties"]
+    assert "owner_type" in schemas["ChargeAllocationProfileCreate"]["properties"]
+    assert "owner_id" in schemas["ChargeAllocationProfileCreate"]["properties"]
+    assert "owner_type" in schemas["ChargeAllocationProfile"]["properties"]
+    assert "owner_id" in schemas["ChargeAllocationProfile"]["properties"]
+    assert "owner_type" in schemas["ChargeCalculationProfileCreate"]["properties"]
+    assert "owner_type" in schemas["ChargeCalculationProfile"]["properties"]
+    assert "owner_type" in schemas["BusinessDateProfileCreate"]["properties"]
+    assert "owner_type" in schemas["BusinessDateProfile"]["properties"]
+    assert "owner_type" in schemas["FreeTimeProfileCreate"]["properties"]
+    assert "owner_type" in schemas["FreeTimeProfile"]["properties"]
+    assert "event_timestamps" in schemas["FreeTimeDurationPreviewRequest"]["properties"]
+    assert "duration_basis" in schemas["FreeTimeDurationPreviewResponse"]["properties"]
+    assert "free_time_profile_version_statuses" in schemas["ChargeReferenceData"]["properties"]
     assert "calculation_inputs" in schemas["QuoteRequestCreate"]["properties"]
     assert "component_calculation_inputs" in schemas["QuoteRequestCreate"]["properties"]
     assert "date_values" in schemas["QuoteRequestCreate"]["properties"]
@@ -4234,12 +4470,25 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/calculation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/allocation-profiles" in contract["paths"]
     assert "/api/v1/charge-management/business-date-profiles" in contract["paths"]
+    assert "/api/v1/charge-management/free-time-profiles" in contract["paths"]
+    assert "/api/v1/charge-management/free-time-profiles/{profile_id}/preview" in contract["paths"]
     assert "/api/v1/charge-management/pricing-dimensions" in contract["paths"]
     assert "/api/v1/charge-management/caller-mapping-profiles" in contract["paths"]
     contract_schemas = contract["components"]["schemas"]
     assert "date_values" in contract_schemas["BusinessDateResolveRequest"]["properties"]
     assert contract_schemas["BusinessDateResolveRequest"]["properties"]["context"]["deprecated"] is True
     assert "supplied_date_keys" in contract_schemas["BusinessDateResolveResponse"]["properties"]
+    assert "owner_type" in contract_schemas["ChargeAllocationProfileCreate"]["properties"]
+    assert "owner_type" in contract_schemas["ChargeAllocationProfile"]["properties"]
+    assert "owner_type" in contract_schemas["ChargeCalculationProfileCreate"]["properties"]
+    assert "owner_type" in contract_schemas["ChargeCalculationProfile"]["properties"]
+    assert "owner_type" in contract_schemas["BusinessDateProfileCreate"]["properties"]
+    assert "owner_type" in contract_schemas["BusinessDateProfile"]["properties"]
+    assert "owner_type" in contract_schemas["FreeTimeProfileCreate"]["properties"]
+    assert "owner_type" in contract_schemas["FreeTimeProfile"]["properties"]
+    assert "event_timestamps" in contract_schemas["FreeTimeDurationPreviewRequest"]["properties"]
+    assert "duration_basis" in contract_schemas["FreeTimeDurationPreviewResponse"]["properties"]
+    assert "free_time_profile_version_statuses" in contract_schemas["ChargeReferenceData"]["properties"]
     assert (
         "ROAD_ACTUAL_PICKUP_DATE"
         in contract_schemas["BusinessDateValue"]["properties"]["date_type"]["enum"]
@@ -4292,6 +4541,7 @@ def test_openapi_exposes_core_paths() -> None:
     assert "/api/v1/charge-management/quote-offers/{offer_id}/withdraw" in contract["paths"]
     assert "/api/v1/charge-management/quote-requests/{quote_request_id}/award" in contract["paths"]
     assert "/api/v1/charge-management/quote-commitments/match" in contract["paths"]
+    assert "/api/v1/charge-management/quote-commitments/{commitment_id}/cancel" in contract["paths"]
     assert "/api/v1/charge-management/quote-commitment-consumptions/{consumption_id}/reverse" in contract["paths"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
     assert "charge_date_basis" in contract["components"]["schemas"]["ChargeComponentPayload"]["properties"]
