@@ -3371,10 +3371,10 @@ class _CalculationTemplateStepEditor extends StatelessWidget {
         !books.any((book) => _asInt(book['id']) == step.rateBookId)) {
       step.rateBookId = null;
     }
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        border: Border.all(color: LedgerFlowDesign.border),
+    return Material(
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: LedgerFlowDesign.border),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
@@ -6781,11 +6781,11 @@ class _RateEntryEditor extends StatelessWidget {
       );
     }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+    return Material(
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: LedgerFlowDesign.border),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: LedgerFlowDesign.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),

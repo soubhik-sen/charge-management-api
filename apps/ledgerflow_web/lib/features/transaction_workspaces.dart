@@ -931,10 +931,10 @@ class _ContractTemplateRouteEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final templates = calculationTemplates.where(_isPublished).toList();
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        border: Border.all(color: LedgerFlowDesign.border),
+    return Material(
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: LedgerFlowDesign.border),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
@@ -1172,10 +1172,10 @@ class _ContractLineEditor extends StatelessWidget {
         !books.any((book) => _asInt(book['id']) == line.rateBookId)) {
       line.rateBookId = null;
     }
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        border: Border.all(color: LedgerFlowDesign.border),
+    return Material(
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: LedgerFlowDesign.border),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
