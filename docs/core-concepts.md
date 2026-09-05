@@ -112,16 +112,17 @@ An alias maps an external or imported label to a canonical charge component. For
 
 - Importing provider proposals or rate sheets.
 - Normalizing invoice labels.
-- Supporting customer-, forwarder-, transport-mode-, template-, or document-specific terminology.
-- Overriding default allocation behavior for a recognized external label.
+- Supporting customer-, forwarder-, transport-mode-, source-UOM-, template-, or document-specific terminology.
+- Overriding default calculation or allocation behavior for a recognized external label.
 
 ### How To Use It
 
 1. Create the canonical component first.
 2. Create an alias with `POST /component-aliases` using `raw_label` and `charge_component_id`.
-3. Add optional customer, forwarder, transport mode, document kind, or template scope.
-4. Choose `INHERIT_PROFILE`, `OVERRIDE_PROFILE`, or `NO_ALLOCATION` for allocation behavior.
-5. Search aliases with `GET /component-aliases` and update/deactivate them through the ID endpoint.
+3. Add optional customer, forwarder, transport mode, source UOM, document kind, or template scope. Source UOM is part of alias identity, so the same label can have separate document, container, ocean W/M, weight, or percentage behavior.
+4. Choose `INHERIT_PROFILE`, `OVERRIDE_PROFILE`, or `NO_PROFILE` for calculation behavior and optionally select the calculation profile.
+5. Choose `INHERIT_PROFILE`, `OVERRIDE_PROFILE`, or `NO_ALLOCATION` for allocation behavior and optionally select the allocation profile.
+6. Search aliases with `GET /component-aliases` and update/deactivate them through the ID endpoint.
 
 Aliases normalize input; they are not separate charge types and they do not replace rate books.
 
@@ -197,7 +198,9 @@ With a rate of `12`, three eligible containers, and eight entered hours, the cal
 
 ### Factors And Trust Boundary
 
-Each ordered factor has a resolver. Object-derived resolvers such as container count, House count, quantity, weight, volume, and chargeable weight come from the persisted source-object context. A line request cannot replace those values. Transaction resolvers such as manual quantity and duration can be entered for the specific charge.
+Each ordered factor has a resolver. Object-derived resolvers such as container count, House count, quantity, weight, volume, chargeable weight, and ocean weight-or-measure come from the persisted source-object context. Ocean W/M is the greater of metric tonnes and cubic metres. A line request cannot replace those values. Transaction resolvers such as manual quantity and duration can be entered for the specific charge.
+
+`PERCENT_OF_REFERENCE` calculates `reference amount x percentage / 100`. The reference amount must be explicit in calculation input or context; it is never inferred from an unrelated charge. Rate minimum and maximum boundaries are applied after the formula.
 
 Missing required factors block calculation; the engine does not silently substitute an equal share or a value of one.
 

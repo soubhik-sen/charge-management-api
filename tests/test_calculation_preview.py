@@ -88,6 +88,79 @@ def test_preview_calculates_percentage_and_allocates_exactly() -> None:
     assert payload["allocation_config_snapshot_json"]["profile_code"] == "DIRECT_HEADER_DEFAULT"
 
 
+def test_preview_supports_ocean_wm_and_percentage_profile_minimums() -> None:
+    profiles = client.get(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+    )
+    assert profiles.status_code == 200, profiles.text
+    profiles_by_code = {row["profile_code"]: row for row in profiles.json()["items"]}
+
+    percentage_profile = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "PERCENT_WITH_MINIMUM_TEST",
+            "profile_name": "Percentage with minimum test",
+            "initial_version": {
+                "application_level": "SHIPMENT",
+                "calculation_method": "PERCENT_OF_REFERENCE",
+                "rate_uom": "PERCENT",
+                "minimum_amount": "25.00",
+            },
+        },
+    )
+    assert percentage_profile.status_code == 201, percentage_profile.text
+    percentage_version_id = percentage_profile.json()["versions"][0]["id"]
+
+    wm_response = client.post(
+        "/api/v1/charge-management/calculations/preview",
+        headers=AUTH,
+        json={
+            "basis": "FLAT",
+            "rate_amount": "10",
+            "calculation_profile_version_id": profiles_by_code["OCEAN_WM"]["versions"][0]["id"],
+            "calculation_context": {
+                "weight": "6500",
+                "volume": "3.2",
+            },
+        },
+    )
+    assert wm_response.status_code == 200, wm_response.text
+    wm_payload = wm_response.json()
+    assert wm_payload["source_amount"] == "65.00"
+    assert wm_payload["amount"] == "65.00"
+    assert wm_payload["quantity"] == "6.500000"
+    assert wm_payload["calculation_config_snapshot_json"]["profile_code"] == "OCEAN_WM"
+    assert wm_payload["calculation_input_snapshot_json"]["OCEAN_WM"]["value"] == "6.5"
+    assert wm_payload["calculation_input_snapshot_json"]["OCEAN_WM"]["source"] == "OBJECT_CONTEXT"
+
+    percentage_response = client.post(
+        "/api/v1/charge-management/calculations/preview",
+        headers=AUTH,
+        json={
+            "basis": "FLAT",
+            "rate_amount": "10",
+            "calculation_profile_version_id": percentage_version_id,
+            "calculation_context": {
+                "reference_amount": "200",
+            },
+        },
+    )
+    assert percentage_response.status_code == 200, percentage_response.text
+    percentage_payload = percentage_response.json()
+    assert percentage_payload["source_amount"] == "25.00"
+    assert percentage_payload["amount"] == "25.00"
+    assert percentage_payload["quantity"] == "200"
+    assert percentage_payload["minimum_applied"] is True
+    assert percentage_payload["maximum_applied"] is False
+    assert (
+        percentage_payload["calculation_config_snapshot_json"]["calculation_method"]
+        == "PERCENT_OF_REFERENCE"
+    )
+    assert percentage_payload["calculation_input_snapshot_json"]["reference_amount"] == "200"
+
+
 def test_allocation_profile_effectivity_equal_fallback_and_optimistic_lock() -> None:
     profiles = client.get(
         "/api/v1/charge-management/allocation-profiles",

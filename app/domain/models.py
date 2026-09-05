@@ -45,7 +45,7 @@ RateBookRowAttributeKey = Literal[
     "priority",
 ]
 CalculationApplicationLevel = Literal["SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
-CalculationMethod = Literal["FLAT_AMOUNT", "RATE_TIMES_PRODUCT"]
+CalculationMethod = Literal["FLAT_AMOUNT", "RATE_TIMES_PRODUCT", "PERCENT_OF_REFERENCE"]
 CalculationFactorResolver = Literal[
     "MANUAL",
     "TARGET_COUNT",
@@ -56,6 +56,8 @@ CalculationFactorResolver = Literal[
     "WEIGHT",
     "VOLUME",
     "CHARGEABLE_WEIGHT",
+    "OCEAN_WM",
+    "REFERENCE_AMOUNT",
     "DURATION_HOURS",
     "DURATION_DAYS",
     "FIXED_VALUE",
@@ -251,6 +253,7 @@ class ChargeComponentAliasPayload(ApiModel):
     document_kind: str = "CHARGE_PROPOSAL"
     template_key: str | None = None
     source_section: str | None = None
+    source_uom: str | None = None
     customer_id: int | None = None
     forwarder_id: int | None = None
     transport_mode: str | None = None
@@ -259,6 +262,8 @@ class ChargeComponentAliasPayload(ApiModel):
     default_calculation_basis: str = "DOCUMENT"
     default_charge_level: str = "SHIPMENT"
     default_allocation_basis: str | None = None
+    default_calculation_profile_id: int | None = None
+    default_calculation_profile_version_id: int | None = None
     container_house_allocation_basis: str | None = None
     house_item_allocation_basis: str | None = None
     final_posting_level: Literal["HOUSE", "PO_SCHEDULE_LINE"] | None = "PO_SCHEDULE_LINE"
@@ -266,6 +271,8 @@ class ChargeComponentAliasPayload(ApiModel):
     allocation_override_mode: Literal["INHERIT_PROFILE", "OVERRIDE_PROFILE", "NO_ALLOCATION"] = "OVERRIDE_PROFILE"
     override_allocation_profile_id: int | None = None
     override_allocation_profile_version_id: int | None = None
+    override_calculation_profile_id: int | None = None
+    override_calculation_profile_version_id: int | None = None
     override_charge_level: str | None = None
     override_allocation_basis: str | None = None
     override_container_house_allocation_basis: str | None = None
@@ -390,7 +397,16 @@ class ChargeCalculationProfileVersionPayload(ApiModel):
     calculation_method: CalculationMethod = "RATE_TIMES_PRODUCT"
     rate_uom: str | None = None
     missing_factor_policy: Literal["BLOCK"] = "BLOCK"
+    minimum_amount: Decimal | None = None
+    maximum_amount: Decimal | None = None
     factors: list[ChargeCalculationProfileFactorPayload] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_calculation_profile_bounds(self) -> "ChargeCalculationProfileVersionPayload":
+        if self.minimum_amount is not None and self.maximum_amount is not None:
+            if self.minimum_amount > self.maximum_amount:
+                raise ValueError("minimum_amount must be less than or equal to maximum_amount")
+        return self
 
 
 class ChargeCalculationProfileVersionCreate(ChargeCalculationProfileVersionPayload):
@@ -1090,7 +1106,7 @@ class ChargeReferenceData(ApiModel):
     allocation_profile_final_posting_levels: list[str] = ["HOUSE", "PO_SCHEDULE_LINE"]
     allocation_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
     calculation_profile_application_levels: list[str] = ["SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
-    calculation_profile_methods: list[str] = ["FLAT_AMOUNT", "RATE_TIMES_PRODUCT"]
+    calculation_profile_methods: list[str] = ["FLAT_AMOUNT", "RATE_TIMES_PRODUCT", "PERCENT_OF_REFERENCE"]
     calculation_profile_factor_resolvers: list[str] = [
         "MANUAL",
         "TARGET_COUNT",
@@ -1101,6 +1117,8 @@ class ChargeReferenceData(ApiModel):
         "WEIGHT",
         "VOLUME",
         "CHARGEABLE_WEIGHT",
+        "OCEAN_WM",
+        "REFERENCE_AMOUNT",
         "DURATION_HOURS",
         "DURATION_DAYS",
         "FIXED_VALUE",

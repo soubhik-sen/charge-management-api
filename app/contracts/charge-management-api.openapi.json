@@ -6793,6 +6793,22 @@
             }
           },
           {
+            "name": "source_uom",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Uom"
+            }
+          },
+          {
             "name": "charge_component_id",
             "in": "query",
             "required": false,
@@ -15508,6 +15524,8 @@
               "WEIGHT",
               "VOLUME",
               "CHARGEABLE_WEIGHT",
+              "OCEAN_WM",
+              "REFERENCE_AMOUNT",
               "DURATION_HOURS",
               "DURATION_DAYS",
               "FIXED_VALUE"
@@ -15588,6 +15606,8 @@
               "WEIGHT",
               "VOLUME",
               "CHARGEABLE_WEIGHT",
+              "OCEAN_WM",
+              "REFERENCE_AMOUNT",
               "DURATION_HOURS",
               "DURATION_DAYS",
               "FIXED_VALUE"
@@ -15751,7 +15771,8 @@
             "type": "string",
             "enum": [
               "FLAT_AMOUNT",
-              "RATE_TIMES_PRODUCT"
+              "RATE_TIMES_PRODUCT",
+              "PERCENT_OF_REFERENCE"
             ],
             "title": "Calculation Method",
             "default": "RATE_TIMES_PRODUCT"
@@ -15772,6 +15793,30 @@
             "const": "BLOCK",
             "title": "Missing Factor Policy",
             "default": "BLOCK"
+          },
+          "minimum_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Amount"
+          },
+          "maximum_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Amount"
           },
           "factors": {
             "items": {
@@ -15890,7 +15935,8 @@
             "type": "string",
             "enum": [
               "FLAT_AMOUNT",
-              "RATE_TIMES_PRODUCT"
+              "RATE_TIMES_PRODUCT",
+              "PERCENT_OF_REFERENCE"
             ],
             "title": "Calculation Method",
             "default": "RATE_TIMES_PRODUCT"
@@ -15911,6 +15957,36 @@
             "const": "BLOCK",
             "title": "Missing Factor Policy",
             "default": "BLOCK"
+          },
+          "minimum_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Amount"
+          },
+          "maximum_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Amount"
           },
           "factors": {
             "items": {
@@ -16126,6 +16202,17 @@
             ],
             "title": "Source Section"
           },
+          "source_uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Uom"
+          },
           "customer_id": {
             "anyOf": [
               {
@@ -16187,6 +16274,28 @@
               }
             ],
             "title": "Default Allocation Basis"
+          },
+          "default_calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Calculation Profile Id"
+          },
+          "default_calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Calculation Profile Version Id"
           },
           "container_house_allocation_basis": {
             "anyOf": [
@@ -16268,6 +16377,28 @@
               }
             ],
             "title": "Override Allocation Profile Version Id"
+          },
+          "override_calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Calculation Profile Id"
+          },
+          "override_calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Calculation Profile Version Id"
           },
           "override_charge_level": {
             "anyOf": [
@@ -16447,6 +16578,17 @@
             ],
             "title": "Source Section"
           },
+          "source_uom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Uom"
+          },
           "customer_id": {
             "anyOf": [
               {
@@ -16508,6 +16650,28 @@
               }
             ],
             "title": "Default Allocation Basis"
+          },
+          "default_calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Calculation Profile Id"
+          },
+          "default_calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Calculation Profile Version Id"
           },
           "container_house_allocation_basis": {
             "anyOf": [
@@ -16589,6 +16753,28 @@
               }
             ],
             "title": "Override Allocation Profile Version Id"
+          },
+          "override_calculation_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Calculation Profile Id"
+          },
+          "override_calculation_profile_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Calculation Profile Version Id"
           },
           "override_charge_level": {
             "anyOf": [
@@ -19827,7 +20013,8 @@
             "title": "Calculation Profile Methods",
             "default": [
               "FLAT_AMOUNT",
-              "RATE_TIMES_PRODUCT"
+              "RATE_TIMES_PRODUCT",
+              "PERCENT_OF_REFERENCE"
             ]
           },
           "calculation_profile_factor_resolvers": {
@@ -19846,6 +20033,8 @@
               "WEIGHT",
               "VOLUME",
               "CHARGEABLE_WEIGHT",
+              "OCEAN_WM",
+              "REFERENCE_AMOUNT",
               "DURATION_HOURS",
               "DURATION_DAYS",
               "FIXED_VALUE"

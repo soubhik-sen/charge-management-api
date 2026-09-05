@@ -219,9 +219,12 @@ def test_initialization_data_has_seeded_components() -> None:
     }
     assert set(response.json()["reference_data"]["calculation_profile_methods"]) == {
         "FLAT_AMOUNT",
+        "PERCENT_OF_REFERENCE",
         "RATE_TIMES_PRODUCT",
     }
-    assert "CONTAINER_COUNT" in response.json()["reference_data"]["calculation_profile_factor_resolvers"]
+    assert {"CONTAINER_COUNT", "OCEAN_WM"} <= set(
+        response.json()["reference_data"]["calculation_profile_factor_resolvers"]
+    )
     assert response.json()["reference_data"]["calculation_profile_version_statuses"] == [
         "DRAFT",
         "PUBLISHED",
@@ -362,10 +365,12 @@ def test_charge_component_crud_and_search() -> None:
 def test_calculation_profile_lifecycle_and_server_side_rating_snapshot() -> None:
     seeded = client.get("/api/v1/charge-management/calculation-profiles", headers=AUTH)
     assert seeded.status_code == 200, seeded.text
-    assert seeded.json()["total"] == 13
+    assert seeded.json()["total"] == 15
     seeded_codes = {row["profile_code"] for row in seeded.json()["items"]}
     assert {
         "FLAT_AMOUNT",
+        "OCEAN_WM",
+        "PERCENT_OF_REFERENCE",
         "PER_CONTAINER",
         "PER_DAY",
         "PER_KILOMETER",
@@ -704,6 +709,11 @@ def test_charge_document_explicit_profile_uses_server_object_axes() -> None:
 
 def test_component_alias_crud_and_search() -> None:
     init = client.get("/api/v1/charge-management/initialization-data", headers=AUTH)
+    calculation_profiles = client.get(
+        "/api/v1/charge-management/calculation-profiles", headers=AUTH
+    )
+    assert calculation_profiles.status_code == 200, calculation_profiles.text
+    profiles_by_code = {row["profile_code"]: row for row in calculation_profiles.json()["items"]}
     component_id = next(
         row["id"]
         for row in init.json()["components"]
@@ -717,16 +727,25 @@ def test_component_alias_crud_and_search() -> None:
             "document_kind": "CHARGE_PROPOSAL",
             "template_key": "GENERIC_PROPOSAL_V1",
             "source_section": "Ocean",
+            "source_uom": "CONTAINER",
             "raw_label": "Frete Internacional",
             "charge_component_id": component_id,
             "default_calculation_basis": "PER_CONTAINER",
             "default_charge_level": "CONTAINER",
             "default_allocation_basis": "CBM",
+            "default_calculation_profile_id": profiles_by_code["PER_CONTAINER"]["id"],
+            "default_calculation_profile_version_id": profiles_by_code["PER_CONTAINER"]["versions"][
+                0
+            ]["id"],
             "container_house_allocation_basis": "CBM",
             "house_item_allocation_basis": "OCEAN_WM",
             "final_posting_level": "HOUSE",
             "default_quantity_uom": "CBM",
             "allocation_override_mode": "OVERRIDE_PROFILE",
+            "override_calculation_profile_id": profiles_by_code["OCEAN_WM"]["id"],
+            "override_calculation_profile_version_id": profiles_by_code["OCEAN_WM"]["versions"][0][
+                "id"
+            ],
             "override_charge_level": "CONTAINER",
             "override_allocation_basis": "CBM",
             "override_container_house_allocation_basis": "CBM",
@@ -745,10 +764,21 @@ def test_component_alias_crud_and_search() -> None:
     assert alias["customer_id"] == 101
     assert alias["forwarder_id"] == 202
     assert alias["transport_mode"] == "OCEAN"
+    assert alias["source_uom"] == "CONTAINER"
     assert alias["container_house_allocation_basis"] == "CBM"
     assert alias["house_item_allocation_basis"] == "OCEAN_WM"
     assert alias["final_posting_level"] == "HOUSE"
+    assert alias["default_calculation_profile_id"] == profiles_by_code["PER_CONTAINER"]["id"]
+    assert (
+        alias["default_calculation_profile_version_id"]
+        == profiles_by_code["PER_CONTAINER"]["versions"][0]["id"]
+    )
     assert alias["allocation_override_mode"] == "OVERRIDE_PROFILE"
+    assert alias["override_calculation_profile_id"] == profiles_by_code["OCEAN_WM"]["id"]
+    assert (
+        alias["override_calculation_profile_version_id"]
+        == profiles_by_code["OCEAN_WM"]["versions"][0]["id"]
+    )
     assert alias["override_house_item_allocation_basis"] == "WEIGHT"
     assert alias["override_final_posting_level"] == "PO_SCHEDULE_LINE"
 
@@ -762,6 +792,18 @@ def test_component_alias_crud_and_search() -> None:
         },
     )
     assert duplicate.status_code == 409
+
+    uom_sibling = client.post(
+        "/api/v1/charge-management/component-aliases",
+        headers=AUTH,
+        json={
+            **created.json(),
+            "raw_label": "Frete Internacional",
+            "charge_component_id": component_id,
+            "source_uom": "OCEAN_WM",
+        },
+    )
+    assert uom_sibling.status_code == 201, uom_sibling.text
 
     scoped_sibling = client.post(
         "/api/v1/charge-management/component-aliases",
@@ -777,7 +819,7 @@ def test_component_alias_crud_and_search() -> None:
     assert scoped_sibling.status_code == 201, scoped_sibling.text
 
     listed = client.get(
-        "/api/v1/charge-management/component-aliases?q=frete&forwarder_id=202&transport_mode=OCEAN",
+        "/api/v1/charge-management/component-aliases?q=frete&forwarder_id=202&transport_mode=OCEAN&source_uom=CONTAINER",
         headers=AUTH,
     )
     assert listed.status_code == 200, listed.text
@@ -791,16 +833,25 @@ def test_component_alias_crud_and_search() -> None:
             "document_kind": "CHARGE_PROPOSAL",
             "template_key": "GENERIC_PROPOSAL_V1",
             "source_section": "Ocean",
+            "source_uom": "CONTAINER",
             "raw_label": "International Freight",
             "charge_component_id": component_id,
             "default_calculation_basis": "PER_CONTAINER",
             "default_charge_level": "CONTAINER",
             "default_allocation_basis": "CBM",
+            "default_calculation_profile_id": profiles_by_code["PER_CONTAINER"]["id"],
+            "default_calculation_profile_version_id": profiles_by_code["PER_CONTAINER"]["versions"][
+                0
+            ]["id"],
             "container_house_allocation_basis": "CBM",
             "house_item_allocation_basis": "KG",
             "final_posting_level": "PO_SCHEDULE_LINE",
             "default_quantity_uom": "CBM",
             "allocation_override_mode": "NO_ALLOCATION",
+            "override_calculation_profile_id": profiles_by_code["PER_HOUR"]["id"],
+            "override_calculation_profile_version_id": profiles_by_code["PER_HOUR"]["versions"][0][
+                "id"
+            ],
             "override_charge_level": None,
             "override_allocation_basis": None,
             "override_container_house_allocation_basis": None,
@@ -820,6 +871,18 @@ def test_component_alias_crud_and_search() -> None:
     assert updated.json()["house_item_allocation_basis"] == "KG"
     assert updated.json()["final_posting_level"] == "PO_SCHEDULE_LINE"
     assert updated.json()["allocation_override_mode"] == "NO_ALLOCATION"
+    assert (
+        updated.json()["default_calculation_profile_id"] == profiles_by_code["PER_CONTAINER"]["id"]
+    )
+    assert (
+        updated.json()["default_calculation_profile_version_id"]
+        == profiles_by_code["PER_CONTAINER"]["versions"][0]["id"]
+    )
+    assert updated.json()["override_calculation_profile_id"] == profiles_by_code["PER_HOUR"]["id"]
+    assert (
+        updated.json()["override_calculation_profile_version_id"]
+        == profiles_by_code["PER_HOUR"]["versions"][0]["id"]
+    )
 
     deleted = client.delete(
         f"/api/v1/charge-management/component-aliases/{alias['id']}",
@@ -833,7 +896,8 @@ def test_component_alias_crud_and_search() -> None:
         headers=AUTH,
     )
     assert active_only.status_code == 200, active_only.text
-    assert active_only.json()["total"] == 0
+    assert active_only.json()["total"] == 1
+    assert active_only.json()["items"][0]["source_uom"] == "OCEAN_WM"
 
 
 def test_allocation_profile_lifecycle_and_component_propagation() -> None:
@@ -4551,10 +4615,17 @@ def test_openapi_exposes_core_paths() -> None:
     assert "business_date_profile_id" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
     assert "profile_code" in contract["components"]["schemas"]["ChargeCalculationProfile"]["properties"]
     assert "factors" in contract["components"]["schemas"]["ChargeCalculationProfileVersion"]["properties"]
+    assert "minimum_amount" in contract["components"]["schemas"]["ChargeCalculationProfileVersion"]["properties"]
+    assert "maximum_amount" in contract["components"]["schemas"]["ChargeCalculationProfileVersion"]["properties"]
     assert "resolver" in contract["components"]["schemas"]["ChargeCalculationProfileFactor"]["properties"]
     assert "allocation_override_mode" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
+    assert "source_uom" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
     assert "final_posting_level" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
     assert "override_final_posting_level" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
+    assert "default_calculation_profile_id" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
+    assert "default_calculation_profile_version_id" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
+    assert "override_calculation_profile_id" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
+    assert "override_calculation_profile_version_id" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
     assert "source_level" in contract["components"]["schemas"]["ChargeAllocationProfileVersion"]["properties"]
     assert "final_posting_level" in contract["components"]["schemas"]["ChargeAllocationProfileVersion"]["properties"]
     assert "profile_code" in contract["components"]["schemas"]["BusinessDateProfile"]["properties"]
@@ -4693,6 +4764,44 @@ def test_rating_selects_one_active_valid_specific_rate_entry() -> None:
 
 
 def test_percentage_rate_entry_can_be_persisted_and_rated() -> None:
+    invalid_profile = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "PERCENT-BLANK-UOM",
+            "profile_name": "Percentage with blank UOM",
+            "initial_version": {
+                "application_level": "SHIPMENT",
+                "calculation_method": "PERCENT_OF_REFERENCE",
+                "rate_uom": "   ",
+            },
+        },
+    )
+    assert invalid_profile.status_code == 422
+
+    calculation_profile = client.post(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "PERCENT-QUOTE-MINIMUM",
+            "profile_name": "Percentage quote minimum",
+            "initial_version": {
+                "application_level": "SHIPMENT",
+                "calculation_method": "PERCENT_OF_REFERENCE",
+                "rate_uom": "PERCENT",
+                "minimum_amount": "30.00",
+            },
+        },
+    )
+    assert calculation_profile.status_code == 201, calculation_profile.text
+    calculation_profile_id = calculation_profile.json()["id"]
+    calculation_profile_version_id = calculation_profile.json()["versions"][0]["id"]
+    published_profile = client.post(
+        f"/api/v1/charge-management/calculation-profile-versions/{calculation_profile_version_id}/publish",
+        headers=AUTH,
+    )
+    assert published_profile.status_code == 200, published_profile.text
+
     invalid = client.post(
         "/api/v1/charge-management/rate-books",
         headers=AUTH,
@@ -4721,6 +4830,7 @@ def test_percentage_rate_entry_can_be_persisted_and_rated() -> None:
                     "charge_component_code": "BASE_FREIGHT",
                     "rate_percent": "12.5",
                     "basis": "PERCENT",
+                    "calculation_profile_id": calculation_profile_id,
                 }
             ],
         },
@@ -4753,7 +4863,15 @@ def test_percentage_rate_entry_can_be_persisted_and_rated() -> None:
         headers=AUTH,
     )
     assert rated.status_code == 200, rated.text
-    assert rated.json()["options"][0]["payee_total_amount"] == "25.00"
+    assert rated.json()["options"][0]["payee_total_amount"] == "30.00"
+    line = rated.json()["options"][0]["lines"][0]
+    assert line["amount"] == "30.00"
+    assert line["rate_amount"] == "12.500000"
+    assert line["quantity"] == "200"
+    assert line["quantity_uom"] == "PERCENT"
+    assert line["calculation_profile_version_id"] == calculation_profile_version_id
+    assert line["calculation_config_snapshot_json"]["minimum_amount"] == "30.000000"
+    assert line["calculation_input_snapshot_json"]["reference_amount"] == "200"
 
 
 def test_invoice_matching_aggregates_repeated_posting_components() -> None:

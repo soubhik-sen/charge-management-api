@@ -135,7 +135,7 @@ ALLOCATION_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 ALLOCATION_OVERRIDE_MODES = {"INHERIT_PROFILE", "OVERRIDE_PROFILE", "NO_ALLOCATION"}
 CHARGE_TARGET_SCOPE_MODES = {"ALL_ELIGIBLE", "SELECTED_TARGETS"}
 CALCULATION_PROFILE_APPLICATION_LEVELS = {"SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"}
-CALCULATION_PROFILE_METHODS = {"FLAT_AMOUNT", "RATE_TIMES_PRODUCT"}
+CALCULATION_PROFILE_METHODS = {"FLAT_AMOUNT", "RATE_TIMES_PRODUCT", "PERCENT_OF_REFERENCE"}
 CALCULATION_PROFILE_FACTOR_RESOLVERS = {
     "MANUAL",
     "TARGET_COUNT",
@@ -146,6 +146,8 @@ CALCULATION_PROFILE_FACTOR_RESOLVERS = {
     "WEIGHT",
     "VOLUME",
     "CHARGEABLE_WEIGHT",
+    "OCEAN_WM",
+    "REFERENCE_AMOUNT",
     "DURATION_HOURS",
     "DURATION_DAYS",
     "FIXED_VALUE",
@@ -1132,6 +1134,8 @@ class ChargeManagementService:
         version.calculation_method = normalized["calculation_method"]
         version.rate_uom = normalized["rate_uom"]
         version.missing_factor_policy = normalized["missing_factor_policy"]
+        version.minimum_amount = normalized["minimum_amount"]
+        version.maximum_amount = normalized["maximum_amount"]
         version.factors = [
             ChargeCalculationProfileFactor(
                 id=self.repository.next_id("calculation_profile_factor"),
@@ -2060,6 +2064,7 @@ class ChargeManagementService:
         customer_id: int | None = None,
         forwarder_id: int | None = None,
         transport_mode: str | None = None,
+        source_uom: str | None = None,
         charge_component_id: int | None = None,
         active_only: bool | None = None,
         search: str | None = None,
@@ -2080,6 +2085,9 @@ class ChargeManagementService:
         if transport_mode:
             normalized_mode = transport_mode.strip().upper()
             rows = [row for row in rows if row.transport_mode == normalized_mode]
+        if source_uom:
+            normalized_uom = source_uom.strip().upper()
+            rows = [row for row in rows if row.source_uom == normalized_uom]
         if charge_component_id is not None:
             rows = [row for row in rows if row.charge_component_id == int(charge_component_id)]
         if active_only is not None:
@@ -2102,6 +2110,7 @@ class ChargeManagementService:
                 row.customer_id or 0,
                 row.forwarder_id or 0,
                 row.transport_mode or "",
+                row.source_uom or "",
                 row.priority,
                 row.raw_label,
                 row.id,
@@ -5405,6 +5414,29 @@ class ChargeManagementService:
                 if percentage_base_amount is not None
                 else self._percentage_base_for_quote(entry, quote)
             )
+            if profile is not None and version is not None and version.calculation_method == "PERCENT_OF_REFERENCE":
+                calculation_inputs = self._merged_quote_calculation_inputs(
+                    quote,
+                    component_code=component.component_code,
+                )
+                calculation_inputs["REFERENCE_AMOUNT"] = percentage_base
+                calculation_context = self._calculation_context_for_quote(quote, version.application_level)
+                calculation_context["reference_amount"] = percentage_base
+                result = self._evaluate_calculation_profile(
+                    version,
+                    rate_amount=entry.rate_percent,
+                    inputs=calculation_inputs,
+                    context=calculation_context,
+                )
+                return (
+                    version_id,
+                    self._calculation_snapshot(profile, version),
+                    result["input_snapshot"],
+                    entry.rate_percent,
+                    result["quantity"],
+                    result["quantity_uom"],
+                    result["amount"],
+                )
             amount = self._calculate_amount(
                 entry,
                 quote,
@@ -5501,15 +5533,18 @@ class ChargeManagementService:
         quote: QuoteRequest,
         application_level: str,
     ) -> dict[str, Decimal]:
+        weight = dec(quote.gross_weight)
+        volume = dec(quote.gross_volume_cbm)
         return {
             "shipment_count": Decimal("1"),
             "container_count": dec(quote.container_count),
             "house_count": Decimal("0"),
             "po_schedule_line_count": dec(quote.package_count),
             "quantity": dec(quote.quantity),
-            "weight": dec(quote.gross_weight),
-            "volume": dec(quote.gross_volume_cbm),
+            "weight": weight,
+            "volume": volume,
             "chargeable_weight": dec(quote.chargeable_weight or quote.gross_weight),
+            "ocean_wm": max(weight / Decimal("1000"), volume),
             "duration_hours": Decimal("0"),
             "duration_days": dec(quote.quantity),
             "target_count": dec(
@@ -5563,7 +5598,10 @@ class ChargeManagementService:
                 shipment_count = selected_target_count
         quantity = self._snapshot_decimal(target, source, "quantity", "target_quantity")
         weight = self._snapshot_decimal(target, source, "weight", "gross_weight", "target_weight")
-        volume = self._snapshot_decimal(target, source, "volume", "gross_volume_cbm", "cbm", "target_volume")
+        volume = self._snapshot_decimal(
+            target, source, "volume", "gross_volume_cbm", "cbm", "target_volume"
+        )
+        ocean_wm = max(weight / Decimal("1000"), volume)
         chargeable_weight = self._snapshot_decimal(
             target,
             source,
@@ -5582,6 +5620,7 @@ class ChargeManagementService:
             "quantity": quantity,
             "weight": weight,
             "volume": volume,
+            "ocean_wm": ocean_wm,
             "chargeable_weight": chargeable_weight,
             "duration_hours": duration_hours,
             "duration_days": duration_days,
@@ -5629,8 +5668,14 @@ class ChargeManagementService:
         inputs: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        normalized_inputs = {str(key).strip().upper(): value for key, value in (inputs or {}).items()}
-        normalized_context = {str(key).strip().lower(): value for key, value in (context or {}).items()}
+        normalized_inputs = {
+            str(key).strip().upper(): value for key, value in (inputs or {}).items()
+        }
+        normalized_context = {
+            str(key).strip().lower(): value for key, value in (context or {}).items()
+        }
+        minimum_amount = version.minimum_amount
+        maximum_amount = version.maximum_amount
         if version.calculation_method == "FLAT_AMOUNT":
             amount = self._calculation_decimal(flat_amount)
             if amount is None:
@@ -5640,6 +5685,12 @@ class ChargeManagementService:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="A flat calculation amount is required.",
                 )
+            minimum_applied = minimum_amount is not None and amount < minimum_amount
+            maximum_applied = maximum_amount is not None and amount > maximum_amount
+            if minimum_applied:
+                amount = minimum_amount
+            if maximum_applied:
+                amount = maximum_amount
             return {
                 "amount": money(amount),
                 "quantity": Decimal("1"),
@@ -5649,6 +5700,10 @@ class ChargeManagementService:
                     "calculation_method": "FLAT_AMOUNT",
                     "rate_amount": str(amount),
                     "formula": "flat amount",
+                    "minimum_amount": str(minimum_amount) if minimum_amount is not None else None,
+                    "maximum_amount": str(maximum_amount) if maximum_amount is not None else None,
+                    "minimum_applied": minimum_applied,
+                    "maximum_applied": maximum_applied,
                 },
             }
         rate = self._calculation_decimal(rate_amount)
@@ -5657,56 +5712,130 @@ class ChargeManagementService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="A unit rate is required by the calculation profile.",
             )
-        product = Decimal("1")
-        input_snapshot: dict[str, Any] = {}
-        audit_factors: list[dict[str, Any]] = []
-        for factor in sorted(version.factors, key=lambda item: (item.sequence, item.id)):
-            value: Decimal | None = None
-            source = "OBJECT_CONTEXT"
-            if factor.resolver in CALCULATION_TRANSACTION_INPUT_RESOLVERS:
-                value = self._calculation_input_value(normalized_inputs.get(factor.factor_code))
-                source = "TRANSACTION_INPUT"
-                if value is None:
-                    value = self._calculation_input_value(normalized_inputs.get(factor.resolver))
-            if value is None:
-                context_key = self._factor_context_key(factor.resolver, version.application_level)
-                if context_key is not None:
-                    value = self._calculation_decimal(normalized_context.get(context_key))
-                    source = "OBJECT_CONTEXT"
-            if value is None and factor.resolver == "FIXED_VALUE":
-                value = self._calculation_decimal(factor.default_value)
-                source = "PROFILE_DEFAULT"
-            if value is None and factor.default_value is not None:
-                value = self._calculation_decimal(factor.default_value)
-                source = "PROFILE_DEFAULT"
-            if value is None or value <= 0:
-                if factor.is_required:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=f"Calculation factor {factor.factor_label} ({factor.factor_code}) is required.",
-                    )
-                value = Decimal("1")
-                source = "OPTIONAL_IDENTITY"
-            product *= value
-            input_snapshot[factor.factor_code] = {
-                "value": str(value),
-                "uom": factor.uom,
-                "resolver": factor.resolver,
-                "source": source,
+        quantity_uom = version.rate_uom
+        if version.calculation_method == "PERCENT_OF_REFERENCE":
+            reference_amount = None
+            reference_source = None
+            for key in ("REFERENCE_AMOUNT", "PERCENTAGE_BASE_AMOUNT", "SOURCE_AMOUNT", "AMOUNT"):
+                reference_amount = self._calculation_input_value(normalized_inputs.get(key))
+                if reference_amount is not None:
+                    reference_source = f"INPUT:{key}"
+                    break
+            if reference_amount is None:
+                for key in (
+                    "reference_amount",
+                    "percentage_base_amount",
+                    "source_amount",
+                    "amount",
+                ):
+                    reference_amount = self._calculation_decimal(normalized_context.get(key))
+                    if reference_amount is not None:
+                        reference_source = f"CONTEXT:{key}"
+                        break
+            if reference_amount is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="A reference amount is required by the percentage calculation profile.",
+                )
+            quantity = reference_amount
+            input_snapshot: dict[str, Any] = {
+                "reference_amount": str(reference_amount),
+                "reference_amount_source": reference_source,
             }
-            audit_factors.append(input_snapshot[factor.factor_code] | {"factor_code": factor.factor_code})
-        quantity = product.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-        return {
-            "amount": money(rate * quantity),
-            "quantity": quantity,
-            "quantity_uom": version.rate_uom,
-            "input_snapshot": input_snapshot,
-            "audit": {
+            audit: dict[str, Any] = {
+                "calculation_method": "PERCENT_OF_REFERENCE",
+                "rate_amount": str(rate),
+                "reference_amount": str(reference_amount),
+                "formula": "reference_amount * rate_amount / 100",
+            }
+            amount = reference_amount * rate / Decimal("100")
+        else:
+            product = Decimal("1")
+            input_snapshot = {}
+            audit_factors: list[dict[str, Any]] = []
+            for factor in sorted(version.factors, key=lambda item: (item.sequence, item.id)):
+                value: Decimal | None = None
+                source = "OBJECT_CONTEXT"
+                if factor.resolver in CALCULATION_TRANSACTION_INPUT_RESOLVERS:
+                    value = self._calculation_input_value(normalized_inputs.get(factor.factor_code))
+                    source = "TRANSACTION_INPUT"
+                    if value is None:
+                        value = self._calculation_input_value(
+                            normalized_inputs.get(factor.resolver)
+                        )
+                if value is None:
+                    context_key = self._factor_context_key(
+                        factor.resolver, version.application_level
+                    )
+                    if context_key is not None:
+                        value = self._calculation_decimal(normalized_context.get(context_key))
+                        source = "OBJECT_CONTEXT"
+                if value is None and factor.resolver == "OCEAN_WM":
+                    weight = self._calculation_decimal(
+                        normalized_context.get("weight") or normalized_context.get("gross_weight")
+                    )
+                    volume = self._calculation_decimal(
+                        normalized_context.get("volume")
+                        or normalized_context.get("gross_volume_cbm")
+                    )
+                    if weight is not None or volume is not None:
+                        value = max(
+                            (weight or Decimal("0")) / Decimal("1000"),
+                            volume or Decimal("0"),
+                        )
+                        source = "OBJECT_CONTEXT"
+                if value is None and factor.resolver == "FIXED_VALUE":
+                    value = self._calculation_decimal(factor.default_value)
+                    source = "PROFILE_DEFAULT"
+                if value is None and factor.default_value is not None:
+                    value = self._calculation_decimal(factor.default_value)
+                    source = "PROFILE_DEFAULT"
+                if value is None or value <= 0:
+                    if factor.is_required:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"Calculation factor {factor.factor_label} ({factor.factor_code}) is required.",
+                        )
+                    value = Decimal("1")
+                    source = "OPTIONAL_IDENTITY"
+                product *= value
+                input_snapshot[factor.factor_code] = {
+                    "value": str(value),
+                    "uom": factor.uom,
+                    "resolver": factor.resolver,
+                    "source": source,
+                }
+                audit_factors.append(
+                    input_snapshot[factor.factor_code] | {"factor_code": factor.factor_code}
+                )
+            quantity = product.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            amount = rate * quantity
+            audit = {
                 "calculation_method": version.calculation_method,
                 "rate_amount": str(rate),
                 "quantity": str(quantity),
                 "factors": audit_factors,
-            },
+            }
+        minimum_applied = minimum_amount is not None and amount < minimum_amount
+        maximum_applied = maximum_amount is not None and amount > maximum_amount
+        if minimum_applied:
+            amount = minimum_amount
+        if maximum_applied:
+            amount = maximum_amount
+        audit.update(
+            {
+                "minimum_amount": str(minimum_amount) if minimum_amount is not None else None,
+                "maximum_amount": str(maximum_amount) if maximum_amount is not None else None,
+                "minimum_applied": minimum_applied,
+                "maximum_applied": maximum_applied,
+            }
+        )
+        return {
+            "amount": money(amount),
+            "quantity": quantity,
+            "quantity_uom": quantity_uom,
+            "input_snapshot": input_snapshot,
+            "audit": audit,
         }
 
     def _calculation_decimal(self, value: Any) -> Decimal | None:
@@ -5748,6 +5877,8 @@ class ChargeManagementService:
             "WEIGHT": "weight",
             "VOLUME": "volume",
             "CHARGEABLE_WEIGHT": "chargeable_weight",
+            "OCEAN_WM": "ocean_wm",
+            "REFERENCE_AMOUNT": "reference_amount",
             "DURATION_HOURS": "duration_hours",
             "DURATION_DAYS": "duration_days",
         }.get(normalized)
@@ -5767,6 +5898,8 @@ class ChargeManagementService:
             "calculation_method": version.calculation_method,
             "rate_uom": version.rate_uom,
             "missing_factor_policy": version.missing_factor_policy,
+            "minimum_amount": str(version.minimum_amount) if version.minimum_amount is not None else None,
+            "maximum_amount": str(version.maximum_amount) if version.maximum_amount is not None else None,
             "factors": [
                 {
                     "sequence": factor.sequence,
@@ -5987,6 +6120,8 @@ class ChargeManagementService:
             calculation_config_snapshot = self._calculation_snapshot(profile, version)
             calculation_input_snapshot = result["input_snapshot"]
             audit = result["audit"]
+            minimum_applied = bool(audit.get("minimum_applied"))
+            maximum_applied = bool(audit.get("maximum_applied"))
         elif basis in {"PERCENT", "PERCENTAGE"}:
             source_amount = money(
                 dec(payload.percentage_base_amount)
@@ -6004,6 +6139,12 @@ class ChargeManagementService:
                 "percentage_base_amount": str(payload.percentage_base_amount),
                 "rate_percent": str(payload.rate_percent),
             }
+            minimum_applied = (
+                payload.minimum_amount is not None and source_amount < payload.minimum_amount
+            )
+            maximum_applied = (
+                payload.maximum_amount is not None and source_amount > payload.maximum_amount
+            )
         else:
             flat_bases = {"FLAT", "SHIPMENT", "DOCUMENT", "HEADER"}
             effective_quantity = Decimal("1") if basis in flat_bases else payload.quantity
@@ -6017,13 +6158,17 @@ class ChargeManagementService:
                 "rate_amount": str(payload.rate_amount),
                 "quantity": str(effective_quantity),
             }
-
-        minimum_applied = payload.minimum_amount is not None and source_amount < payload.minimum_amount
-        maximum_applied = payload.maximum_amount is not None and source_amount > payload.maximum_amount
-        if minimum_applied:
-            source_amount = money(payload.minimum_amount)
-        if maximum_applied:
-            source_amount = money(payload.maximum_amount)
+            minimum_applied = (
+                payload.minimum_amount is not None and source_amount < payload.minimum_amount
+            )
+            maximum_applied = (
+                payload.maximum_amount is not None and source_amount > payload.maximum_amount
+            )
+        if calculation_profile_version_id is None:
+            if minimum_applied:
+                source_amount = money(payload.minimum_amount)
+            if maximum_applied:
+                source_amount = money(payload.maximum_amount)
         audit = dict(audit)
         audit.update(
             {
@@ -6469,6 +6614,7 @@ class ChargeManagementService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unsupported calculation profile method: {payload.calculation_method}",
             )
+        rate_uom = _clean_optional(payload.rate_uom.strip().upper() if payload.rate_uom else None)
         missing_factor_policy = (payload.missing_factor_policy or "").strip().upper()
         if missing_factor_policy != "BLOCK":
             raise HTTPException(
@@ -6520,13 +6666,34 @@ class ChargeManagementService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Calculation profile requires at least one factor.",
             )
+        if calculation_method == "PERCENT_OF_REFERENCE" and factors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Percentage of reference calculation profiles cannot define factors.",
+            )
+        if calculation_method == "PERCENT_OF_REFERENCE" and rate_uom is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Percentage of reference profiles require a rate_uom.",
+            )
+        if (
+            payload.minimum_amount is not None
+            and payload.maximum_amount is not None
+            and payload.minimum_amount > payload.maximum_amount
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="minimum_amount must be less than or equal to maximum_amount",
+            )
         return {
             "effective_from": payload.effective_from,
             "effective_to": payload.effective_to,
             "application_level": application_level,
             "calculation_method": calculation_method,
-            "rate_uom": _clean_optional(payload.rate_uom.strip().upper() if payload.rate_uom else None),
+            "rate_uom": rate_uom,
             "missing_factor_policy": missing_factor_policy,
+            "minimum_amount": payload.minimum_amount,
+            "maximum_amount": payload.maximum_amount,
             "factors": sorted(factors, key=lambda item: (item["sequence"], item["factor_code"])),
         }
 
@@ -6549,6 +6716,8 @@ class ChargeManagementService:
             calculation_method=normalized["calculation_method"],
             rate_uom=normalized["rate_uom"],
             missing_factor_policy=normalized["missing_factor_policy"],
+            minimum_amount=normalized["minimum_amount"],
+            maximum_amount=normalized["maximum_amount"],
             factors=[
                 ChargeCalculationProfileFactor(
                     id=self.repository.next_id("calculation_profile_factor"),
@@ -7439,6 +7608,24 @@ class ChargeManagementService:
                 detail=f"Unsupported override_final_posting_level: {payload.override_final_posting_level}",
             )
         (
+            default_calculation_profile_id,
+            default_calculation_profile_version_id,
+            _,
+            _,
+        ) = self._resolve_calculation_profile_reference(
+            payload.default_calculation_profile_id or component.default_calculation_profile_id,
+            payload.default_calculation_profile_version_id,
+        )
+        (
+            override_calculation_profile_id,
+            override_calculation_profile_version_id,
+            _,
+            _,
+        ) = self._resolve_calculation_profile_reference(
+            payload.override_calculation_profile_id,
+            payload.override_calculation_profile_version_id,
+        )
+        (
             override_allocation_profile_id,
             override_allocation_profile_version_id,
             _,
@@ -7455,6 +7642,7 @@ class ChargeManagementService:
             document_kind=payload.document_kind.strip().upper() or "CHARGE_PROPOSAL",
             template_key=_clean_optional(payload.template_key),
             source_section=_clean_optional(payload.source_section),
+            source_uom=_clean_optional(payload.source_uom.upper() if payload.source_uom else None),
             customer_id=payload.customer_id,
             forwarder_id=payload.forwarder_id,
             transport_mode=payload.transport_mode.strip().upper() if payload.transport_mode else None,
@@ -7472,11 +7660,19 @@ class ChargeManagementService:
                 else (payload.default_allocation_basis.strip().upper() if payload.default_allocation_basis else None)
             ),
             final_posting_level=final_posting_level,
-            default_quantity_uom=payload.default_quantity_uom.strip().upper() if payload.default_quantity_uom else None,
+            default_quantity_uom=payload.default_quantity_uom.strip().upper()
+            if payload.default_quantity_uom
+            else None,
+            default_calculation_profile_id=default_calculation_profile_id,
+            default_calculation_profile_version_id=default_calculation_profile_version_id,
             allocation_override_mode=allocation_override_mode,  # type: ignore[arg-type]
             override_allocation_profile_id=override_allocation_profile_id,
             override_allocation_profile_version_id=override_allocation_profile_version_id,
-            override_charge_level=_clean_optional(payload.override_charge_level.upper() if payload.override_charge_level else None),
+            override_calculation_profile_id=override_calculation_profile_id,
+            override_calculation_profile_version_id=override_calculation_profile_version_id,
+            override_charge_level=_clean_optional(
+                payload.override_charge_level.upper() if payload.override_charge_level else None
+            ),
             override_allocation_basis=_clean_optional(
                 payload.override_allocation_basis.upper() if payload.override_allocation_basis else None
             ),
@@ -7511,6 +7707,7 @@ class ChargeManagementService:
                 existing.document_kind == alias.document_kind
                 and existing.template_key == alias.template_key
                 and existing.source_section == alias.source_section
+                and existing.source_uom == alias.source_uom
                 and existing.normalized_label == alias.normalized_label
                 and existing.customer_id == alias.customer_id
                 and existing.forwarder_id == alias.forwarder_id

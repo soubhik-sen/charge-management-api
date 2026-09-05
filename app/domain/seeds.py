@@ -293,6 +293,28 @@ COMMON_CHARGE_CALCULATION_PROFILES: tuple[dict[str, object], ...] = (
         "missing_factor_policy": "BLOCK",
         "factors": ((1, "DURATION_HOURS", "Duration hours", "DURATION_HOURS", "HOUR"),),
     },
+    {
+        "profile_code": "OCEAN_WM",
+        "profile_name": "Ocean W/M",
+        "description": "Multiplies the unit rate by ocean weight-or-measure quantity.",
+        "version_number": 1,
+        "application_level": "SHIPMENT",
+        "calculation_method": "RATE_TIMES_PRODUCT",
+        "rate_uom": "WM",
+        "missing_factor_policy": "BLOCK",
+        "factors": ((1, "OCEAN_WM", "Ocean W/M", "OCEAN_WM", "WM"),),
+    },
+    {
+        "profile_code": "PERCENT_OF_REFERENCE",
+        "profile_name": "Percentage of reference",
+        "description": "Applies a percentage rate to a reference amount with optional min/max caps.",
+        "version_number": 1,
+        "application_level": "SHIPMENT",
+        "calculation_method": "PERCENT_OF_REFERENCE",
+        "rate_uom": "PERCENT",
+        "missing_factor_policy": "BLOCK",
+        "factors": (),
+    },
 )
 
 

@@ -57,7 +57,25 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
     calculation_profile_columns = {column["name"] for column in inspector.get_columns("charge_calculation_profile")}
     assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= calculation_profile_columns
     assert "charge_calculation_profile_version" in tables
+    calculation_version_columns = {
+        column["name"] for column in inspector.get_columns("charge_calculation_profile_version")
+    }
+    assert {
+        "minimum_amount",
+        "maximum_amount",
+        "rate_uom",
+        "calculation_method",
+    } <= calculation_version_columns
     assert "charge_calculation_profile_factor" in tables
+    assert "charge_component_alias" in tables
+    alias_columns = {column["name"] for column in inspector.get_columns("charge_component_alias")}
+    assert {
+        "default_calculation_profile_id",
+        "default_calculation_profile_version_id",
+        "override_calculation_profile_id",
+        "override_calculation_profile_version_id",
+        "source_uom",
+    } <= alias_columns
     assert "charge_business_date_profile" in tables
     business_date_profile_columns = {column["name"] for column in inspector.get_columns("charge_business_date_profile")}
     assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= business_date_profile_columns
@@ -264,6 +282,14 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         flat_count = connection.execute(
             text("select count(*) from charge_calculation_profile where profile_code = 'FLAT_AMOUNT'")
         ).scalar_one()
+        wm_count = connection.execute(
+            text("select count(*) from charge_calculation_profile where profile_code = 'OCEAN_WM'")
+        ).scalar_one()
+        percentage_count = connection.execute(
+            text(
+                "select count(*) from charge_calculation_profile where profile_code = 'PERCENT_OF_REFERENCE'"
+            )
+        ).scalar_one()
         road_component_count = connection.execute(
             text("select count(*) from charge_component where charge_context = 'ROAD'")
         ).scalar_one()
@@ -310,9 +336,11 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         pricing_dimension_count = connection.execute(
             text("select count(*) from charge_pricing_dimension where is_system = true")
         ).scalar_one()
-    assert version == "0033_free_time_scope_and_dimension_identity"
+    assert version == "0034_charge_calculation_profile_parity"
     assert source_code == "MANUAL"
     assert flat_count == 1
+    assert wm_count == 1
+    assert percentage_count == 1
     assert road_component_count == 22
     assert road_calculation_count == 5
     assert road_allocation_count == 3

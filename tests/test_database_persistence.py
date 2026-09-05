@@ -119,6 +119,14 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
     assert calculation.status_code == 201, calculation.text
     calculation_profile = calculation.json()
     calculation_version_id = calculation_profile["versions"][0]["id"]
+    seeded_calculation_profiles = client.get(
+        "/api/v1/charge-management/calculation-profiles",
+        headers=AUTH,
+    )
+    assert seeded_calculation_profiles.status_code == 200, seeded_calculation_profiles.text
+    seeded_profiles_by_code = {
+        row["profile_code"]: row for row in seeded_calculation_profiles.json()["items"]
+    }
 
     calculation_publish = client.post(
         f"/api/v1/charge-management/calculation-profile-versions/{calculation_version_id}/publish",
@@ -187,6 +195,33 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
         },
     )
     assert component.status_code == 201, component.text
+
+    alias = client.post(
+        "/api/v1/charge-management/component-aliases",
+        headers=AUTH,
+        json={
+            "document_kind": "CHARGE_PROPOSAL",
+            "source_section": "Ocean",
+            "source_uom": "OCEAN_WM",
+            "raw_label": "Restart Freight",
+            "charge_component_id": component.json()["id"],
+            "default_calculation_basis": "PER_CONTAINER",
+            "default_charge_level": "CONTAINER",
+            "default_allocation_basis": "CBM",
+            "default_calculation_profile_id": calculation_profile["id"],
+            "default_calculation_profile_version_id": calculation_version_id,
+            "final_posting_level": "PO_SCHEDULE_LINE",
+            "allocation_override_mode": "OVERRIDE_PROFILE",
+            "override_calculation_profile_id": seeded_profiles_by_code["OCEAN_WM"]["id"],
+            "override_calculation_profile_version_id": seeded_profiles_by_code["OCEAN_WM"][
+                "versions"
+            ][0]["id"],
+            "customer_id": 20,
+            "forwarder_id": 202,
+            "transport_mode": "OCEAN",
+        },
+    )
+    assert alias.status_code == 201, alias.text
 
     rate_book = client.post(
         "/api/v1/charge-management/rate-books",
@@ -288,6 +323,21 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
         "DOCUMENT_DATE",
     ]
     assert reloaded_component.default_calculation_profile_id == calculation_profile["id"]
+    reloaded_alias = next(
+        item
+        for item in domain_service.list_component_aliases(limit=200, offset=0).items
+        if item.id == alias.json()["id"]
+    )
+    assert reloaded_alias.default_calculation_profile_id == calculation_profile["id"]
+    assert reloaded_alias.default_calculation_profile_version_id == calculation_version_id
+    assert (
+        reloaded_alias.override_calculation_profile_id == seeded_profiles_by_code["OCEAN_WM"]["id"]
+    )
+    assert reloaded_alias.source_uom == "OCEAN_WM"
+    assert (
+        reloaded_alias.override_calculation_profile_version_id
+        == seeded_profiles_by_code["OCEAN_WM"]["versions"][0]["id"]
+    )
     assert reloaded_rate_book.charge_component_code == "RESTART_COMPONENT"
     assert reloaded_rate_book.row_attribute_keys == [
         "basis_override",

@@ -230,6 +230,7 @@ class ChargeComponentAliasRow(TimestampMixin, Base):
     document_kind: Mapped[str] = mapped_column(String(60), nullable=False, default="CHARGE_PROPOSAL", server_default="CHARGE_PROPOSAL")
     template_key: Mapped[str | None] = mapped_column(String(120))
     source_section: Mapped[str | None] = mapped_column(String(160))
+    source_uom: Mapped[str | None] = mapped_column(String(40))
     customer_id: Mapped[int | None] = mapped_column(Integer)
     forwarder_id: Mapped[int | None] = mapped_column(Integer)
     transport_mode: Mapped[str | None] = mapped_column(String(40))
@@ -239,6 +240,12 @@ class ChargeComponentAliasRow(TimestampMixin, Base):
     default_calculation_basis: Mapped[str] = mapped_column(String(40), nullable=False, default="DOCUMENT", server_default="DOCUMENT")
     default_charge_level: Mapped[str] = mapped_column(String(40), nullable=False, default="SHIPMENT", server_default="SHIPMENT")
     default_allocation_basis: Mapped[str | None] = mapped_column(String(40))
+    default_calculation_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_calculation_profile.id")
+    )
+    default_calculation_profile_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_calculation_profile_version.id")
+    )
     container_house_allocation_basis: Mapped[str | None] = mapped_column(String(40))
     house_item_allocation_basis: Mapped[str | None] = mapped_column(String(40))
     final_posting_level: Mapped[str | None] = mapped_column(String(30))
@@ -252,6 +259,12 @@ class ChargeComponentAliasRow(TimestampMixin, Base):
     override_allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     override_allocation_profile_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("charge_allocation_profile_version.id")
+    )
+    override_calculation_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_calculation_profile.id")
+    )
+    override_calculation_profile_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("charge_calculation_profile_version.id")
     )
     override_charge_level: Mapped[str | None] = mapped_column(String(40))
     override_allocation_basis: Mapped[str | None] = mapped_column(String(40))
@@ -273,6 +286,7 @@ class ChargeComponentAliasRow(TimestampMixin, Base):
             "document_kind",
             "template_key",
             "source_section",
+            "source_uom",
             "normalized_label",
             "customer_id",
             "forwarder_id",
@@ -283,6 +297,7 @@ class ChargeComponentAliasRow(TimestampMixin, Base):
             "ix_charge_component_alias_lookup",
             "document_kind",
             "template_key",
+            "source_uom",
             "normalized_label",
             "customer_id",
             "forwarder_id",
@@ -402,6 +417,8 @@ class ChargeCalculationProfileVersionRow(TimestampMixin, Base):
         default="BLOCK",
         server_default="BLOCK",
     )
+    minimum_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
+    maximum_amount: Mapped[object | None] = mapped_column(Numeric(18, 6))
     lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     published_by: Mapped[str | None] = mapped_column(String(255))
@@ -417,7 +434,7 @@ class ChargeCalculationProfileVersionRow(TimestampMixin, Base):
             name="ck_charge_calculation_profile_version_application_level",
         ),
         CheckConstraint(
-            "calculation_method in ('FLAT_AMOUNT', 'RATE_TIMES_PRODUCT')",
+            "calculation_method in ('FLAT_AMOUNT', 'RATE_TIMES_PRODUCT', 'PERCENT_OF_REFERENCE')",
             name="ck_charge_calculation_profile_version_method",
         ),
         CheckConstraint(
@@ -451,7 +468,8 @@ class ChargeCalculationProfileFactorRow(TimestampMixin, Base):
         CheckConstraint(
             "resolver in ('MANUAL', 'TARGET_COUNT', 'CONTAINER_COUNT', 'HOUSE_COUNT', "
             "'PO_SCHEDULE_LINE_COUNT', 'QUANTITY', 'WEIGHT', 'VOLUME', "
-            "'CHARGEABLE_WEIGHT', 'DURATION_HOURS', 'DURATION_DAYS', 'FIXED_VALUE')",
+            "'CHARGEABLE_WEIGHT', 'OCEAN_WM', 'REFERENCE_AMOUNT', "
+            "'DURATION_HOURS', 'DURATION_DAYS', 'FIXED_VALUE')",
             name="ck_charge_calculation_profile_factor_resolver",
         ),
         Index("ix_charge_calculation_profile_factor_profile_version", "profile_version_id"),
