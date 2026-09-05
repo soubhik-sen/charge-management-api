@@ -6,8 +6,6 @@ Revises: 0033_free_time_scope_and_dimension_identity
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import inspect
@@ -23,6 +21,12 @@ PROFILE_TABLE = "charge_calculation_profile"
 VERSION_TABLE = "charge_calculation_profile_version"
 FACTOR_TABLE = "charge_calculation_profile_factor"
 ALIAS_TABLE = "charge_component_alias"
+
+IDENTITY_SEQUENCE_TABLES = (
+    PROFILE_TABLE,
+    VERSION_TABLE,
+    FACTOR_TABLE,
+)
 
 CURRENT_METHOD_CHECK = (
     "calculation_method in ('FLAT_AMOUNT', 'RATE_TIMES_PRODUCT', 'PERCENT_OF_REFERENCE')"
@@ -154,6 +158,22 @@ def _table_definitions() -> tuple[sa.TableClause, sa.TableClause, sa.TableClause
     return profile_table, version_table, factor_table
 
 
+def _synchronize_identity_sequences(bind: sa.engine.Connection) -> None:
+    if bind.dialect.name != "postgresql":
+        return
+    inspector = inspect(bind)
+    for table_name in IDENTITY_SEQUENCE_TABLES:
+        if not inspector.has_table(table_name):
+            continue
+        bind.execute(
+            sa.text(
+                "SELECT setval("
+                f"pg_get_serial_sequence('{table_name}', 'id'), "
+                f"COALESCE(MAX(id), 1), COUNT(*) > 0) FROM {table_name}"
+            )
+        )
+
+
 def _replace_check_constraint(
     bind: sa.engine.Connection,
     *,
@@ -278,7 +298,7 @@ def _seed_calculation_profile(bind: sa.engine.Connection, row: dict[str, object]
     if existing_profile_id is not None:
         return
 
-    profile_result = bind.execute(
+    bind.execute(
         sa.insert(profile_table).values(
             profile_code=profile_code,
             profile_name=str(row["profile_name"]),
@@ -295,7 +315,7 @@ def _seed_calculation_profile(bind: sa.engine.Connection, row: dict[str, object]
         ).scalar_one()
     )
 
-    version_result = bind.execute(
+    bind.execute(
         sa.insert(version_table).values(
             profile_id=profile_id,
             version_number=1,
@@ -448,6 +468,7 @@ def upgrade() -> None:
         condition=CURRENT_FACTOR_CHECK,
     )
     _add_alias_columns(bind)
+    _synchronize_identity_sequences(bind)
     _seed_calculation_profiles(bind)
 
 

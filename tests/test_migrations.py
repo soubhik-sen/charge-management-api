@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import runpy
 from pathlib import Path
 
 from alembic import command
@@ -12,6 +13,44 @@ from app.infrastructure.sqlalchemy_repository import DatabaseRepositoryControl
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 ALEMBIC_SCRIPT_LOCATION = Path(__file__).resolve().parents[1] / "alembic"
+
+
+def test_profile_parity_migration_synchronizes_postgresql_sequences(monkeypatch) -> None:
+    migration_path = (
+        ALEMBIC_SCRIPT_LOCATION
+        / "versions"
+        / "0034_charge_calculation_profile_parity.py"
+    )
+    migration = runpy.run_path(str(migration_path))
+    synchronize = migration["_synchronize_identity_sequences"]
+    statements: list[str] = []
+
+    class _Dialect:
+        name = "postgresql"
+
+    class _Bind:
+        dialect = _Dialect()
+
+        def execute(self, statement) -> None:
+            statements.append(str(statement))
+
+    class _Inspector:
+        @staticmethod
+        def has_table(_table_name: str) -> bool:
+            return True
+
+    monkeypatch.setitem(synchronize.__globals__, "inspect", lambda _bind: _Inspector())
+    synchronize(_Bind())
+
+    expected_tables = (
+        "charge_calculation_profile",
+        "charge_calculation_profile_version",
+        "charge_calculation_profile_factor",
+    )
+    assert len(statements) == len(expected_tables)
+    for table_name, statement in zip(expected_tables, statements, strict=True):
+        assert f"pg_get_serial_sequence('{table_name}', 'id')" in statement
+        assert f"FROM {table_name}" in statement
 
 
 def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, monkeypatch) -> None:
