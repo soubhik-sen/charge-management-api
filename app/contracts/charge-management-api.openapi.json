@@ -12828,6 +12828,15 @@
     "schemas": {
       "BusinessDateProfile": {
         "properties": {
+          "business_purpose": {
+            "type": "string",
+            "enum": [
+              "EXCHANGE_RATE_DATE",
+              "PAYMENT_BASELINE_DATE"
+            ],
+            "title": "Business Purpose",
+            "default": "EXCHANGE_RATE_DATE"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -12951,7 +12960,10 @@
           },
           "business_purpose": {
             "type": "string",
-            "const": "EXCHANGE_RATE_DATE",
+            "enum": [
+              "EXCHANGE_RATE_DATE",
+              "PAYMENT_BASELINE_DATE"
+            ],
             "title": "Business Purpose",
             "default": "EXCHANGE_RATE_DATE"
           },
@@ -13034,7 +13046,10 @@
           },
           "business_purpose": {
             "type": "string",
-            "const": "EXCHANGE_RATE_DATE",
+            "enum": [
+              "EXCHANGE_RATE_DATE",
+              "PAYMENT_BASELINE_DATE"
+            ],
             "title": "Business Purpose",
             "default": "EXCHANGE_RATE_DATE"
           },
@@ -13100,6 +13115,15 @@
             "title": "Owner Id",
             "default": 0
           },
+          "business_purpose": {
+            "type": "string",
+            "enum": [
+              "EXCHANGE_RATE_DATE",
+              "PAYMENT_BASELINE_DATE"
+            ],
+            "title": "Business Purpose",
+            "default": "EXCHANGE_RATE_DATE"
+          },
           "profile_code": {
             "type": "string",
             "title": "Profile Code"
@@ -13135,6 +13159,7 @@
                 "items": {
                   "type": "string",
                   "enum": [
+                    "INVOICE_DATE",
                     "DOCUMENT_DATE",
                     "MANUAL_LINE_DATE",
                     "SHIPPED_ON_BOARD_DATE",
@@ -13232,6 +13257,7 @@
           "date_key": {
             "type": "string",
             "enum": [
+              "INVOICE_DATE",
               "DOCUMENT_DATE",
               "MANUAL_LINE_DATE",
               "SHIPPED_ON_BOARD_DATE",
@@ -13289,6 +13315,7 @@
           "date_key": {
             "type": "string",
             "enum": [
+              "INVOICE_DATE",
               "DOCUMENT_DATE",
               "MANUAL_LINE_DATE",
               "SHIPPED_ON_BOARD_DATE",
@@ -13637,6 +13664,7 @@
               {
                 "type": "string",
                 "enum": [
+                  "INVOICE_DATE",
                   "DOCUMENT_DATE",
                   "MANUAL_LINE_DATE",
                   "SHIPPED_ON_BOARD_DATE",
@@ -13669,6 +13697,7 @@
             "items": {
               "type": "string",
               "enum": [
+                "INVOICE_DATE",
                 "DOCUMENT_DATE",
                 "MANUAL_LINE_DATE",
                 "SHIPPED_ON_BOARD_DATE",
@@ -13693,6 +13722,7 @@
             "items": {
               "type": "string",
               "enum": [
+                "INVOICE_DATE",
                 "DOCUMENT_DATE",
                 "MANUAL_LINE_DATE",
                 "SHIPPED_ON_BOARD_DATE",
@@ -13729,6 +13759,7 @@
           "date_type": {
             "type": "string",
             "enum": [
+              "INVOICE_DATE",
               "DOCUMENT_DATE",
               "MANUAL_LINE_DATE",
               "SHIPPED_ON_BOARD_DATE",
@@ -20110,7 +20141,8 @@
             "type": "array",
             "title": "Business Date Purposes",
             "default": [
-              "EXCHANGE_RATE_DATE"
+              "EXCHANGE_RATE_DATE",
+              "PAYMENT_BASELINE_DATE"
             ]
           },
           "business_date_profile_version_statuses": {
@@ -20157,6 +20189,7 @@
             "type": "array",
             "title": "Business Date Keys",
             "default": [
+              "INVOICE_DATE",
               "DOCUMENT_DATE",
               "MANUAL_LINE_DATE",
               "SHIPPED_ON_BOARD_DATE",
@@ -27713,13 +27746,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

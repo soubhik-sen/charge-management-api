@@ -83,7 +83,9 @@ RATE_BOOK_ROW_ATTRIBUTE_KEYS = (
     "priority",
 )
 ChargeTargetScopeMode = Literal["ALL_ELIGIBLE", "SELECTED_TARGETS"]
+BusinessDatePurpose = Literal["EXCHANGE_RATE_DATE", "PAYMENT_BASELINE_DATE"]
 BusinessDateType = Literal[
+    "INVOICE_DATE",
     "DOCUMENT_DATE",
     "MANUAL_LINE_DATE",
     "SHIPPED_ON_BOARD_DATE",
@@ -499,6 +501,7 @@ class BusinessDateProfileVersionCreate(BusinessDateProfileVersionPayload):
 
 
 class BusinessDateProfileCreate(OwnerScopedProfilePayload):
+    business_purpose: BusinessDatePurpose = "EXCHANGE_RATE_DATE"
     profile_code: str = Field(
         validation_alias=AliasChoices("profile_code", "profile_key")
     )
@@ -569,6 +572,7 @@ class BusinessDateProfileVersion(BusinessDateProfileVersionPayload):
 
 
 class BusinessDateProfile(ApiModel):
+    business_purpose: BusinessDatePurpose = "EXCHANGE_RATE_DATE"
     id: int
     profile_code: str
     profile_name: str
@@ -818,7 +822,7 @@ class BusinessDateProfileAssignmentPayload(ApiModel):
     scope_type: Literal["GLOBAL", "COMPANY", "CUSTOMER", "VENDOR", "FORWARDER", "CARRIER"]
     scope_id: int | None = None
     shipment_scope: Literal["OCEAN_HOUSE", "AIR_HOUSE", "ROAD_SHIPMENT"]
-    business_purpose: Literal["EXCHANGE_RATE_DATE"] = "EXCHANGE_RATE_DATE"
+    business_purpose: BusinessDatePurpose = "EXCHANGE_RATE_DATE"
     priority: int = 100
     is_active: bool = True
 
@@ -1139,11 +1143,12 @@ class ChargeReferenceData(ApiModel):
         "AIR_HOUSE",
         "ROAD_SHIPMENT",
     ]
-    business_date_purposes: list[str] = ["EXCHANGE_RATE_DATE"]
+    business_date_purposes: list[str] = ["EXCHANGE_RATE_DATE", "PAYMENT_BASELINE_DATE"]
     business_date_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
     free_time_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
     fx_rate_types: list[str] = ["MID", "BUY", "SELL", "CUSTOM"]
     business_date_keys: list[str] = [
+        "INVOICE_DATE",
         "DOCUMENT_DATE",
         "MANUAL_LINE_DATE",
         "SHIPPED_ON_BOARD_DATE",

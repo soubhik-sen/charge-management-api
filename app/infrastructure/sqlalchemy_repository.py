@@ -849,6 +849,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             self._ids["business_date_profile_version"] = max(self._ids["business_date_profile_version"], version.id)
         for row in profile_rows:
             profile = BusinessDateProfile(
+                business_purpose=row.business_purpose,
                 id=row.id,
                 profile_code=row.profile_code,
                 profile_name=row.profile_name,
@@ -1654,6 +1655,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         for profile in sorted(self.business_date_profiles.values(), key=lambda item: item.id):
             self.session.merge(
                 ChargeBusinessDateProfileRow(
+                    business_purpose=profile.business_purpose,
                     id=profile.id,
                     profile_code=profile.profile_code,
                     profile_name=profile.profile_name,

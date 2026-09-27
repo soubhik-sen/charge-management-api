@@ -22,6 +22,20 @@ def setup_function() -> None:
     repository.reset()
 
 
+def test_automatic_document_numbers_survive_deletion_and_repository_reload() -> None:
+    path = "/api/v1/charge-management/charge-documents"
+    first = client.post(path, headers=AUTH, json={"currency": "USD"})
+    second = client.post(path, headers=AUTH, json={"currency": "USD"})
+    assert first.status_code == second.status_code == 201
+    for response in [first, second]:
+        deleted = client.delete(f"{path}/{response.json()['id']}", headers=AUTH)
+        assert deleted.status_code == 200, deleted.text
+    # Each API call constructs a fresh SQLAlchemy repository.
+    third = client.post(path, headers=AUTH, json={"currency": "USD"})
+    assert third.status_code == 201, third.text
+    assert int(third.json()["document_number"].split("-")[-1]) > int(second.json()["document_number"].split("-")[-1])
+
+
 def test_next_id_recovers_when_persisted_sequence_trails_seeded_rows() -> None:
     with SessionLocal() as db:
         db.execute(

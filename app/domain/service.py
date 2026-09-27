@@ -162,7 +162,7 @@ BUSINESS_DATE_POLICY_MODES = {"LEGACY_BASIS", "INHERIT_PROFILE", "PROFILE_OVERRI
 BUSINESS_DATE_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 BUSINESS_DATE_ASSIGNMENT_SCOPE_TYPES = {"GLOBAL", "COMPANY", "CUSTOMER", "VENDOR", "FORWARDER", "CARRIER"}
 BUSINESS_DATE_SHIPMENT_SCOPES = {"OCEAN_HOUSE", "AIR_HOUSE", "ROAD_SHIPMENT"}
-BUSINESS_DATE_PURPOSES = {"EXCHANGE_RATE_DATE"}
+BUSINESS_DATE_PURPOSES = {"EXCHANGE_RATE_DATE", "PAYMENT_BASELINE_DATE"}
 CHARGE_DOCUMENT_MUTABLE_STATUSES = {"ESTIMATED", "ACCRUED", "ACTUAL", "DISPUTED"}
 CHARGE_DOCUMENT_LOCKED_STATUSES = {"APPROVED", "EXPORTED", "REVERSED"}
 CHARGE_LINE_LIFECYCLE_STATUSES = CHARGE_DOCUMENT_MUTABLE_STATUSES | CHARGE_DOCUMENT_LOCKED_STATUSES
@@ -170,6 +170,7 @@ CHARGE_LINE_DELETE_ALLOWED_ROLES = {"CALCULATION", "POSTING"}
 CHARGE_LINE_MANUAL_SOURCES = {"MANUAL", "DIRECT"}
 PROCESSING_BLOCKED_STATUSES = {"PENDING", "PENDING_CONTEXT", "FAILED"}
 BUSINESS_DATE_BASIS_KEYS = {
+    "INVOICE_DATE",
     "DOCUMENT_DATE",
     "MANUAL_LINE_DATE",
     "SHIPPED_ON_BOARD_DATE",
@@ -908,6 +909,7 @@ class ChargeManagementService:
             profile_id=profile.id,
             payload=payload,
             version_number=next_version_number,
+            purpose=profile.business_purpose,
         )
         profile.versions = sorted([*profile.versions, version], key=lambda row: (row.version_number, row.id))
         profile.updated_at = utcnow()
@@ -1099,6 +1101,7 @@ class ChargeManagementService:
             profile_id=profile.id,
             payload=payload,
             version_number=next_version_number,
+            purpose=profile.business_purpose,
         )
         profile.versions = sorted([*profile.versions, version], key=lambda row: (row.version_number, row.id))
         profile.updated_at = utcnow()
@@ -1326,8 +1329,10 @@ class ChargeManagementService:
             profile_id=profile_id,
             payload=payload.initial_version,  # type: ignore[arg-type]
             version_number=1,
+            purpose=payload.business_purpose,
         )
         profile = BusinessDateProfile(
+            business_purpose=payload.business_purpose,
             id=profile_id,
             profile_code=code,
             profile_name=name,
@@ -1378,6 +1383,7 @@ class ChargeManagementService:
             profile_id=profile.id,
             payload=payload,
             version_number=next_version_number,
+            purpose=profile.business_purpose,
         )
         profile.versions = sorted([*profile.versions, version], key=lambda row: (row.version_number, row.id))
         profile.updated_at = utcnow()
@@ -1406,7 +1412,8 @@ class ChargeManagementService:
                     f"{payload.expected_lock_version}, current value is {version.lock_version}."
                 ),
             )
-        normalized = self._normalized_business_date_profile_version_payload(payload)
+        profile = self._require_business_date_profile(version.profile_id)
+        normalized = self._normalized_business_date_profile_version_payload(payload, profile.business_purpose)
         version.notes = normalized["notes"]
         version.effective_from = normalized["effective_from"]
         version.effective_to = normalized["effective_to"]
@@ -1734,6 +1741,7 @@ class ChargeManagementService:
             profile_id=profile.id,
             payload=payload,
             version_number=next_version_number,
+            purpose=profile.business_purpose,
         )
         profile.versions = sorted([*profile.versions, version], key=lambda row: (row.version_number, row.id))
         profile.updated_at = utcnow()
@@ -4177,6 +4185,7 @@ class ChargeManagementService:
 
     def create_invoice(self, payload: ChargeInvoiceCreate) -> ChargeInvoice:
         document = self._require_document(payload.charge_document_id)
+        self._assert_invoice_mutation_allowed(document)
         invoice_number = payload.invoice_number.strip()
         if not invoice_number:
             raise HTTPException(
@@ -4359,6 +4368,7 @@ class ChargeManagementService:
     def match_invoice(self, invoice_id: int) -> InvoiceMatchResponse:
         invoice = self._require_invoice(invoice_id)
         document = self._require_document(invoice.charge_document_id)
+        self._assert_invoice_mutation_allowed(document)
         if invoice.currency.upper() != document.currency.upper():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -4418,6 +4428,14 @@ class ChargeManagementService:
         self._sync_invoice_document_summary(invoice)
         return InvoiceMatchResponse(invoice=invoice, results=results)
 
+    @staticmethod
+    def _assert_invoice_mutation_allowed(document: ChargeDocument) -> None:
+        if document.status.upper() in CHARGE_DOCUMENT_LOCKED_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Invoices cannot be created, updated, or matched after their charge document is approved, exported, or reversed.",
+            )
+
     def approve_document(self, charge_document_id: int) -> ChargeActionResponse:
         document = self._require_document(charge_document_id)
         if document.status == "APPROVED":
@@ -4445,8 +4463,6 @@ class ChargeManagementService:
                 None,
             )
             if existing is not None:
-                self._sync_document_line_statuses(document, "EXPORTED")
-                existing.document = document
                 return existing
         if document.status != "APPROVED":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document must be approved first")
@@ -4454,12 +4470,16 @@ class ChargeManagementService:
         document.exported_at = utcnow()
         self._sync_document_line_statuses(document, "EXPORTED")
         export_number = f"EXP-{self.repository.next_id('export'):08d}"
+        payload = document.model_dump(mode="json")
+        # Calculation rows retain allocation lineage in the workspace, but only
+        # posting rows represent ledger amounts.
+        payload["lines"] = [line for line in payload["lines"] if line["line_role"] == "POSTING"]
         response = ChargeExportResponse(
             document=document,
             export_number=export_number,
             target_system="INTERNAL_LEDGER",
             status="POSTED",
-            payload_json=document.model_dump(mode="json"),
+            payload_json=payload,
         )
         self.repository.exports[export_number] = response
         return response
@@ -6943,6 +6963,8 @@ class ChargeManagementService:
                 detail="business_date_profile_id is required when business_date_policy_mode is PROFILE_OVERRIDE.",
             )
         profile = self._require_business_date_profile(resolved_profile_id)
+        if profile.business_purpose != "EXCHANGE_RATE_DATE":
+            raise HTTPException(422, detail="Charge components require an exchange-rate date profile.")
         self._require_published_business_date_profile_version(profile)
         return normalized_mode, resolved_profile_id
 
@@ -7148,6 +7170,7 @@ class ChargeManagementService:
     def _normalized_business_date_profile_version_payload(
         self,
         payload: BusinessDateProfileVersionCreate,
+        purpose: str = "EXCHANGE_RATE_DATE",
     ) -> dict[str, Any]:
         normalized_steps: list[dict[str, Any]] = []
         seen_step_numbers: set[int] = set()
@@ -7170,6 +7193,8 @@ class ChargeManagementService:
                 )
             seen_step_numbers.add(step_number)
             date_key = step.date_key.strip().upper()
+            if date_key == "INVOICE_DATE" and purpose != "PAYMENT_BASELINE_DATE":
+                raise HTTPException(422, detail="Invoice date requires a payment baseline profile.")
             if date_key not in BUSINESS_DATE_BASIS_KEYS:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -7196,8 +7221,9 @@ class ChargeManagementService:
         profile_id: int,
         payload: BusinessDateProfileVersionCreate,
         version_number: int,
+        purpose: str = "EXCHANGE_RATE_DATE",
     ) -> BusinessDateProfileVersion:
-        normalized = self._normalized_business_date_profile_version_payload(payload)
+        normalized = self._normalized_business_date_profile_version_payload(payload, purpose)
         steps: list[BusinessDateProfileStep] = []
         version_id = self.repository.next_id("business_date_profile_version")
         for step_payload in normalized["steps"]:
@@ -7249,6 +7275,8 @@ class ChargeManagementService:
                 detail=f"Unsupported business date assignment shipment_scope: {payload.shipment_scope}",
             )
         business_purpose = payload.business_purpose.strip().upper()
+        if self._require_business_date_profile(profile_id).business_purpose != business_purpose:
+            raise HTTPException(422, detail="Profile purpose does not match assignment purpose.")
         if business_purpose not in BUSINESS_DATE_PURPOSES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

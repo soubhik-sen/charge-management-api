@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Separate payment-baseline Business Date Profile purpose, invoice-date event, persisted purpose and FX assignment safeguards (migration `0035_payment_baseline_profile_purpose`).
+
 - Effective-dated rate-book metadata, percentage rates, deterministic rate-entry priority, contract-line context, and quote chargeable weight.
 - Explicit charge-line calculation/allocation execution state and migration `0016_align_charge_runtime`.
 - Regression tests for overlapping rate rows, percentage-only rates, and repeated invoice components.
@@ -18,6 +20,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Invoice capture and matching now respect approved/exported/reversed document finality; export retries preserve the existing snapshot without rewriting line states.
+
+- Financial export payloads include only posting lines, preserving calculation lineage in the document workspace without posting it twice.
 - PostgreSQL migrations widen Alembic's version column before descriptive revision IDs exceed its default length.
 - Direct runtime and test dependencies are pinned so generated OpenAPI and CI results are reproducible.
 - Contract rating now excludes inactive, expired, out-of-scale, and dimension-mismatched rows and never creates zero-line options.

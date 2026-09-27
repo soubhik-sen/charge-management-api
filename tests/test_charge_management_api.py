@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.v1.charge_management import repository
@@ -283,7 +284,10 @@ def test_initialization_data_has_seeded_components() -> None:
         "AIR_HOUSE",
         "ROAD_SHIPMENT",
     ]
-    assert response.json()["reference_data"]["business_date_purposes"] == ["EXCHANGE_RATE_DATE"]
+    assert response.json()["reference_data"]["business_date_purposes"] == [
+        "EXCHANGE_RATE_DATE",
+        "PAYMENT_BASELINE_DATE",
+    ]
     assert response.json()["reference_data"]["fx_rate_types"] == ["MID", "BUY", "SELL", "CUSTOM"]
     assert "SHIPPED_ON_BOARD_DATE" in response.json()["reference_data"]["business_date_keys"]
     assert "ROAD_ACTUAL_PICKUP_DATE" in response.json()["reference_data"]["business_date_keys"]
@@ -4926,6 +4930,68 @@ def test_invoice_matching_aggregates_repeated_posting_components() -> None:
     assert matched.json()["results"][0]["expected_amount"] == "300.00"
     assert matched.json()["results"][0]["invoice_amount"] == "300.00"
     assert matched.json()["results"][0]["match_status"] == "MATCHED"
+
+
+def test_ledger_export_excludes_calculation_rows_and_preserves_workspace_lineage() -> None:
+    from decimal import Decimal
+
+    created = client.post("/api/v1/charge-management/charge-documents", headers=AUTH,
+        json={"currency": "USD", "lines": [
+            {"relationship_role": "PAYER", "line_role": role,
+             "charge_component_code": "BASE_FREIGHT", "expected_amount": amount}
+            for role, amount in [("CALCULATION", "100"), ("POSTING", "40"), ("POSTING", "60")]
+        ]})
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    approved = client.post(f"/api/v1/charge-management/charge-documents/{document_id}/approve", headers=AUTH)
+    assert approved.status_code == 200, approved.text
+    exported = client.post(f"/api/v1/charge-management/charge-documents/{document_id}/post-export", headers=AUTH)
+    assert exported.status_code == 200, exported.text
+    result = exported.json()
+    assert len(result["document"]["lines"]) == 3
+    posting = result["payload_json"]["lines"]
+    assert len(posting) == 2 and all(row["line_role"] == "POSTING" for row in posting)
+    assert sum(Decimal(row["expected_amount"]) for row in posting) == Decimal("100")
+    replay = client.post(f"/api/v1/charge-management/charge-documents/{document_id}/post-export", headers=AUTH)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["payload_json"] == result["payload_json"]
+
+
+@pytest.mark.parametrize("final_status", ["APPROVED", "EXPORTED", "REVERSED"])
+def test_final_document_invoice_mutations_and_export_replay(final_status: str) -> None:
+    base = "/api/v1/charge-management"
+    created = client.post(f"{base}/charge-documents", headers=AUTH, json={
+        "currency": "USD", "lines": [{"relationship_role": "PAYER", "line_role": "POSTING",
+            "charge_component_code": "BASE_FREIGHT", "expected_amount": "100"}],
+    })
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    doc_url = f"{base}/charge-documents/{document_id}"
+    invoice_payload = {"charge_document_id": document_id, "invoice_number": "INV-FINAL",
+        "invoice_type": "SUPPLIER", "lines": [{"charge_component_code": "BASE_FREIGHT", "amount": "100"}]}
+    captured = client.post(f"{base}/invoices", headers=AUTH, json=invoice_payload)
+    assert captured.status_code == 201, captured.text
+    invoice_url = f"{base}/invoices/{captured.json()['id']}"
+    matched = client.post(f"{invoice_url}/match", headers=AUTH)
+    assert matched.status_code == 200, matched.text
+    assert client.post(f"{doc_url}/approve", headers=AUTH).status_code == 200
+    if final_status in {"EXPORTED", "REVERSED"}:
+        exported = client.post(f"{doc_url}/post-export", headers=AUTH)
+        assert exported.status_code == 200, exported.text
+        replay = client.post(f"{doc_url}/post-export", headers=AUTH)
+        assert replay.status_code == 200 and replay.json() == exported.json()
+    if final_status == "REVERSED":
+        reversed_doc = client.post(f"{doc_url}/reverse", headers=AUTH, json={"reason": "Wrong charge"})
+        assert reversed_doc.status_code == 200, reversed_doc.text
+        assert client.post(f"{doc_url}/post-export", headers=AUTH).status_code == 409
+    before = client.get(f"{invoice_url}/workspace", headers=AUTH).json()
+    assert before["charge_document"]["status"] == final_status
+    invoice_payload["invoice_number"] = "INV-NEW"
+    assert client.post(f"{base}/invoices", headers=AUTH, json=invoice_payload).status_code == 409
+    assert client.post(f"{invoice_url}/match", headers=AUTH).status_code == 409
+    assert client.put(f"{invoice_url}/workspace", headers=AUTH, json={"invoice_number": "MODIFIED"}).status_code == 409
+    assert client.delete(invoice_url, headers=AUTH).status_code == 409
+    assert client.get(f"{invoice_url}/workspace", headers=AUTH).json() == before
 
 
 def _submit_quote(quote_request_id: int) -> dict:

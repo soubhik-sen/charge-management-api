@@ -62,6 +62,10 @@ For road transport, start with the seeded road component and profile pack descri
 
 ## Current Execution Boundary
 
+Invoice matching and financial export use only `POSTING` lines. `CALCULATION` rows remain in document workspaces to explain allocation lineage; they are excluded from `post-export`'s `payload_json.lines`. The response's `document.lines` still contains the complete hierarchy. For example, a 100 calculation source allocated to 40 and 60 produces a ledger payload totaling 100.
+
+Automatic document and quote numbers use persisted counters. Deleting an earlier or latest document does not reset the sequence, including after a repository reload. These are identifiers, not gap-free accounting sequences.
+
 The API separates maintained business configuration from executable built-in behavior. Rate-book matching and versioning, calculation-profile and calculation-template execution, quote ranking/award, date resolution, FX resolution, allocation preview, document lifecycle, and invoice matching are executable today.
 
 `POST /calculations/preview` is the reusable, side-effect-free entry point when a host application needs a calculated result without creating a quote or charge document. It supports flat and quantity-based rates, percentages with an explicit base, published calculation-profile versions, minimum/maximum amounts, currency conversion, and allocation over caller-supplied targets. The host application still owns source-object hydration and authorization of those targets.
@@ -544,6 +548,8 @@ Updating an invoice clears stale match results and returns it to `CAPTURED` so i
 
 ## Approval, Export, And Reversal
 
+Invoice capture, correction, deletion, and matching return HTTP 409 once the document is `APPROVED`, `EXPORTED`, or `REVERSED`. Complete invoice reconciliation before approval. Export retries are read-only for `EXPORTED`; a reversed document cannot be exported again. Corrections require a new document while the original export snapshot remains intact.
+
 ### Approval
 
 Approval moves the charge document to `APPROVED`, synchronizes each line to `APPROVED`, and copies each line's actual amount, or expected amount when actual is absent, into `approved_amount`.
@@ -577,3 +583,10 @@ Only approved or exported documents can be reversed. Reversal synchronizes docum
 - [Database](database.md) maps concepts to relational tables.
 - [Authentication](authentication.md) explains JWT and the authorization adapter boundary.
 - [Generated OpenAPI](../app/contracts/charge-management-api.openapi.json) contains every request and response schema.
+
+
+## Payment baseline date profiles
+
+Business Date Profiles carry an immutable `business_purpose`: `EXCHANGE_RATE_DATE` (the backward-compatible default) or `PAYMENT_BASELINE_DATE`. The latter permits `INVOICE_DATE` in its ordered date steps. Assignment purpose must match the profile; charge component overrides require an exchange-rate profile. The generic date resolver can consume caller-supplied invoice dates, but the reusable API adds no supplier master, payment-term catalog, invoice due-date calculation or host UI policy.
+
+Existing profile rows receive `EXCHANGE_RATE_DATE` through migration `0035_payment_baseline_profile_purpose`. Publish a version before assigning it. Host applications that define payment terms should retain the selected profile version and explicitly decide missing-date behavior and transaction snapshots.

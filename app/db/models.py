@@ -477,6 +477,7 @@ class ChargeCalculationProfileFactorRow(TimestampMixin, Base):
 
 
 class ChargeBusinessDateProfileRow(TimestampMixin, Base):
+    business_purpose: Mapped[str] = mapped_column(String(40), nullable=False, default="EXCHANGE_RATE_DATE", server_default="EXCHANGE_RATE_DATE")
     __tablename__ = "charge_business_date_profile"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -607,7 +608,7 @@ class ChargeBusinessDateProfileAssignmentRow(TimestampMixin, Base):
             name="ck_charge_business_date_profile_assignment_shipment_scope",
         ),
         CheckConstraint(
-            "business_purpose in ('EXCHANGE_RATE_DATE')",
+            "business_purpose in ('EXCHANGE_RATE_DATE', 'PAYMENT_BASELINE_DATE')",
             name="ck_charge_business_date_profile_assignment_business_purpose",
         ),
         Index("ix_charge_business_date_profile_assignment_profile", "profile_id"),
