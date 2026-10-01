@@ -262,6 +262,7 @@ def test_initialization_data_has_seeded_components() -> None:
     assert "HOUSE" in response.json()["reference_data"]["charge_target_levels"]
     assert "PO_SCHEDULE_LINE" in response.json()["reference_data"]["charge_target_levels"]
     assert "HOUSE" in response.json()["reference_data"]["allocation_profile_source_levels"]
+    assert "DOCUMENT" in response.json()["reference_data"]["allocation_profile_source_levels"]
     assert "HOUSE" in response.json()["reference_data"]["allocation_profile_final_posting_levels"]
     assert response.json()["reference_data"]["allocation_profile_version_statuses"] == [
         "DRAFT",
@@ -313,6 +314,7 @@ def test_charge_component_crud_and_search() -> None:
     component = created.json()
     assert component["component_code"] == "PORT_SECURITY"
     assert component["is_active"] is True
+    assert component["manual_entry_enabled"] is False
     assert component["charge_date_basis"] == "MANUAL"
 
     duplicate = client.post(
@@ -341,6 +343,7 @@ def test_charge_component_crud_and_search() -> None:
             "charge_context": "PORT",
             "calculation_basis": "FLAT",
             "charge_date_basis": "SHIPMENT_DEPARTURE_DATE",
+            "manual_entry_enabled": True,
             "is_tax": False,
             "is_active": True,
         },
@@ -350,6 +353,13 @@ def test_charge_component_crud_and_search() -> None:
     assert updated.json()["default_party_role"] == "PAYEE"
     assert updated.json()["calculation_basis"] == "FLAT"
     assert updated.json()["charge_date_basis"] == "SHIPMENT_DEPARTURE_DATE"
+    assert updated.json()["manual_entry_enabled"] is True
+
+    listed_after_update = client.get(
+        "/api/v1/charge-management/components?q=PORT_SECURITY_FEE", headers=AUTH
+    )
+    assert listed_after_update.status_code == 200, listed_after_update.text
+    assert listed_after_update.json()["items"][0]["manual_entry_enabled"] is True
 
     deleted = client.delete(
         f"/api/v1/charge-management/components/{component['id']}",
@@ -1028,6 +1038,252 @@ def test_allocation_profile_lifecycle_and_component_propagation() -> None:
     assert line["pinned_allocation_snapshot_json"]["source_level"] == "HOUSE"
     assert line["effective_allocation_snapshot_json"]["default_quantity_uom"] == "KG"
     assert line["effective_allocation_snapshot_json"]["house_to_item_driver"] == "WEIGHT"
+
+
+@pytest.mark.parametrize(
+    "version, expected_detail",
+    [
+        (
+            {"source_level": "DOCUMENT", "final_posting_level": "HOUSE", "source_to_item_driver": "KG"},
+            "requires PO_SCHEDULE_LINE",
+        ),
+        (
+            {"source_level": "DOCUMENT", "final_posting_level": "PO_SCHEDULE_LINE"},
+            "source_to_item_driver is required",
+        ),
+        (
+            {"source_level": "DOCUMENT", "final_posting_level": "PO_SCHEDULE_LINE", "source_to_item_driver": "WEIGHT"},
+            "Unsupported DOCUMENT source_to_item_driver",
+        ),
+        (
+            {"source_level": "DOCUMENT", "final_posting_level": "PO_SCHEDULE_LINE", "source_to_item_driver": "KG", "house_to_item_driver": "KG"},
+            "cannot use house-stage drivers",
+        ),
+        (
+            {"source_level": "HOUSE", "final_posting_level": "PO_SCHEDULE_LINE", "source_to_item_driver": "KG", "house_to_item_driver": "KG"},
+            "only valid for DOCUMENT",
+        ),
+    ],
+)
+def test_document_allocation_profile_rejects_invalid_shapes(version, expected_detail) -> None:
+    response = client.post(
+        "/api/v1/charge-management/allocation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "DOCUMENT_TO_ITEMS",
+            "profile_name": "Document to items",
+            "initial_version": version,
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert expected_detail in response.json()["detail"]
+
+
+def test_document_allocation_profile_publishes_and_previews_direct_item_allocation() -> None:
+    created = client.post(
+        "/api/v1/charge-management/allocation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "DOCUMENT_KG_TO_ITEMS",
+            "profile_name": "Document kilograms to items",
+            "initial_version": {
+                "source_level": "DOCUMENT",
+                "source_to_item_driver": "kg",
+                "final_posting_level": "PO_SCHEDULE_LINE",
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    version = profile["versions"][0]
+    assert version["source_to_item_driver"] == "KG"
+    assert version["source_to_house_driver"] is None
+    assert version["house_to_item_driver"] is None
+
+    published = client.post(
+        f"/api/v1/charge-management/allocation-profile-versions/{version['id']}/publish",
+        headers=AUTH,
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["published_version_id"] == version["id"]
+
+    next_version = client.post(
+        f"/api/v1/charge-management/allocation-profiles/{profile['id']}/versions",
+        headers=AUTH,
+        json={
+            "source_level": "DOCUMENT",
+            "source_to_item_driver": "COUNT",
+            "final_posting_level": "PO_SCHEDULE_LINE",
+        },
+    )
+    assert next_version.status_code == 201, next_version.text
+    assert next_version.json()["versions"][-1]["source_to_item_driver"] == "COUNT"
+
+    listed = client.get(
+        "/api/v1/charge-management/allocation-profiles?source_level=DOCUMENT", headers=AUTH
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["total"] == 1
+    assert listed.json()["items"][0]["versions"][0]["source_to_item_driver"] == "KG"
+
+    no_legacy = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            "component_code": "DOCUMENT_ONLY_COMPONENT",
+            "component_name": "Document only component",
+            "allocation_profile_id": profile["id"],
+        },
+    )
+    assert no_legacy.status_code == 409, no_legacy.text
+    assert "published non-DOCUMENT version" in no_legacy.json()["detail"]
+
+    preview = client.post(
+        "/api/v1/charge-management/calculations/preview",
+        headers=AUTH,
+        json={
+            "basis": "FLAT",
+            "rate_amount": "20.00",
+            "allocation_profile_version_id": version["id"],
+            "allocation_targets": [
+                {"target_level": "PO_SCHEDULE_LINE", "target_object_type": "ORDER_ITEM", "target_object_id": "one", "driver_value": "1"},
+                {"target_level": "PO_SCHEDULE_LINE", "target_object_type": "ORDER_ITEM", "target_object_id": "two", "driver_value": "3"},
+            ],
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    result = preview.json()
+    assert result["allocation_config_snapshot_json"]["source_level"] == "DOCUMENT"
+    assert result["allocation_config_snapshot_json"]["source_to_item_driver"] == "KG"
+    assert [row["allocated_amount"] for row in result["allocations"]] == ["5.00", "15.00"]
+
+    for amount, expected in (
+        ("0.02", ["0.01", "0.01", "0.00", "0.00"]),
+        ("-0.02", ["-0.01", "-0.01", "0.00", "0.00"]),
+    ):
+        tiny_preview = client.post(
+            "/api/v1/charge-management/calculations/preview",
+            headers=AUTH,
+            json={
+                "basis": "FLAT",
+                "rate_amount": amount,
+                "allocation_profile_version_id": version["id"],
+                "allocation_targets": [
+                    {"target_level": "PO_SCHEDULE_LINE", "target_object_type": "ORDER_ITEM", "target_object_id": str(index), "driver_value": "1"}
+                    for index in range(4)
+                ],
+            },
+        )
+        assert tiny_preview.status_code == 200, tiny_preview.text
+        assert [row["allocated_amount"] for row in tiny_preview.json()["allocations"]] == expected
+        assert tiny_preview.json()["allocated_amount"] == amount
+        assert tiny_preview.json()["unallocated_amount"] == "0.00"
+
+
+def test_document_publish_preserves_legacy_allocation_resolution() -> None:
+    created = client.post(
+        "/api/v1/charge-management/allocation-profiles",
+        headers=AUTH,
+        json={
+            "profile_code": "MIXED_SOURCE_PROFILE",
+            "profile_name": "Mixed source profile",
+            "initial_version": {
+                "source_level": "HOUSE",
+                "house_to_item_driver": "WEIGHT",
+                "final_posting_level": "PO_SCHEDULE_LINE",
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    legacy_version_id = profile["versions"][0]["id"]
+    published_legacy = client.post(
+        f"/api/v1/charge-management/allocation-profile-versions/{legacy_version_id}/publish",
+        headers=AUTH,
+    )
+    assert published_legacy.status_code == 200, published_legacy.text
+
+    added_document = client.post(
+        f"/api/v1/charge-management/allocation-profiles/{profile['id']}/versions",
+        headers=AUTH,
+        json={
+            "source_level": "DOCUMENT",
+            "source_to_item_driver": "KG",
+            "final_posting_level": "PO_SCHEDULE_LINE",
+        },
+    )
+    assert added_document.status_code == 201, added_document.text
+    document_version_id = added_document.json()["versions"][-1]["id"]
+    published_document = client.post(
+        f"/api/v1/charge-management/allocation-profile-versions/{document_version_id}/publish",
+        headers=AUTH,
+    )
+    assert published_document.status_code == 200, published_document.text
+    assert published_document.json()["published_version_id"] == document_version_id
+    assert [row["status"] for row in published_document.json()["versions"]] == [
+        "PUBLISHED", "PUBLISHED"
+    ]
+
+    added_legacy = client.post(
+        f"/api/v1/charge-management/allocation-profiles/{profile['id']}/versions",
+        headers=AUTH,
+        json={
+            "source_level": "HOUSE",
+            "house_to_item_driver": "CBM",
+            "final_posting_level": "PO_SCHEDULE_LINE",
+        },
+    )
+    assert added_legacy.status_code == 201, added_legacy.text
+    new_legacy_version_id = added_legacy.json()["versions"][-1]["id"]
+    published_new_legacy = client.post(
+        f"/api/v1/charge-management/allocation-profile-versions/{new_legacy_version_id}/publish",
+        headers=AUTH,
+    )
+    assert published_new_legacy.status_code == 200, published_new_legacy.text
+    assert published_new_legacy.json()["published_version_id"] == new_legacy_version_id
+    assert [row["status"] for row in published_new_legacy.json()["versions"]] == [
+        "RETIRED", "PUBLISHED", "PUBLISHED"
+    ]
+
+    component_payload = {
+        "component_code": "MIXED_SOURCE_SERVICE",
+        "component_name": "Mixed source service",
+        "allocation_profile_id": profile["id"],
+        "manual_entry_enabled": True,
+    }
+    component = client.post(
+        "/api/v1/charge-management/components", headers=AUTH, json=component_payload
+    )
+    assert component.status_code == 201, component.text
+    assert component.json()["allocation_profile_version_id"] == new_legacy_version_id
+    rejected_explicit = client.post(
+        "/api/v1/charge-management/components",
+        headers=AUTH,
+        json={
+            **component_payload,
+            "component_code": "MIXED_SOURCE_EXPLICIT",
+            "allocation_profile_version_id": document_version_id,
+        },
+    )
+    assert rejected_explicit.status_code == 409, rejected_explicit.text
+
+    document = client.post(
+        "/api/v1/charge-management/charge-documents",
+        headers=AUTH,
+        json={
+            "currency": "USD",
+            "lines": [{
+                "relationship_role": "PAYEE",
+                "charge_component_code": "MIXED_SOURCE_SERVICE",
+                "expected_amount": "20.00",
+                "currency": "USD",
+            }],
+        },
+    )
+    assert document.status_code == 201, document.text
+    line = document.json()["lines"][0]
+    assert line["allocation_profile_version_id"] == new_legacy_version_id
+    assert line["allocation_basis"] == "CBM"
 
 
 def test_business_date_profile_lifecycle_assignment_and_resolution() -> None:
@@ -4631,6 +4887,10 @@ def test_openapi_exposes_core_paths() -> None:
     assert "override_calculation_profile_id" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
     assert "override_calculation_profile_version_id" in contract["components"]["schemas"]["ChargeComponentAlias"]["properties"]
     assert "source_level" in contract["components"]["schemas"]["ChargeAllocationProfileVersion"]["properties"]
+    assert "source_to_item_driver" in contract["components"]["schemas"]["ChargeAllocationProfileVersion"]["properties"]
+    assert "DOCUMENT" in contract["components"]["schemas"]["ChargeAllocationProfileVersionCreate"]["properties"]["source_level"]["enum"]
+    assert "manual_entry_enabled" in contract["components"]["schemas"]["ChargeComponent"]["properties"]
+    assert "manual_entry_enabled" in contract["components"]["schemas"]["ChargeComponentPayload"]["properties"]
     assert "final_posting_level" in contract["components"]["schemas"]["ChargeAllocationProfileVersion"]["properties"]
     assert "profile_code" in contract["components"]["schemas"]["BusinessDateProfile"]["properties"]
     assert "steps" in contract["components"]["schemas"]["BusinessDateProfileVersion"]["properties"]

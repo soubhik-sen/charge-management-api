@@ -129,7 +129,8 @@ from app.domain.seeds import (
 
 MONEY = Decimal("0.01")
 CHARGE_TARGET_LEVELS = {"HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"}
-ALLOCATION_PROFILE_SOURCE_LEVELS = {"SHIPMENT", "CONTAINER", "HOUSE"}
+ALLOCATION_PROFILE_SOURCE_LEVELS = {"SHIPMENT", "CONTAINER", "HOUSE", "DOCUMENT"}
+DOCUMENT_ALLOCATION_DRIVERS = {"KG", "CBM", "COUNT", "OCEAN_WM", "AIR_CHARGEABLE_KG"}
 ALLOCATION_PROFILE_FINAL_POSTING_LEVELS = {"HOUSE", "PO_SCHEDULE_LINE"}
 ALLOCATION_PROFILE_VERSION_STATUSES = {"DRAFT", "PUBLISHED", "RETIRED"}
 ALLOCATION_OVERRIDE_MODES = {"INHERIT_PROFILE", "OVERRIDE_PROFILE", "NO_ALLOCATION"}
@@ -909,7 +910,6 @@ class ChargeManagementService:
             profile_id=profile.id,
             payload=payload,
             version_number=next_version_number,
-            purpose=profile.business_purpose,
         )
         profile.versions = sorted([*profile.versions, version], key=lambda row: (row.version_number, row.id))
         profile.updated_at = utcnow()
@@ -950,13 +950,14 @@ class ChargeManagementService:
     def publish_allocation_profile_version(self, version_id: int) -> ChargeAllocationProfile:
         version = self._require_allocation_profile_version(version_id)
         profile = self._require_allocation_profile(version.profile_id)
+        document_family = version.source_level == "DOCUMENT"
         for existing in profile.versions:
             if existing.id == version.id:
                 existing.status = "PUBLISHED"
                 existing.published_at = utcnow()
                 existing.lock_version += 1
                 existing.updated_at = utcnow()
-            elif existing.status == "PUBLISHED":
+            elif existing.status == "PUBLISHED" and (existing.source_level == "DOCUMENT") == document_family:
                 existing.status = "RETIRED"
                 existing.updated_at = utcnow()
         profile.published_version_id = version.id
@@ -2054,6 +2055,7 @@ class ChargeManagementService:
         existing.default_calculation_profile_id = self._resolve_calculation_profile_identity_reference(
             payload.default_calculation_profile_id
         )
+        existing.manual_entry_enabled = payload.manual_entry_enabled
         existing.is_tax = bool(payload.is_tax)
         existing.is_active = bool(payload.is_active)
         self.repository.components_by_code[existing.component_code] = existing
@@ -6569,26 +6571,56 @@ class ChargeManagementService:
         house_to_item_driver = _clean_optional(
             payload.house_to_item_driver.upper() if payload.house_to_item_driver else None
         )
+        source_to_item_driver = _clean_optional(
+            payload.source_to_item_driver.upper() if payload.source_to_item_driver else None
+        )
         final_posting_level = (payload.final_posting_level or "").strip().upper()
         if final_posting_level not in ALLOCATION_PROFILE_FINAL_POSTING_LEVELS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unsupported allocation profile final_posting_level: {payload.final_posting_level}",
             )
-        if source_level == "HOUSE":
-            source_to_house_driver = None
-        elif source_to_house_driver is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="source_to_house_driver is required for SHIPMENT or CONTAINER source allocation.",
-            )
-        if final_posting_level == "HOUSE":
-            house_to_item_driver = None
-        elif house_to_item_driver is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="house_to_item_driver is required for PO_SCHEDULE_LINE posting.",
-            )
+        if source_level == "DOCUMENT":
+            if final_posting_level != "PO_SCHEDULE_LINE":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="DOCUMENT source allocation requires PO_SCHEDULE_LINE posting.",
+                )
+            if source_to_item_driver is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="source_to_item_driver is required for DOCUMENT source allocation.",
+                )
+            if source_to_item_driver not in DOCUMENT_ALLOCATION_DRIVERS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported DOCUMENT source_to_item_driver: {source_to_item_driver}",
+                )
+            if source_to_house_driver is not None or house_to_item_driver is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="DOCUMENT source allocation cannot use house-stage drivers.",
+                )
+        else:
+            if source_to_item_driver is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="source_to_item_driver is only valid for DOCUMENT source allocation.",
+                )
+            if source_level == "HOUSE":
+                source_to_house_driver = None
+            elif source_to_house_driver is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="source_to_house_driver is required for SHIPMENT or CONTAINER source allocation.",
+                )
+            if final_posting_level == "HOUSE":
+                house_to_item_driver = None
+            elif house_to_item_driver is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="house_to_item_driver is required for PO_SCHEDULE_LINE posting.",
+                )
         default_quantity_uom = _clean_optional(payload.default_quantity_uom.upper() if payload.default_quantity_uom else None)
         return {
             "effective_from": payload.effective_from,
@@ -6596,6 +6628,7 @@ class ChargeManagementService:
             "source_level": source_level,
             "source_to_house_driver": source_to_house_driver,
             "house_to_item_driver": house_to_item_driver,
+            "source_to_item_driver": source_to_item_driver,
             "final_posting_level": final_posting_level,
             "default_quantity_uom": default_quantity_uom,
             "missing_driver_policy": payload.missing_driver_policy.strip().upper(),
@@ -6849,7 +6882,7 @@ class ChargeManagementService:
 
     def _effective_allocation_basis(self, snapshot: dict[str, Any] | None) -> str | None:
         row = snapshot or {}
-        return self._effective_allocation_value(row, "house_to_item_driver") or self._effective_allocation_value(
+        return self._effective_allocation_value(row, "source_to_item_driver") or self._effective_allocation_value(row, "house_to_item_driver") or self._effective_allocation_value(
             row,
             "source_to_house_driver",
         )
@@ -7520,6 +7553,7 @@ class ChargeManagementService:
             "source_level": version.source_level,
             "source_to_house_driver": version.source_to_house_driver,
             "house_to_item_driver": version.house_to_item_driver,
+            "source_to_item_driver": version.source_to_item_driver,
             "final_posting_level": version.final_posting_level,
             "default_quantity_uom": version.default_quantity_uom,
             "missing_driver_policy": version.missing_driver_policy,
@@ -7589,13 +7623,22 @@ class ChargeManagementService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="allocation_profile_version_id does not belong to allocation_profile_id.",
             )
+        if version is not None and version.source_level == "DOCUMENT":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="DOCUMENT allocation versions require a document-aware adapter or calculation preview.",
+            )
         if version is None:
-            if profile.published_version_id is None:
+            published_legacy = [
+                candidate for candidate in profile.versions
+                if candidate.status == "PUBLISHED" and candidate.source_level != "DOCUMENT"
+            ]
+            if not published_legacy:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Charge allocation profile does not have a published version.",
+                    detail="Charge allocation profile does not have a published non-DOCUMENT version for this flow.",
                 )
-            version = self._require_allocation_profile_version(profile.published_version_id)
+            version = max(published_legacy, key=lambda row: (row.version_number, row.id))
         return profile.id, version.id, profile, version
 
     def _alias_from_payload(

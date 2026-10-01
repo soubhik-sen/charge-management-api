@@ -206,6 +206,7 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
             "charge_context": "TRANSPORT",
             "calculation_basis": "PER_CONTAINER",
             "default_calculation_profile_id": calculation_profile["id"],
+            "manual_entry_enabled": True,
         },
     )
     assert component.status_code == 201, component.text
@@ -337,6 +338,7 @@ def test_master_data_survives_fresh_repository_and_service_instances() -> None:
         "DOCUMENT_DATE",
     ]
     assert reloaded_component.default_calculation_profile_id == calculation_profile["id"]
+    assert reloaded_component.manual_entry_enabled is True
     reloaded_alias = next(
         item
         for item in domain_service.list_component_aliases(limit=200, offset=0).items

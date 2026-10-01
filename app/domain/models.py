@@ -167,6 +167,10 @@ class ChargeComponent(ApiModel):
     allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
     default_calculation_profile_id: int | None = None
+    manual_entry_enabled: bool = Field(
+        default=False,
+        description="Whether consuming adapters may offer this component for manual entry; authorization remains adapter owned.",
+    )
     is_tax: bool = False
     is_active: bool = True
 
@@ -208,6 +212,10 @@ class ChargeComponentPayload(ApiModel):
     default_allocation_profile_id: int | None = None
     allocation_profile_version_id: int | None = None
     default_calculation_profile_id: int | None = None
+    manual_entry_enabled: bool = Field(
+        default=False,
+        description="Whether consuming adapters may offer this component for manual entry; authorization remains adapter owned.",
+    )
     is_tax: bool = False
     is_active: bool = True
 
@@ -304,9 +312,10 @@ class ChargeComponentAliasListResponse(ApiModel):
 class ChargeAllocationProfileVersionPayload(ApiModel):
     effective_from: date | None = None
     effective_to: date | None = None
-    source_level: Literal["SHIPMENT", "CONTAINER", "HOUSE"]
+    source_level: Literal["SHIPMENT", "CONTAINER", "HOUSE", "DOCUMENT"]
     source_to_house_driver: str | None = None
     house_to_item_driver: str | None = None
+    source_to_item_driver: str | None = None
     final_posting_level: Literal["HOUSE", "PO_SCHEDULE_LINE"]
     default_quantity_uom: str | None = None
     missing_driver_policy: Literal["BLOCK", "EQUAL"] = "BLOCK"
@@ -1106,7 +1115,7 @@ class ChargeReferenceData(ApiModel):
     quote_acceptance_modes: list[str] = ["AUTO_ACCEPT", "CUSTOMER_ACCEPTANCE"]
     charge_line_roles: list[str] = ["CALCULATION", "POSTING"]
     charge_target_levels: list[str] = ["HEADER", "ITEM", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]
-    allocation_profile_source_levels: list[str] = ["SHIPMENT", "CONTAINER", "HOUSE"]
+    allocation_profile_source_levels: list[str] = ["SHIPMENT", "CONTAINER", "HOUSE", "DOCUMENT"]
     allocation_profile_final_posting_levels: list[str] = ["HOUSE", "PO_SCHEDULE_LINE"]
     allocation_profile_version_statuses: list[str] = ["DRAFT", "PUBLISHED", "RETIRED"]
     calculation_profile_application_levels: list[str] = ["SHIPMENT", "CONTAINER", "HOUSE", "PO_SCHEDULE_LINE"]

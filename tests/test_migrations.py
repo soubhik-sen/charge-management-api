@@ -53,7 +53,7 @@ def test_profile_parity_migration_synchronizes_postgresql_sequences(monkeypatch)
         assert f"FROM {table_name}" in statement
 
 
-def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, monkeypatch) -> None:
+def test_fresh_sqlite_database_migrates_to_current_head(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "charge_management.sqlite"
     database_url = f"sqlite:///{database_path.as_posix()}"
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -89,7 +89,13 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         "effective_to",
         "missing_driver_policy",
         "lock_version",
+        "source_to_item_driver",
     } <= allocation_version_columns
+    source_level_check = next(
+        check for check in inspector.get_check_constraints("charge_allocation_profile_version")
+        if check["name"] == "ck_charge_allocation_profile_version_source_level"
+    )
+    assert "DOCUMENT" in source_level_check["sqltext"]
     assert "charge_calculation_profile" in tables
     calculation_profile_columns = {column["name"] for column in inspector.get_columns("charge_calculation_profile")}
     assert {"owner_type", "owner_id", "profile_code", "profile_name", "published_version_id"} <= calculation_profile_columns
@@ -224,6 +230,7 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
     } <= quote_line_columns
     component_columns = {column["name"] for column in inspector.get_columns("charge_component")}
     assert "default_calculation_profile_id" in component_columns
+    assert "manual_entry_enabled" in component_columns
     contract_line_columns = {column["name"] for column in inspector.get_columns("charge_contract_line")}
     assert {"calculation_profile_id", "line_number", "priority", "is_active", "charge_context"} <= contract_line_columns
     contract_columns = {column["name"] for column in inspector.get_columns("charge_rate_contract")}
@@ -332,6 +339,10 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         road_component_count = connection.execute(
             text("select count(*) from charge_component where charge_context = 'ROAD'")
         ).scalar_one()
+        disabled_manual_entry_count = connection.execute(
+            text("select count(*) from charge_component where manual_entry_enabled = false")
+        ).scalar_one()
+        component_count = connection.execute(text("select count(*) from charge_component")).scalar_one()
         road_calculation_count = connection.execute(
             text(
                 "select count(*) from charge_calculation_profile "
@@ -375,12 +386,13 @@ def test_fresh_sqlite_database_migrates_to_calculation_profile_head(tmp_path, mo
         pricing_dimension_count = connection.execute(
             text("select count(*) from charge_pricing_dimension where is_system = true")
         ).scalar_one()
-    assert version == "0034_charge_calculation_profile_parity"
+    assert version == "0036_component_manual_entry_eligibility"
     assert source_code == "MANUAL"
     assert flat_count == 1
     assert wm_count == 1
     assert percentage_count == 1
     assert road_component_count == 22
+    assert disabled_manual_entry_count == component_count
     assert road_calculation_count == 5
     assert road_allocation_count == 3
     assert road_date_count == 1

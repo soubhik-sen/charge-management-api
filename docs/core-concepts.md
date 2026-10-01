@@ -92,6 +92,7 @@ Examples:
 - Optional default calculation profile.
 - Default charge-date behavior.
 - Optional business-date and allocation profile references.
+- `manual_entry_enabled` (default `false`) opts a component into an adapter's manual-entry offer flow. It does not blanket-block established internal direct-charge APIs; host applications own their authorization and workflow rules.
 - Tax and active flags.
 
 Category is classification metadata for cataloging and reporting. Charge context is an applicability dimension: `DESTINATION`, for example, identifies import/arrival-side charges. The tax flag classifies a component for reporting and downstream tax handling; it does not calculate a tax amount by itself.
@@ -330,7 +331,9 @@ Example: allocate a shipment charge to houses by gross weight, then to PO schedu
 
 The effective profile is resolved from the most specific available reference, including transaction/line override before reusable master-data defaults. The selected profile and version are snapshotted onto quote and charge lines for auditability.
 
-The preview API distributes one calculated amount over caller-supplied target objects and driver values. It calculates ratios, rounds to currency minor units, and applies the deterministic remainder to the final target so allocated totals exactly equal the source amount. A version can use `BLOCK` when every driver is zero or `EQUAL` to permit an equal-share fallback. Effective dates and optimistic lock versions protect profile maintenance.
+The preview API distributes one calculated amount over caller-supplied target objects and driver values. It calculates ratios, rounds to currency minor units, and allocates rounding cents using the largest fractional remainders so allocated totals exactly equal the source amount. A version can use `BLOCK` when every driver is zero or `EQUAL` to permit an equal-share fallback. Effective dates and optimistic lock versions protect profile maintenance.
+
+Allocation profile versions support document-level sources with `source_level=DOCUMENT`, `final_posting_level=PO_SCHEDULE_LINE`, and `source_to_item_driver` values `KG`, `CBM`, `COUNT`, `OCEAN_WM`, or `AIR_CHARGEABLE_KG`. Document-level profiles do not use house-stage drivers, and legacy non-document sources do not use the direct source-to-item driver. Publishing treats `DOCUMENT` and non-`DOCUMENT` versions as separate applicability families: it retires a prior published version in the same family while retaining the other family. The profile's `published_version_id` identifies its most recently published version; automatic legacy charge flows resolve the published non-document family. A caller can select the document family explicitly for generic calculation preview and supply its item targets.
 
 The API does not hydrate a host application's shipment/house/item hierarchy. The integrating application supplies and authorizes target references and driver values; the API executes and snapshots the reusable allocation policy.
 

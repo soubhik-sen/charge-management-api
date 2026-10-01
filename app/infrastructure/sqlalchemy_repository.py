@@ -1562,6 +1562,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     source_level=version.source_level,
                     source_to_house_driver=version.source_to_house_driver,
                     house_to_item_driver=version.house_to_item_driver,
+                    source_to_item_driver=version.source_to_item_driver,
                     final_posting_level=version.final_posting_level,
                     default_quantity_uom=version.default_quantity_uom,
                     missing_driver_policy=version.missing_driver_policy,
@@ -1810,6 +1811,7 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
                     allocation_profile_id=component.allocation_profile_id,
                     allocation_profile_version_id=component.allocation_profile_version_id,
                     default_calculation_profile_id=component.default_calculation_profile_id,
+                    manual_entry_enabled=component.manual_entry_enabled,
                     is_tax=component.is_tax,
                     is_active=component.is_active,
                 )

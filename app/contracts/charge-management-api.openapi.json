@@ -14697,7 +14697,8 @@
             "enum": [
               "SHIPMENT",
               "CONTAINER",
-              "HOUSE"
+              "HOUSE",
+              "DOCUMENT"
             ],
             "title": "Source Level"
           },
@@ -14722,6 +14723,17 @@
               }
             ],
             "title": "House To Item Driver"
+          },
+          "source_to_item_driver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source To Item Driver"
           },
           "final_posting_level": {
             "type": "string",
@@ -14858,7 +14870,8 @@
             "enum": [
               "SHIPMENT",
               "CONTAINER",
-              "HOUSE"
+              "HOUSE",
+              "DOCUMENT"
             ],
             "title": "Source Level"
           },
@@ -14883,6 +14896,17 @@
               }
             ],
             "title": "House To Item Driver"
+          },
+          "source_to_item_driver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source To Item Driver"
           },
           "final_posting_level": {
             "type": "string",
@@ -16146,6 +16170,12 @@
             ],
             "title": "Default Calculation Profile Id"
           },
+          "manual_entry_enabled": {
+            "type": "boolean",
+            "title": "Manual Entry Enabled",
+            "description": "Whether consuming adapters may offer this component for manual entry; authorization remains adapter owned.",
+            "default": false
+          },
           "is_tax": {
             "type": "boolean",
             "title": "Is Tax",
@@ -17075,6 +17105,12 @@
               }
             ],
             "title": "Default Calculation Profile Id"
+          },
+          "manual_entry_enabled": {
+            "type": "boolean",
+            "title": "Manual Entry Enabled",
+            "description": "Whether consuming adapters may offer this component for manual entry; authorization remains adapter owned.",
+            "default": false
           },
           "is_tax": {
             "type": "boolean",
@@ -19997,7 +20033,8 @@
             "default": [
               "SHIPMENT",
               "CONTAINER",
-              "HOUSE"
+              "HOUSE",
+              "DOCUMENT"
             ]
           },
           "allocation_profile_final_posting_levels": {
@@ -27746,6 +27783,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",

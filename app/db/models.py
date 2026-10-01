@@ -205,6 +205,7 @@ class ChargeComponentRow(Base):
     allocation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile.id"))
     allocation_profile_version_id: Mapped[int | None] = mapped_column(ForeignKey("charge_allocation_profile_version.id"))
     default_calculation_profile_id: Mapped[int | None] = mapped_column(ForeignKey("charge_calculation_profile.id"))
+    manual_entry_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_tax: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
@@ -336,6 +337,7 @@ class ChargeAllocationProfileVersionRow(TimestampMixin, Base):
     source_level: Mapped[str] = mapped_column(String(30), nullable=False)
     source_to_house_driver: Mapped[str | None] = mapped_column(String(40))
     house_to_item_driver: Mapped[str | None] = mapped_column(String(40))
+    source_to_item_driver: Mapped[str | None] = mapped_column(String(40))
     final_posting_level: Mapped[str] = mapped_column(String(30), nullable=False)
     default_quantity_uom: Mapped[str | None] = mapped_column(String(30))
     missing_driver_policy: Mapped[str] = mapped_column(
@@ -356,7 +358,7 @@ class ChargeAllocationProfileVersionRow(TimestampMixin, Base):
             name="ck_charge_allocation_profile_version_status",
         ),
         CheckConstraint(
-            "source_level in ('SHIPMENT', 'CONTAINER', 'HOUSE')",
+            "source_level in ('SHIPMENT', 'CONTAINER', 'HOUSE', 'DOCUMENT')",
             name="ck_charge_allocation_profile_version_source_level",
         ),
         CheckConstraint(
