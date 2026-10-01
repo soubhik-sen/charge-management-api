@@ -1012,7 +1012,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
         for row in component_rows:
             component = _model_from_row(ChargeComponent, row)
             self.components[component.id] = component
-            self.components_by_code[component.component_code] = component
+            if (component.owner_type, component.owner_id) == ("GLOBAL", 0):
+                self.components_by_code[component.component_code] = component
             components_by_id[component.id] = component
             self._ids["component"] = max(self._ids["component"], component.id)
         alias_rows = self.session.scalars(
@@ -1799,6 +1800,8 @@ class SqlAlchemyChargeRepository(InMemoryChargeRepository):
             self.session.merge(
                 ChargeComponentRow(
                     id=component.id,
+                    owner_type=component.owner_type,
+                    owner_id=component.owner_id,
                     component_code=component.component_code,
                     component_name=component.component_name,
                     category=component.category,

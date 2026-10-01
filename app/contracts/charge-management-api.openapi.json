@@ -6502,6 +6502,99 @@
       }
     },
     "/api/v1/charge-management/components/{component_id}": {
+      "get": {
+        "tags": [
+          "Charge Management"
+        ],
+        "summary": "Get Component",
+        "operationId": "get_component_api_v1_charge_management_components__component_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "component_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Component Id"
+            }
+          },
+          {
+            "name": "X-Subject",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Subject"
+            }
+          },
+          {
+            "name": "X-Roles",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Roles"
+            }
+          },
+          {
+            "name": "X-Tenant-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeComponent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "tags": [
           "Charge Management"
@@ -16075,6 +16168,21 @@
             "type": "integer",
             "title": "Id"
           },
+          "owner_type": {
+            "type": "string",
+            "enum": [
+              "GLOBAL",
+              "FORWARDER"
+            ],
+            "title": "Owner Type",
+            "default": "GLOBAL"
+          },
+          "owner_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Owner Id",
+            "default": 0
+          },
           "component_code": {
             "type": "string",
             "title": "Component Code"
@@ -16958,6 +17066,33 @@
       },
       "ChargeComponentPayload": {
         "properties": {
+          "owner_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "GLOBAL",
+                  "FORWARDER"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Type"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "component_code": {
             "type": "string",
             "title": "Component Code"

@@ -840,6 +840,15 @@ def create_component(
     return service.create_component(payload)
 
 
+@router.get("/components/{component_id}", response_model=ChargeComponent)
+def get_component(
+    component_id: int,
+    principal: Principal = Depends(require_bearer_principal),
+) -> ChargeComponent:
+    _allow(principal, "charge.components.detail")
+    return service.get_component(component_id)
+
+
 @router.put("/components/{component_id}", response_model=ChargeComponent)
 def update_component(
     component_id: int,

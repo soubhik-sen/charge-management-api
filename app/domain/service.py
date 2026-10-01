@@ -1970,11 +1970,22 @@ class ChargeManagementService:
             offset=safe_offset,
         )
 
+    def get_component(self, component_id: int) -> ChargeComponent:
+        component = self.repository.components.get(component_id)
+        if component is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Charge component not found")
+        return component
+
     def create_component(self, payload: ChargeComponentPayload) -> ChargeComponent:
         code = payload.component_code.strip().upper()
+        owner_type, owner_id = payload.owner_type or "GLOBAL", payload.owner_id if payload.owner_id is not None else 0
         if not code or not payload.component_name.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="component_code and component_name are required")
-        if code in self.repository.components_by_code:
+        if any(
+            row.component_code == code
+            and (row.owner_type, row.owner_id) == (owner_type, owner_id)
+            for row in self.repository.components.values()
+        ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Charge component code already exists")
         business_date_policy_mode, business_date_profile_id = self._resolve_business_date_component_reference(
             payload.business_date_policy_mode,
@@ -1987,10 +1998,17 @@ class ChargeManagementService:
         default_calculation_profile_id = self._resolve_calculation_profile_identity_reference(
             payload.default_calculation_profile_id
         )
+        self._require_component_profile_owners(
+            owner_type=owner_type, owner_id=owner_id, business_date_profile_id=business_date_profile_id,
+            allocation_profile_id=allocation_profile_id,
+            calculation_profile_id=default_calculation_profile_id,
+        )
         component = ChargeComponent(
             **payload.model_dump(
                 exclude={
                     "component_code",
+                    "owner_type",
+                    "owner_id",
                     "component_name",
                     "category",
                     "charge_context",
@@ -2005,6 +2023,8 @@ class ChargeManagementService:
             ),
             id=self.repository.next_id("component"),
             component_code=code,
+            owner_type=owner_type,
+            owner_id=owner_id,
             component_name=payload.component_name.strip(),
             category=payload.category.strip().upper() or "ACCESSORIAL",
             charge_context=payload.charge_context.strip().upper() or "TRANSPORT",
@@ -2017,22 +2037,63 @@ class ChargeManagementService:
             default_calculation_profile_id=default_calculation_profile_id,
         )
         self.repository.components[component.id] = component
-        self.repository.components_by_code[component.component_code] = component
+        if (component.owner_type, component.owner_id) == ("GLOBAL", 0):
+            self.repository.components_by_code[component.component_code] = component
         return component
+
+    def _require_component_profile_owners(
+        self, *, owner_type: str, owner_id: int, business_date_profile_id: int | None,
+        allocation_profile_id: int | None, calculation_profile_id: int | None,
+    ) -> None:
+        profiles = (
+            self.repository.business_date_profiles.get(business_date_profile_id) if business_date_profile_id is not None else None,
+            self.repository.allocation_profiles.get(allocation_profile_id) if allocation_profile_id is not None else None,
+            self.repository.calculation_profiles.get(calculation_profile_id) if calculation_profile_id is not None else None,
+        )
+        for profile in profiles:
+            if profile is None:
+                continue
+            owner = (profile.owner_type, profile.owner_id)
+            if owner in {("GLOBAL", 0), ("SYSTEM", 0)} or (
+                owner_type == "FORWARDER" and owner == (owner_type, owner_id)
+            ):
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Component profile must be global or owned by the same forwarder",
+            )
 
     def update_component(self, component_id: int, payload: ChargeComponentPayload) -> ChargeComponent:
         existing = self._require_component_by_id(component_id)
+        if payload.owner_type is not None and (payload.owner_type, payload.owner_id) != (existing.owner_type, existing.owner_id):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Charge component owner cannot be changed")
         code = payload.component_code.strip().upper()
         if not code or not payload.component_name.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="component_code and component_name are required")
-        duplicate = self.repository.components_by_code.get(code)
-        if duplicate is not None and duplicate.id != existing.id:
+        if any(
+            row.id != existing.id and row.component_code == code
+            and (row.owner_type, row.owner_id) == (existing.owner_type, existing.owner_id)
+            for row in self.repository.components.values()
+        ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Charge component code already exists")
         business_date_policy_mode, business_date_profile_id = self._resolve_business_date_component_reference(
             payload.business_date_policy_mode,
             payload.business_date_profile_id,
         )
-        if existing.component_code != code:
+        allocation_profile_id, allocation_profile_version_id, _, _ = self._resolve_allocation_profile_reference(
+            payload.allocation_profile_id,
+            payload.allocation_profile_version_id,
+        )
+        calculation_profile_id = self._resolve_calculation_profile_identity_reference(
+            payload.default_calculation_profile_id
+        )
+        self._require_component_profile_owners(
+            owner_type=existing.owner_type, owner_id=existing.owner_id,
+            business_date_profile_id=business_date_profile_id,
+            allocation_profile_id=allocation_profile_id,
+            calculation_profile_id=calculation_profile_id,
+        )
+        if existing.component_code != code and existing.owner_type == "GLOBAL":
             self.repository.components_by_code.pop(existing.component_code, None)
         existing.component_code = code
         existing.component_name = payload.component_name.strip()
@@ -2043,22 +2104,14 @@ class ChargeManagementService:
         existing.charge_date_basis = _charge_date_basis(payload.charge_date_basis)
         existing.business_date_policy_mode = business_date_policy_mode
         existing.business_date_profile_id = business_date_profile_id
-        (
-            existing.allocation_profile_id,
-            existing.allocation_profile_version_id,
-            _,
-            _,
-        ) = self._resolve_allocation_profile_reference(
-            payload.allocation_profile_id,
-            payload.allocation_profile_version_id,
-        )
-        existing.default_calculation_profile_id = self._resolve_calculation_profile_identity_reference(
-            payload.default_calculation_profile_id
-        )
+        existing.allocation_profile_id = allocation_profile_id
+        existing.allocation_profile_version_id = allocation_profile_version_id
+        existing.default_calculation_profile_id = calculation_profile_id
         existing.manual_entry_enabled = payload.manual_entry_enabled
         existing.is_tax = bool(payload.is_tax)
         existing.is_active = bool(payload.is_active)
-        self.repository.components_by_code[existing.component_code] = existing
+        if existing.owner_type == "GLOBAL":
+            self.repository.components_by_code[existing.component_code] = existing
         return existing
 
     def delete_component(self, component_id: int) -> ChargeComponent:
@@ -7648,6 +7701,11 @@ class ChargeManagementService:
         component: ChargeComponent,
         alias_id: int,
     ) -> ChargeComponentAlias:
+        if component.owner_type == "FORWARDER" and component.owner_id != payload.forwarder_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Alias forwarder must match component owner",
+            )
         raw_label = payload.raw_label.strip()
         if not raw_label:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="raw_label is required")

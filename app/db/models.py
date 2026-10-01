@@ -183,7 +183,9 @@ class ChargeComponentRow(Base):
     __tablename__ = "charge_component"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    component_code: Mapped[str] = mapped_column(String(60), nullable=False, unique=True)
+    owner_type: Mapped[str] = mapped_column(String(20), nullable=False, default="GLOBAL", server_default="GLOBAL")
+    owner_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    component_code: Mapped[str] = mapped_column(String(60), nullable=False)
     component_name: Mapped[str] = mapped_column(String(160), nullable=False)
     category: Mapped[str] = mapped_column(String(60), nullable=False)
     default_party_role: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -212,6 +214,11 @@ class ChargeComponentRow(Base):
     aliases: Mapped[list["ChargeComponentAliasRow"]] = relationship(back_populates="component")
 
     __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "component_code", name="uq_charge_component_owner_code"),
+        CheckConstraint(
+            "(owner_type = 'GLOBAL' AND owner_id = 0) OR (owner_type = 'FORWARDER' AND owner_id > 0)",
+            name="ck_charge_component_owner",
+        ),
         CheckConstraint("default_party_role in ('PAYER', 'PAYEE', 'BOTH')", name="ck_charge_component_default_party_role"),
         CheckConstraint(
             "charge_date_basis in ('DOCUMENT_DATE', 'SHIPMENT_DEPARTURE_DATE', 'SHIPMENT_ARRIVAL_DATE', 'HOUSE_BILL_ISSUE_DATE', 'MANUAL')",

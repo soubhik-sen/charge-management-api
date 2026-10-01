@@ -149,6 +149,8 @@ def _normalize_owner_type(value: Any) -> Any:
 
 class ChargeComponent(ApiModel):
     id: int
+    owner_type: Literal["GLOBAL", "FORWARDER"] = "GLOBAL"
+    owner_id: int = Field(default=0, ge=0)
     component_code: str
     component_name: str
     category: str
@@ -191,6 +193,8 @@ class ChargeComponent(ApiModel):
 
 
 class ChargeComponentPayload(ApiModel):
+    owner_type: Literal["GLOBAL", "FORWARDER"] | None = None
+    owner_id: int | None = Field(default=None, ge=0)
     component_code: str
     component_name: str
     category: str = "ACCESSORIAL"
@@ -221,6 +225,12 @@ class ChargeComponentPayload(ApiModel):
 
     @model_validator(mode="after")
     def normalize_flux_compatibility_fields(self) -> "ChargeComponentPayload":
+        if (self.owner_type is None) != (self.owner_id is None):
+            raise ValueError("Component owner type and ID must be provided together")
+        if (self.owner_type == "GLOBAL" and self.owner_id != 0) or (
+            self.owner_type == "FORWARDER" and (self.owner_id is None or self.owner_id <= 0)
+        ):
+            raise ValueError("Component owner must be GLOBAL/0 or FORWARDER with a positive ID")
         roles = {
             value
             for value in (
